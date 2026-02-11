@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Study Tracker</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="login-container">
+  <div class="panel">
+    <div class="logo">Study Tracker</div>
+    <form id="login-form">
+      <input id="login-username" placeholder="Username" autocomplete="username" />
+      <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
+      <button type="submit">Login</button>
+      <p class="error" id="login-error"></p>
+      <p><a href="#" id="show-signup">Create account</a></p>
+    </form>
+    <form id="signup-form" class="hidden">
+      <input id="signup-username" placeholder="Username" autocomplete="username" />
+      <input id="signup-password" type="password" placeholder="Password" autocomplete="new-password" />
+      <button type="submit">Sign up</button>
+      <p class="error" id="signup-error"></p>
+      <p><a href="#" id="show-login">Back to login</a></p>
+    </form>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app-container" class="hidden">
+  <header>
+    <div class="logo">Study Tracker</div>
+    <div class="header-actions">
+      <button id="info-button" class="icon-button" title="Quick usage tips">ℹ</button>
+      <button id="settings-button" class="icon-button" title="Settings">⚙</button>
+      <div class="user">
+        <span id="current-user"></span>
+        <button id="logout-button" type="button">Log out</button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="workspace-nav">
+    <button id="prev-workspace" class="nav-btn">‹</button>
+    <div class="nav-spacer"></div>
+    <button id="next-workspace" class="nav-btn">›</button>
+  </nav>
+
+  <main id="workspaces">
+    <!-- Workspace 0: Study Timer -->
+    <section class="workspace" data-workspace="0">
+      <h2 class="workspace-heading">Study Timer</h2>
+      <div id="timer-container">
+        <div class="timer-config">
+          <!--
+            Added explicit IDs on the labels so they can be renamed when toggling exam mode.
+            A new exam mode button lives alongside the existing strategy selector. When exam
+            mode is active the break input is hidden and the study label is renamed to
+            indicate an exam duration.
+          -->
+          <label id="study-label">
+            <span id="study-label-text">Study (min)</span>
+            <input id="study-duration" type="number" min="1" value="25" />
+          </label>
+          <label id="break-label">
+            <span id="break-label-text">Break (min)</span>
+            <input id="break-duration" type="number" min="1" value="5" />
+          </label>
+          <button id="strategy-button" class="icon-button" title="Select strategy">🎯</button>
+          <!-- Exam mode toggle button -->
+          <button id="exam-mode-button" class="icon-button" title="Toggle exam mode">🎓</button>
+        </div>
+        <div id="timer-display" class="timer-display">00:00</div>
+        <div id="timer-message" class="timer-message"></div>
+        <div class="timer-buttons">
+          <button id="start-timer">Start</button>
+          <button id="pause-timer" disabled>Pause</button>
+          <button id="reset-timer" disabled>Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workspace 1: Progress Tracker -->
+    <section class="workspace" data-workspace="1">
+      <h2 class="workspace-heading">Progress Tracker</h2>
+      <div id="projects-list"></div>
+    </section>
+
+    <!-- Workspace 2: Statistics -->
+    <section class="workspace" data-workspace="2">
+      <h2 class="workspace-heading">Statistics</h2>
+      <div id="stats-container"></div>
+    </section>
+  </main>
+
+  <button id="add-project-button" class="fab hidden" type="button">Add Project</button>
+
+  <!-- Strategy overlay -->
+  <div id="strategy-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <div class="overlay-header">
+        <h3>Choose a Strategy</h3>
+        <button id="close-strategy-overlay" class="icon-button">✖</button>
+      </div>
+      <ul id="strategy-list" class="selection-list"></ul>
+    </div>
+  </div>
+
+  <!-- Settings overlay -->
+  <div id="settings-overlay" class="overlay hidden">
+    <div class="overlay-content">
+      <div class="overlay-header">
+        <h3>Select Theme</h3>
+        <button id="close-settings-overlay" class="icon-button">✖</button>
+      </div>
+      <ul id="theme-list" class="selection-list"></ul>
+    </div>
+  </div>
+
+  <!-- Reusable input modal -->
+  <div id="modal-overlay" class="hidden">
+    <div class="modal">
+      <h3 id="modal-title"></h3>
+      <input id="modal-input" />
+      <p class="error" id="modal-error"></p>
+      <div class="modal-buttons">
+        <button id="modal-cancel" type="button">Cancel</button>
+        <button id="modal-ok" type="button">OK</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
