@@ -1,35 +1,36 @@
-// src/store/store.js
 import { createLocalStore } from "./localStore.js";
 import { createSupabaseStore } from "./supabaseStore.js";
+import { createGuestStore } from "./guestStore.js";
 import { getSession, onAuthStateChange } from "../auth/auth.js";
 import { Events } from "../core/events.js";
 
 let activeStore = null;
-let activeKind = "local"; // "local" | "supabase"
+let activeKind = "guest"; // "guest" | "local" | "supabase"
 
-function setActive(kind) {
+function makeStore(kind) {
+  if (kind === "supabase") return createSupabaseStore(Events);
+  if (kind === "local") return createLocalStore(Events);
+  return createGuestStore(Events);
+}
+
+export function setStoreKind(kind) {
   activeKind = kind;
-  activeStore = kind === "supabase"
-    ? createSupabaseStore(Events)
-    : createLocalStore(Events);
+  activeStore = makeStore(kind);
 
-  // Back-compat safety for local store only
   activeStore.ensureSessionsArray?.();
   activeStore.ensureProjectsArray?.();
 
-  // Refresh UI
   Events.emit("sessions:changed");
   Events.emit("projects:changed");
-
   console.log(`Store initialized (${kind})`);
 }
 
 export async function initStore() {
   const session = await getSession().catch(() => null);
-  setActive(session ? "supabase" : "local");
+  setStoreKind(session ? "supabase" : "guest");
 
   onAuthStateChange((newSession) => {
-    setActive(newSession ? "supabase" : "local");
+    setStoreKind(newSession ? "supabase" : "guest");
   });
 }
 
