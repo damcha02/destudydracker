@@ -13,13 +13,14 @@
   <div class="panel">
     <div class="logo">Study Tracker</div>
     <form id="login-form">
-      <input id="login-username" placeholder="Username" autocomplete="username" />
+      <input id="login-email" placeholder="Email" autocomplete="email" />
       <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
       <button type="submit">Login</button>
       <p class="error" id="login-error"></p>
       <p><a href="#" id="show-signup">Create account</a></p>
     </form>
     <form id="signup-form" class="hidden">
+      <input id="signup-email" placeholder="Email" autocomplete="email" />
       <input id="signup-username" placeholder="Username" autocomplete="username" />
       <input id="signup-password" type="password" placeholder="Password" autocomplete="new-password" />
       <button type="submit">Sign up</button>
@@ -134,6 +135,13 @@
   </div>
 </div>
 
-<script src="script.js"></script>
+<!-- Supabase config -->
+<script>
+  window.SUPABASE_URL = "https://hhfzurynzryflpgfsctf.supabase.co";
+  window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhoZnp1cnluenJ5ZmxwZ2ZzY3RmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA4MTc1ODUsImV4cCI6MjA4NjM5MzU4NX0.6eXgia8hNIRN8SSM9CKA63TwFOIta0-eKz0u8qjOnho";
+</script>
+
+<script type="module" src="src/main.js"></script>
+<!-- <script src="script.js"></script> -->
 </body>
 </html>
