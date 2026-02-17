@@ -257,6 +257,42 @@ header {
   font-size: 0.8rem;
   color: var(--muted);
 }
+/* Unit toggle */
+.stats-unit-toggle{
+  display:flex;
+  justify-content:center;
+  gap:8px;
+  margin: 0.5rem 0 1rem 0;
+}
+
+.stats-unit-btn{
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(126,156,216,0.16);
+  border: 1px solid rgba(126,156,216,0.22);
+  color: var(--fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.stats-unit-btn.active{
+  background: var(--accent);
+  color: #0e0e15;
+}
+
+/* Ensure bars have a real stack area */
+.stats-graph .bar {
+  height: 100%;
+}
+
+.bar-stack{
+  width: 70%;
+  margin-left:auto;
+  margin-right:auto;
+  display:flex;
+  flex-direction: column;
+  justify-content: flex-end; /* push stack to bottom */
+}
 
 .timer-display {
   font-size: 2rem;
