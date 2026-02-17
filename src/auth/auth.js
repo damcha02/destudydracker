@@ -1,6 +1,8 @@
 // src/auth/auth.js
 import { supabase } from "./supabaseClient.js";
 import { DOM } from "../core/dom.js";
+import { setStoreKind } from "../store/store.js";
+
 
 let authWired = false;
 
@@ -60,6 +62,15 @@ async function saveUsername(username) {
   if (upsertErr) throw upsertErr;
 }
 
+function setHeaderMode(kind, label = "") {
+  const isGuest = kind === "guest";
+
+  if (DOM.currentUser) DOM.currentUser.textContent = label || (isGuest ? "Guest" : "");
+  DOM.logoutButton?.classList.toggle("hidden", isGuest);
+  DOM.loginButton?.classList.toggle("hidden", !isGuest);
+  DOM.guestHint?.classList.toggle("hidden", !isGuest);
+}
+
 
 async function getUsername() {
   const { data: userRes, error: userErr } = await supabase.auth.getUser();
@@ -82,7 +93,7 @@ async function showApp(session) {
   DOM.loginContainer?.classList.add("hidden");
   DOM.appContainer?.classList.remove("hidden");
   const username = await getUsername().catch(() => "");
-  if (DOM.currentUser) DOM.currentUser.textContent = username || session.user.email;
+  setHeaderMode("supabase", username || session.user.email);
 }
 
 function showAuth(mode = "login") {
@@ -158,6 +169,21 @@ export async function initAuth() {
       if (DOM.signupError) DOM.signupError.textContent = err?.message ?? String(err);
     }
   });
+// guest login
+  DOM.continueGuest?.addEventListener("click", (e) => {
+    e.preventDefault();
+    setStoreKind("guest");
+    DOM.loginContainer?.classList.add("hidden");
+    DOM.appContainer?.classList.remove("hidden");
+    setHeaderMode("guest", "Guest");
+  });
+
+  DOM.loginButton?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showAuth("login");
+    // (store is already guest when logged out)
+  });
+
 
   // Logout
   DOM.logoutButton?.addEventListener("click", (e) => {
@@ -166,6 +192,8 @@ export async function initAuth() {
     // instant UI feedback
     DOM.logoutButton.disabled = true;
     showAuth("login");
+    setStoreKind("guest");
+    setHeaderMode("guest", "Guest");
 
     // do the real sign-out (async) without freezing clicks
     signOut()
@@ -191,6 +219,8 @@ export async function initAuth() {
     }
     await showApp(session);
   } else {
+    setStoreKind("guest");
+    setHeaderMode("guest", "Guest");
     showAuth("login");
   }
 

@@ -15,6 +15,9 @@ import { initStore } from "./store/store.js";
 import { initUI } from "./ui/overlays.js";
 import { initModal } from "./ui/modal.js";
 
+import { initToast } from "./ui/toast.js";
+
+
 
 /* ---------------------------
    App Bootstrap
@@ -28,6 +31,7 @@ async function bootstrap() {
 
   initUI();
   initModal();
+  initToast();
 
   initRouter();
   initTimer();

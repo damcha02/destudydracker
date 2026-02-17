@@ -16,6 +16,7 @@
       <input id="login-email" placeholder="Email" autocomplete="email" />
       <input id="login-password" type="password" placeholder="Password" autocomplete="current-password" />
       <button type="submit">Login</button>
+      <p><a href="#" id="continue-guest">Continue without login</a></p>
       <p class="error" id="login-error"></p>
       <p><a href="#" id="show-signup">Create account</a></p>
     </form>
@@ -39,6 +40,9 @@
       <button id="settings-button" class="icon-button" title="Settings">⚙</button>
       <div class="user">
         <span id="current-user"></span>
+        <span id="guest-hint" class="guest-hint hidden">Login to save sessions & use Projects/Stats.</span>
+
+        <button id="login-button" type="button" class="hidden">Log in</button>
         <button id="logout-button" type="button">Log out</button>
       </div>
     </div>
@@ -98,6 +102,8 @@
   </main>
 
   <button id="add-project-button" class="fab hidden" type="button">Add Project</button>
+  <!-- alert -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
   <!-- Strategy overlay -->
   <div id="strategy-overlay" class="overlay hidden">

@@ -15,6 +15,12 @@ export const DOM = {
   loginPassword: document.getElementById("login-password"),
   loginError: document.getElementById("login-error"),
 
+  toast: document.getElementById("toast"),
+  loginButton: document.getElementById("login-button"),
+  guestHint: document.getElementById("guest-hint"),
+  continueGuest: document.getElementById("continue-guest"),
+
+
   signupUsername: document.getElementById("signup-username"),
   signupEmail: document.getElementById("signup-email"),
   signupPassword: document.getElementById("signup-password"),
@@ -63,11 +69,11 @@ export const DOM = {
   statsContainer: document.getElementById("stats-container"),
 
   // Modal
-    modalOverlay: document.getElementById("modal-overlay"),
-    modalTitle: document.getElementById("modal-title"),
-    modalInput: document.getElementById("modal-input"),
-    modalError: document.getElementById("modal-error"),
-    modalOk: document.getElementById("modal-ok"),
-    modalCancel: document.getElementById("modal-cancel")
+  modalOverlay: document.getElementById("modal-overlay"),
+  modalTitle: document.getElementById("modal-title"),
+  modalInput: document.getElementById("modal-input"),
+  modalError: document.getElementById("modal-error"),
+  modalOk: document.getElementById("modal-ok"),
+  modalCancel: document.getElementById("modal-cancel")
 
 };
