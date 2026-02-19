@@ -17,6 +17,7 @@ import { initModal } from "./ui/modal.js";
 
 import { initToast } from "./ui/toast.js";
 
+import { initGarden } from "./features/garden.js";
 
 
 /* ---------------------------
@@ -37,6 +38,8 @@ async function bootstrap() {
   initTimer();
   initProjects();
   initStats();
+
+  initGarden();
 
   console.log("StudyTracker ready.");
 }

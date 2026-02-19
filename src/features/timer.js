@@ -40,26 +40,49 @@ function enableControls({ start, pause, reset, inputs }) {
   if (DOM.breakInput) DOM.breakInput.disabled = !inputs;
 }
 
-function recordSession(minutes, isExam) {
-  const store = getStore();
-  const mins = Math.round(Number(minutes) || 0);
-  if (!mins || mins <= 0) return;
+// async function recordSession(minutes, isExam) {
+//   const store = getStore();
+//   const mins = Math.round(Number(minutes) || 0);
+//   if (!mins || mins <= 0) return;
 
-  store.addSession({
-    date: isoDateKey(new Date()),
-    minutes: mins,
-    isExam: !!isExam
-  });
+//   await store.addSession({
+//     date: isoDateKey(new Date()),
+//     minutes: mins,
+//     isExam: !!isExam
+//   });
+//   Events.emit("sessions:changed");
+// }
+async function recordSession(minutes, isExam) {
+  try {
+    const store = getStore();
+    const mins = Math.round(Number(minutes) || 0);
+    if (!mins || mins <= 0) return;
+
+    await store.addSession({
+      date: isoDateKey(new Date()),
+      minutes: mins,
+      isExam: !!isExam
+    });
+
+    Events.emit("sessions:changed");
+  } catch (err) {
+    console.error("Failed to record session:", err);
+  }
 }
 
 function finishExam() {
+  // SAFETY: never run exam finish unless we're actually in exam mode
+  if (timerMode !== "exam") return;
+
   recordSession(examSeconds / 60, true);
   clearInterval(timerInterval);
   timerInterval = null;
+
   setMessage("Exam complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
 }
+
 
 function finishBreak() {
   clearInterval(timerInterval);
@@ -77,12 +100,22 @@ function startBreak() {
 }
 
 function finishStudyStartBreak() {
-  // record only the study portion
-  recordSession(studySeconds / 60, false);
   startBreak();
+
+  // record only the study portion
+  recordSession(studySeconds / 60, false).catch(console.error);
 }
 
 function tick() {
+  Events.emit("timer:tick", {
+    timerMode,
+    timerRemaining,
+    timerPaused,
+    studySeconds,
+    breakSeconds,
+    examSeconds
+  });
+
   if (timerPaused) return;
 
   if (timerRemaining > 0) {
@@ -91,11 +124,29 @@ function tick() {
     return;
   }
 
-  // reached 0
-  if (timerMode === "exam") return finishExam();
-  if (timerMode === "study") return finishStudyStartBreak();
-  if (timerMode === "break") return finishBreak();
+  // timerRemaining is 0 → transition based on mode
+  if (timerRemaining === 0) console.log("TIMER HIT 0", { timerMode, examModeActive });
+
+  switch (timerMode) {
+    case "exam":
+      finishExam();
+      return;
+
+    case "study":
+      finishStudyStartBreak();
+      return;
+
+    case "break":
+      finishBreak();
+      return;
+
+    default:
+      console.warn("Unknown timerMode:", timerMode);
+      return;
+  }
 }
+
+
 
 function startTimer() {
   const durationMin = parseInt(DOM.studyInput?.value, 10);

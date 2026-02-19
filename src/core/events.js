@@ -18,8 +18,19 @@ export function createEventBus() {
   function emit(event, detail) {
     const set = handlers.get(event);
     if (!set) return;
-    for (const cb of set) cb({ detail });
+
+    const list = Array.from(set); // snapshot
+
+    for (const cb of list) {
+      try {
+        cb({ detail });
+      } catch (err) {
+        console.error(`Error in handler for "${event}"`, err);
+      }
+    }
   }
+
+
 
   return { on, off, emit };
 }

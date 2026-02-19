@@ -31,8 +31,7 @@ export function createSupabaseStore(emitter) {
         minutes,
         is_exam: !!isExam,
       });
-      if (error) throw error;
-      emitter.emit("sessions:changed");
+      if (error) throw error; 
     },
 
     async getProjects() {

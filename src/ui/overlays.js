@@ -8,7 +8,10 @@ const STRATEGY_KEY = "study_tracker_strategy";
 const THEMES = [
   { id: "blue", name: "Kanagawa Blue" },
   { id: "green", name: "Kanagawa Green" },
+  { id: "garden", name: "Garden of Knowledge" },
+  { id: "garden-sketch", name: "Garden of Knowledge (Sketch)" }
 ];
+
 
 const STRATEGIES = [
   { id: "pomodoro", name: "Pomodoro 25/5", study: 25, break: 5 },
@@ -21,8 +24,28 @@ function close(el) { el?.classList.add("hidden"); }
 
 function applyTheme() {
   const theme = localStorage.getItem(THEME_KEY) || "blue";
-  document.body.classList.toggle("theme-green", theme === "green");
+
+  document.body.classList.remove(
+    "theme-green",
+    "theme-garden",
+    "theme-garden-sketch"
+  );
+
+  if (theme === "green") {
+    document.body.classList.add("theme-green");
+  }
+
+  if (theme === "garden") {
+    document.body.classList.add("theme-garden");
+  }
+
+  if (theme === "garden-sketch") {
+    document.body.classList.add("theme-garden-sketch");
+  }
+
+  Events.emit("theme:changed", { theme });
 }
+
 
 function buildThemeList() {
   if (!DOM.themeList) return;

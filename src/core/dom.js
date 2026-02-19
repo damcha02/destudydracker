@@ -60,6 +60,7 @@ export const DOM = {
   settingsOverlay: document.getElementById("settings-overlay"),
   closeSettingsOverlay: document.getElementById("close-settings-overlay"),
   themeList: document.getElementById("theme-list"),
+  gardenResetBtn: document.getElementById("garden-reset-btn"),
 
   // Projects
   projectsList: document.getElementById("projects-list"),

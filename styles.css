@@ -19,21 +19,29 @@
 /* Green theme override */
 body.theme-green {
   --accent: var(--green-accent);
-  background:
-    radial-gradient(1200px 500px at 20% 0%, rgba(118,148,106,0.12), transparent 60%),
-    radial-gradient(900px 400px at 80% 0%, rgba(118,148,106,0.10), transparent 55%),
-    var(--bg);
+  background: 
+  /* radial-gradient(1200px 500px at 20% 0%, rgba(118,148,106,0.12), transparent 60%), */
+  /* radial-gradient(900px 400px at 80% 0%, rgba(118,148,106,0.10), transparent 55%),  */
+  var(--bg);
 }
 
 /* General setup */
 * { box-sizing: border-box; }
 
-body {
+/* body {
   margin: 0;
   background:
-    radial-gradient(1200px 500px at 20% 0%, rgba(126,156,216,0.10), transparent 60%),
-    radial-gradient(900px 400px at 80% 0%, rgba(118,148,106,0.08), transparent 55%),
-    var(--bg);
+  radial-gradient(1200px 500px at 20% 0%, rgba(126,156,216,0.10), transparent 60%),
+  radial-gradient(900px 400px at 80% 0%, rgba(118,148,106,0.08), transparent 55%),
+  var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  } */
+  body {
+    margin: 0;
+    /* Uniform background (no section banding) */
+    background: 
+      var(--bg);
   color: var(--fg);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
@@ -644,4 +652,206 @@ header {
   transition: transform 200ms ease, opacity 200ms ease;
   transform: translateX(-120%);
   opacity: 0;
+}
+
+
+/* ===============================
+   Garden of Knowledge Theme
+================================ */
+
+
+.garden {
+  position: absolute;
+  inset: 0;
+  left: -20px;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: -1;
+}
+
+
+
+.plant.grown {
+  transform: scaleY(1);
+}
+
+/* FLOWER */
+.plant.type0::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--stem-width);
+  height: 100%;
+  background: #6ba368;
+}
+
+.plant.type0::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: calc(var(--stem-width) * 4);
+  height: calc(var(--stem-width) * 4);
+  border-radius: 50%;
+  background: #dcd7ba;
+}
+
+/* TREE */
+.plant.type1::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--stem-width) * 2);
+  height: 60%;
+  background: #8b5e3c;
+}
+
+.plant.type1::after {
+  content: "";
+  position: absolute;
+  bottom: 60%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--stem-width) * 8);
+  height: 40%;
+  border-radius: 50%;
+  background: #4f8f4f;
+}
+
+/* CACTUS */
+.plant.type2::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--stem-width) * 2);
+  height: 100%;
+  background: #357a38;
+  border-radius: 6px 6px 0 0;
+}
+
+/* PALM STYLE */
+.plant.type3::before {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--stem-width) * 1.5);
+  height: 70%;
+  background: #6d4c41;
+}
+
+.plant.type3::after {
+  content: "";
+  position: absolute;
+  bottom: 70%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(var(--stem-width) * 10);
+  height: calc(var(--stem-width) * 3);
+  border-radius: 50%;
+  background: #6ba368;
+}
+
+/* Sketch Mode */
+/* body.theme-garden-sketch .plant::before,
+body.theme-garden-sketch .plant::after {
+  background: transparent !important;
+  border: 1.5px solid #888;
+} */
+.plant {
+  position: absolute;
+  bottom: 0;
+  width: 160px;
+  height: var(--plant-height, 200px);
+  transform: translateY(12px) scale(var(--plant-scale, 1));
+  opacity: 0.95;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 14px rgba(0,0,0,0.45));
+}
+
+.plant-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* default hidden parts before growing */
+.plant .stem {
+  stroke-dasharray: 500;
+  stroke-dashoffset: 500;
+}
+
+.plant .leaf,
+.plant .bloom {
+  transform-origin: center;
+  transform: scale(0);
+  opacity: 0;
+}
+
+/* growth animation */
+.plant.growing .stem {
+  animation: stemGrow 1.1s ease-out forwards;
+}
+
+.plant.growing .leaf {
+  animation: leafPop 0.9s ease-out forwards;
+  animation-delay: 0.6s;
+}
+
+.plant.growing .bloom {
+  animation: bloomPop 0.8s ease-out forwards;
+  animation-delay: 0.95s;
+}
+
+.plant.grown .stem {
+  stroke-dashoffset: 0;
+}
+.plant.grown .leaf,
+.plant.grown .bloom {
+  transform: scale(1);
+  opacity: 1;
+}
+
+/* keyframes */
+@keyframes stemGrow {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes leafPop {
+  0% { transform: scale(0); opacity: 0; }
+  70% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes bloomPop {
+  0% { transform: scale(0) rotate(-10deg); opacity: 0; }
+  70% { transform: scale(1.18) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+
+/* Sketch version: make SVG look pencil-drawn */
+.garden-sketch .stem,
+.garden-sketch .leaf,
+.garden-sketch .bloom {
+  fill: none !important;
+  stroke: rgba(220,215,186,0.85);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: none !important;
+  opacity: 0.9;
+}
+
+/* add slight roughness by layering a faint duplicate stroke */
+.garden-sketch .stem {
+  stroke-dasharray: 6 4;
 }
