@@ -287,6 +287,7 @@ export function initTimer() {
   updateTimerDisplay();
 
   document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) tick(); // catch up first
     console.log("[page] visibilitychange:", document.hidden ? "HIDDEN" : "VISIBLE", {
       timerMode,
       timerPaused,
@@ -295,7 +296,6 @@ export function initTimer() {
 
     if (!document.hidden) {
       Events.emit("toast", { msg: "Welcome back — checking timer…" });
-      tick(); 
     }
   });
 
