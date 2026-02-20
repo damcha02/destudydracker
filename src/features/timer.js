@@ -14,7 +14,7 @@ let timerInterval = null;
 let timerRemaining = 0;
 let timerPaused = false;
 
-
+let studyRecorded = false;
 let endAtMs = null;        // absolute deadline timestamp
 let pausedRemainingSec = 0; // store remaining when paused
 
@@ -98,7 +98,7 @@ function finishExam() {
   endAtMs = null;
   pausedRemainingSec = 0;
   timerPaused = false;
-
+  studyRecorded = false;
   setMessage("Exam complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
@@ -111,28 +111,43 @@ function finishBreak() {
   endAtMs = null;
   pausedRemainingSec = 0;
   timerPaused = false;
-
+  studyRecorded = false;
   setMessage("Session complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
 }
 
-function startBreak() {
-  timerMode = "break";
-  timerRemaining = breakSeconds;
-  endAtMs = Date.now() + timerRemaining * 1000; 
-  pausedRemainingSec = 0;  
 
-  setMessage("Break time! Relax.");
-  updateTimerDisplay();
-}
 
-function finishStudyStartBreak() {
-  console.log("[timer] study finished -> starting break, recording study");
-  startBreak();
 
-  // record only the study portion
-  recordSession(studySeconds / 60, false).catch(console.error);
+
+function advancePhase() {
+  if (timerMode === "study") {
+    // record study once
+    if (!studyRecorded) {
+      studyRecorded = true;
+      recordSession(studySeconds / 60, false).catch(console.error);
+    }
+
+    // move into break, using the *old* deadline as anchor
+    timerMode = "break";
+    endAtMs = endAtMs + (breakSeconds * 1000);
+    setMessage("Break time! Relax.");
+    // recompute for the new phase immediately:
+    timerRemaining = Math.max(0, Math.ceil((endAtMs - Date.now()) / 1000));
+    updateTimerDisplay();
+    return;
+  }
+
+  if (timerMode === "break") {
+    finishBreak();
+    return;
+  }
+
+  if (timerMode === "exam") {
+    finishExam();
+    return;
+  }
 }
 
 function tick() {
@@ -149,24 +164,28 @@ function tick() {
 
   if (!endAtMs) return;
 
-  // recompute remaining from real time
-  const rem = Math.ceil((endAtMs - Date.now()) / 1000);
-  timerRemaining = Math.max(0, rem);
-  updateTimerDisplay();
+  // Catch up through phases if we've been away
+  while (true) {
+    const rem = Math.ceil((endAtMs - Date.now()) / 1000);
+    timerRemaining = Math.max(0, rem);
+    updateTimerDisplay();
 
-  if (timerRemaining > 0) return;
+    if (timerRemaining > 0) break;
 
-  // hit 0 -> transition
-  switch (timerMode) {
-    case "exam":  finishExam(); break;
-    case "study": finishStudyStartBreak(); break;
-    case "break": finishBreak(); break;
+    // timerRemaining == 0 => advance phase
+    advancePhase();
+
+    // finishBreak/finishExam clears interval; stop looping
+    if (!timerInterval) break;
+
+    // if we advanced into break, loop again to see if break already elapsed too
   }
 }
 
 
 
 function startTimer() {
+  studyRecorded = false;
   const durationMin = parseInt(DOM.studyInput?.value, 10);
   const breakMin = parseInt(DOM.breakInput?.value, 10);
 
@@ -230,6 +249,7 @@ function pauseTimer() {
 }
 
 function resetTimer() {
+  studyRecorded = false;
   if (timerInterval) clearInterval(timerInterval);
   timerInterval = null;
 
