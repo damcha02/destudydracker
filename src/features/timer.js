@@ -88,11 +88,11 @@ async function recordSession(minutes, isExam) {
   }
 }
 
-function finishExam() {
+async function finishExam() {
   // SAFETY: never run exam finish unless we're actually in exam mode
   if (timerMode !== "exam") return;
 
-  recordSession(examSeconds / 60, true);
+  await recordSession(examSeconds / 60, true);
   clearInterval(timerInterval);
   timerInterval = null;
   endAtMs = null;
@@ -121,12 +121,12 @@ function finishBreak() {
 
 
 
-function advancePhase() {
+async function advancePhase() {
   if (timerMode === "study") {
     // record study once
     if (!studyRecorded) {
       studyRecorded = true;
-      recordSession(studySeconds / 60, false).catch(console.error);
+      await recordSession(studySeconds / 60, false);
     }
 
     // move into break, using the *old* deadline as anchor
@@ -145,12 +145,13 @@ function advancePhase() {
   }
 
   if (timerMode === "exam") {
-    finishExam();
+    await recordSession(examSeconds / 60, true);
+    await finishExam();
     return;
   }
 }
 
-function tick() {
+async function tick() {
   Events.emit("timer:tick", {
     timerMode,
     timerRemaining,
@@ -173,7 +174,7 @@ function tick() {
     if (timerRemaining > 0) break;
 
     // timerRemaining == 0 => advance phase
-    advancePhase();
+    await advancePhase();
 
     // finishBreak/finishExam clears interval; stop looping
     if (!timerInterval) break;
@@ -223,7 +224,7 @@ function startTimer() {
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
 
   if (timerInterval) clearInterval(timerInterval);
-  timerInterval = setInterval(tick, 1000);
+  timerInterval = setInterval(() => tick().catch(console.error), 1000);
 }
 
 function pauseTimer() {
@@ -239,7 +240,7 @@ function pauseTimer() {
     // resume
     endAtMs = Date.now() + pausedRemainingSec * 1000;   
     pausedRemainingSec = 0;
-    tick();
+    tick().catch(console.error);
     if (timerMode === "study") setMessage("Study session resumed");
     else if (timerMode === "break") setMessage("Break resumed");
     else setMessage("Exam resumed");
@@ -307,7 +308,7 @@ export function initTimer() {
   updateTimerDisplay();
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) tick(); // catch up first
+    if (!document.hidden) tick().catch(console.error); // catch up first
     console.log("[page] visibilitychange:", document.hidden ? "HIDDEN" : "VISIBLE", {
       timerMode,
       timerPaused,
