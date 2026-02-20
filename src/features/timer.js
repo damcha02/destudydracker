@@ -53,20 +53,34 @@ function enableControls({ start, pause, reset, inputs }) {
 //   Events.emit("sessions:changed");
 // }
 async function recordSession(minutes, isExam) {
-  try {
-    const store = getStore();
-    const mins = Math.round(Number(minutes) || 0);
-    if (!mins || mins <= 0) return;
+  const store = getStore();
+  const mins = Math.round(Number(minutes) || 0);
+  if (!mins || mins <= 0) return;
 
+  // Helpful debug info
+  const username = store.getCurrentUsername?.() ?? "(unknown)";
+  console.log("[recordSession] attempting save", {
+    mins,
+    isExam: !!isExam,
+    username,
+    date: isoDateKey(new Date()),
+  });
+
+  Events.emit("toast", { msg: `Saving ${mins} min...` });
+
+  try {
     await store.addSession({
       date: isoDateKey(new Date()),
       minutes: mins,
-      isExam: !!isExam
+      isExam: !!isExam,
     });
 
+    console.log("[recordSession] save OK");
+    Events.emit("toast", { msg: `Saved ${mins} min` });
     Events.emit("sessions:changed");
   } catch (err) {
-    console.error("Failed to record session:", err);
+    console.error("[recordSession] save FAILED:", err);
+    Events.emit("toast", { msg: "Session NOT saved (see console)" });
   }
 }
 
@@ -100,6 +114,7 @@ function startBreak() {
 }
 
 function finishStudyStartBreak() {
+  console.log("[timer] study finished -> starting break, recording study");
   startBreak();
 
   // record only the study portion
@@ -255,4 +270,17 @@ export function initTimer() {
   // initial UI state
   enableControls({ start: true, pause: false, reset: false, inputs: true });
   updateTimerDisplay();
+
+  document.addEventListener("visibilitychange", () => {
+    console.log("[page] visibilitychange:", document.hidden ? "HIDDEN" : "VISIBLE", {
+      timerMode,
+      timerPaused,
+      timerRemaining,
+    });
+
+    if (!document.hidden) {
+      Events.emit("toast", { msg: "Welcome back — checking timer…" });
+    }
+  });
+  
 }
