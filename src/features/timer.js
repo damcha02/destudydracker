@@ -14,6 +14,10 @@ let timerInterval = null;
 let timerRemaining = 0;
 let timerPaused = false;
 
+
+let endAtMs = null;        // absolute deadline timestamp
+let pausedRemainingSec = 0; // store remaining when paused
+
 let examModeActive = false;
 let timerMode = "study"; // "study" | "break" | "exam"
 
@@ -91,6 +95,9 @@ function finishExam() {
   recordSession(examSeconds / 60, true);
   clearInterval(timerInterval);
   timerInterval = null;
+  endAtMs = null;
+  pausedRemainingSec = 0;
+  timerPaused = false;
 
   setMessage("Exam complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
@@ -101,6 +108,10 @@ function finishExam() {
 function finishBreak() {
   clearInterval(timerInterval);
   timerInterval = null;
+  endAtMs = null;
+  pausedRemainingSec = 0;
+  timerPaused = false;
+
   setMessage("Session complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
@@ -109,6 +120,9 @@ function finishBreak() {
 function startBreak() {
   timerMode = "break";
   timerRemaining = breakSeconds;
+  endAtMs = Date.now() + timerRemaining * 1000; 
+  pausedRemainingSec = 0;  
+
   setMessage("Break time! Relax.");
   updateTimerDisplay();
 }
@@ -133,31 +147,20 @@ function tick() {
 
   if (timerPaused) return;
 
-  if (timerRemaining > 0) {
-    timerRemaining--;
-    updateTimerDisplay();
-    return;
-  }
+  if (!endAtMs) return;
 
-  // timerRemaining is 0 → transition based on mode
-  if (timerRemaining === 0) console.log("TIMER HIT 0", { timerMode, examModeActive });
+  // recompute remaining from real time
+  const rem = Math.ceil((endAtMs - Date.now()) / 1000);
+  timerRemaining = Math.max(0, rem);
+  updateTimerDisplay();
 
+  if (timerRemaining > 0) return;
+
+  // hit 0 -> transition
   switch (timerMode) {
-    case "exam":
-      finishExam();
-      return;
-
-    case "study":
-      finishStudyStartBreak();
-      return;
-
-    case "break":
-      finishBreak();
-      return;
-
-    default:
-      console.warn("Unknown timerMode:", timerMode);
-      return;
+    case "exam":  finishExam(); break;
+    case "study": finishStudyStartBreak(); break;
+    case "break": finishBreak(); break;
   }
 }
 
@@ -178,6 +181,8 @@ function startTimer() {
     examSeconds = durationMin * 60;
     timerMode = "exam";
     timerRemaining = examSeconds;
+    endAtMs = Date.now() + timerRemaining * 1000;
+    pausedRemainingSec = 0;
     setMessage("Exam started. Good luck!");
   } else {
     if (!breakMin || breakMin <= 0) {
@@ -188,6 +193,8 @@ function startTimer() {
     breakSeconds = breakMin * 60;
     timerMode = "study";
     timerRemaining = studySeconds;
+    endAtMs = Date.now() + timerRemaining * 1000;
+    pausedRemainingSec = 0;
     setMessage("Study session started!");
   }
 
@@ -206,11 +213,18 @@ function pauseTimer() {
   timerPaused = !timerPaused;
   if (timerPaused) {
     setMessage("Paused");
+    pausedRemainingSec = timerRemaining;
+    endAtMs = null;
     if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Resume";
   } else {
+    // resume
+    endAtMs = Date.now() + pausedRemainingSec * 1000;   
+    pausedRemainingSec = 0;
+    tick();
     if (timerMode === "study") setMessage("Study session resumed");
     else if (timerMode === "break") setMessage("Break resumed");
     else setMessage("Exam resumed");
+
     if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
   }
 }
@@ -222,7 +236,8 @@ function resetTimer() {
   timerRemaining = 0;
   timerPaused = false;
   timerMode = "study";
-
+  endAtMs = null;
+  pausedRemainingSec = 0;
   if (DOM.timerDisplay) DOM.timerDisplay.textContent = "00:00";
   setMessage("");
 
@@ -280,7 +295,8 @@ export function initTimer() {
 
     if (!document.hidden) {
       Events.emit("toast", { msg: "Welcome back — checking timer…" });
+      tick(); 
     }
   });
-  
+
 }
