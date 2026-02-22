@@ -24,6 +24,49 @@ let timerMode = "study"; // "study" | "break" | "exam"
 let studySeconds = 0;
 let breakSeconds = 0;
 let examSeconds = 0;
+const TIMER_KEY = "studytracker_timer_state";
+
+
+function saveTimerState() {
+  localStorage.setItem(TIMER_KEY, JSON.stringify({
+    timerMode,
+    timerPaused,
+    timerRemaining,
+    endAtMs,
+    pausedRemainingSec,
+    studySeconds,
+    breakSeconds,
+    examSeconds,
+    examModeActive,
+    studyRecorded
+  }));
+}
+
+function loadTimerState() {
+  const raw = localStorage.getItem(TIMER_KEY);
+  if (!raw) return false;
+  try {
+    const s = JSON.parse(raw);
+    timerMode = s.timerMode ?? "study";
+    timerPaused = !!s.timerPaused;
+    timerRemaining = Number(s.timerRemaining) || 0;
+    endAtMs = s.endAtMs ?? null;
+    pausedRemainingSec = Number(s.pausedRemainingSec) || 0;
+    studySeconds = Number(s.studySeconds) || 0;
+    breakSeconds = Number(s.breakSeconds) || 0;
+    examSeconds = Number(s.examSeconds) || 0;
+    examModeActive = !!s.examModeActive;
+    studyRecorded = !!s.studyRecorded;
+    if (timerPaused) setMessage("Paused");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearTimerState() {
+  localStorage.removeItem(TIMER_KEY);
+}
 
 function updateTimerDisplay() {
   const m = String(Math.floor(timerRemaining / 60)).padStart(2, "0");
@@ -102,6 +145,8 @@ async function finishExam() {
   setMessage("Exam complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
+  clearTimerState();
+  timerMode = "study";
 }
 
 
@@ -115,6 +160,8 @@ function finishBreak() {
   setMessage("Session complete! Well done.");
   enableControls({ start: true, pause: false, reset: true, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
+  clearTimerState();
+  timerMode = "study";
 }
 
 
@@ -127,11 +174,13 @@ async function advancePhase() {
     if (!studyRecorded) {
       studyRecorded = true;
       await recordSession(studySeconds / 60, false);
+      console.log("[advancePhase] STUDY->BREAK, calling recordSession", { studyRecorded, studySeconds });
     }
 
     // move into break, using the *old* deadline as anchor
     timerMode = "break";
     endAtMs = endAtMs + (breakSeconds * 1000);
+    saveTimerState();
     setMessage("Break time! Relax.");
     // recompute for the new phase immediately:
     timerRemaining = Math.max(0, Math.ceil((endAtMs - Date.now()) / 1000));
@@ -145,7 +194,7 @@ async function advancePhase() {
   }
 
   if (timerMode === "exam") {
-    await recordSession(examSeconds / 60, true);
+    // await recordSession(examSeconds / 60, true);
     await finishExam();
     return;
   }
@@ -160,9 +209,10 @@ async function tick() {
     breakSeconds,
     examSeconds
   });
-
+  
   if (timerPaused) return;
-
+  
+  console.log("[tick] guard", { endAtMs, timerMode, timerPaused });
   if (!endAtMs) return;
 
   // Catch up through phases if we've been away
@@ -170,6 +220,7 @@ async function tick() {
     const rem = Math.ceil((endAtMs - Date.now()) / 1000);
     timerRemaining = Math.max(0, rem);
     updateTimerDisplay();
+    saveTimerState();
 
     if (timerRemaining > 0) break;
 
@@ -219,6 +270,7 @@ function startTimer() {
   }
 
   updateTimerDisplay();
+  saveTimerState();
 
   enableControls({ start: false, pause: true, reset: true, inputs: false });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
@@ -247,6 +299,7 @@ function pauseTimer() {
 
     if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
   }
+  saveTimerState();
 }
 
 function resetTimer() {
@@ -261,6 +314,7 @@ function resetTimer() {
   pausedRemainingSec = 0;
   if (DOM.timerDisplay) DOM.timerDisplay.textContent = "00:00";
   setMessage("");
+  clearTimerState();
 
   enableControls({ start: true, pause: false, reset: false, inputs: true });
   if (DOM.pauseBtn) DOM.pauseBtn.textContent = "Pause";
@@ -320,4 +374,13 @@ export function initTimer() {
     }
   });
 
+  if (loadTimerState()) {
+    tick().catch(console.error);
+    updateTimerDisplay();
+
+    if (!timerPaused && endAtMs) {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => tick().catch(console.error), 1000);
+    }
+  }
 }
