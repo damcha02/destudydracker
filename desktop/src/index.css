@@ -1,0 +1,126 @@
+:root {
+  --bg: #071019;
+  --bg-top: #0f1b28;
+  --surface: #0f1825;
+  --surface-2: #152234;
+  --text: #ecf4ff;
+  --muted: rgba(218, 230, 247, 0.72);
+  --border: rgba(159, 183, 218, 0.15);
+  --border-strong: rgba(159, 183, 218, 0.26);
+  --accent: #8fb4ff;
+  --danger: #ff5c75;
+  --shadow: 0 28px 80px rgba(0, 0, 0, 0.35);
+  --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, monospace;
+
+  color: var(--text);
+  background: var(--bg);
+  color-scheme: dark;
+  font-family: Inter, "Segoe UI", Roboto, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(143, 180, 255, 0.12), transparent 32%),
+    radial-gradient(circle at top right, rgba(103, 235, 182, 0.08), transparent 25%),
+    linear-gradient(180deg, var(--bg-top), var(--bg));
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at center, black 34%, transparent 80%);
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='%23d9e7ff' d='M3.2 5.2 8 10l4.8-4.8 1.2 1.2L8 12.4 2 6.4z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 14px;
+  padding-right: 44px;
+}
+
+select option,
+select optgroup {
+  background: #0f1825;
+  color: var(--text);
+}
+
+input[type="date"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.95);
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  padding: 12px 14px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 110px;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: clamp(2.4rem, 5vw, 4.4rem);
+  line-height: 0.98;
+}
+
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}

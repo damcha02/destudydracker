@@ -14,7 +14,7 @@ let growthProgress = 0;         // 0..1 over ~5 mins
 let leftCursor = 5;             // % from left edge
 let rightCursor = 95;           // % from left edge
 
-const PLANT_INTERVAL_SECONDS = 5;
+const PLANT_INTERVAL_SECONDS = 1;
 
 /* --------------------------
    Utilities
@@ -39,6 +39,13 @@ function random(min, max) {
   return Math.random() * (max - min) + min;
 }
 
+function edgeMarginPercent() {
+  // half plant width / container width  -> percent margin
+  const w = gardenContainer?.clientWidth || 1;
+  const halfPlantPx = 80; // width 160 / 2
+  const m = (halfPlantPx / w) * 100;
+  return Math.min(18, Math.max(6, m + 1)); // keep sane bounds
+}
 /* --------------------------
    Plant Creation
 --------------------------- */
@@ -47,7 +54,7 @@ function createPlant(config, instant = false) {
   const el = document.createElement("div");
   el.className = `plant type${config.type}`;
   el.style.left = config.left + "%";
-  el.style.transform = `translateX(-50%) translateY(12px) scale(${config.scale})`;
+  // el.style.transform = `translateX(-50%) scale(${config.scale})`;
   el.style.setProperty("--plant-height", config.height + "px");
   el.style.setProperty("--plant-scale", config.scale);
 
@@ -98,29 +105,62 @@ function generatePlant() {
 
   // Chance to spawn in the center increases over time.
   // Early: ~10% center plants, Late: ~45% center plants
-  const centerChance = 0.3 + (0.35 * growthProgress);
-  const useCenter = Math.random() < centerChance;
+//   const centerChance = 0.3 + (0.35 * growthProgress);
+//   const useCenter = Math.random() < centerChance;
+
+//   let x;
+
+//   if (useCenter) {
+//   // Center spread: starts fairly tight, widens over time
+//     const spread = 30 + (35 * growthProgress); // 10%..45%
+//     x = random(50 - spread, 50 + spread) + random(-2, 2);
+//   } else {
+// // Your existing side-based spawn logic
+//     const side = Math.random() < 0.5 ? "left" : "right";
+//     const inward = 42 * Math.pow(growthProgress, 1.35);
+//     const leftBase = 4 + inward;
+//     const rightBase = 96 - inward;
+//     const jitter = random(-2.5, 2.5);
+
+//     if (side === "left") leftCursor = leftBase + jitter;
+//     else rightCursor = rightBase + jitter;
+
+//     x = side === "left" ? leftCursor : rightCursor;
+// }
+  const EARLY_RANDOM_PLANTS = 40;
+  const count = gardenData.length;
+  const margin = edgeMarginPercent();
 
   let x;
 
-  if (useCenter) {
-  // Center spread: starts fairly tight, widens over time
-    const spread = 30 + (35 * growthProgress); // 10%..45%
-    x = random(50 - spread, 50 + spread) + random(-2, 2);
+  if (count < EARLY_RANDOM_PLANTS) {
+    // Early: genuinely random across the whole garden (looks nicer fast)
+    x = random(margin, 100-margin) + random(-3, 3);
   } else {
-// Your existing side-based spawn logic
-    const side = Math.random() < 0.5 ? "left" : "right";
-    const inward = 42 * Math.pow(growthProgress, 1.35);
-    const leftBase = 4 + inward;
-    const rightBase = 96 - inward;
-    const jitter = random(-2.5, 2.5);
+    // Mid/Late: gentle bias toward center but still varied
+    const p = growthProgress;
 
-    if (side === "left") leftCursor = leftBase + jitter;
-    else rightCursor = rightBase + jitter;
+    const centerChance = 0.35 + (0.35 * p); // 35% -> 70%
+    const useCenter = Math.random() < centerChance;
 
-    x = side === "left" ? leftCursor : rightCursor;
-}
+    if (useCenter) {
+      const spread = 40 + (20 * p); // wide early-mid, slightly tighter later
+      x = random(50 - spread, 50 + spread) + random(-2, 2);
+    } else {
+      const side = Math.random() < 0.5 ? "left" : "right";
+      const inward = 36 * Math.pow(p, 1.15);
+      const leftBase = margin + inward;
+      const rightBase = (100 - margin) - inward;
+      const jitter = random(-4, 4);
 
+      if (side === "left") leftCursor = leftBase + jitter;
+      else rightCursor = rightBase + jitter;
+
+      x = side === "left" ? leftCursor : rightCursor;
+    }
+  }
+
+  x = Math.max(margin, Math.min(100 - margin, x));
   // Height ramps up, but keep it lower early so you don't get "mid giant trees"
   const minH = 90 + growthProgress * 60;
   const maxH = 170 + growthProgress * 320;

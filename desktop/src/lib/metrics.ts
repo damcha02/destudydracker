@@ -1,0 +1,266 @@
+import type { AppState, Course, Exam, Semester, StudySession, Task } from "../types";
+
+export function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function formatMinutes(minutes: number) {
+  if (!minutes) return "0m";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return mins ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
+export function formatDate(date: string) {
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+  }).format(new Date(date));
+}
+
+export function isoDate(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+export function daysUntil(date: string) {
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target.getTime() - today.getTime()) / 86400000);
+}
+
+export function getTaskProgress(task: Task) {
+  const total = Math.max(task.totalUnits, 1);
+  return Math.round((task.completedUnits / total) * 100);
+}
+
+export function getSemesterCourses(state: AppState, semesterId: string) {
+  return state.courses.filter((course) => course.semesterId === semesterId);
+}
+
+export function getCourseTasks(state: AppState, courseId: string) {
+  return state.tasks.filter((task) => task.courseId === courseId);
+}
+
+export function getCourseExams(state: AppState, courseId: string) {
+  return state.exams.filter((exam) => exam.courseId === courseId);
+}
+
+export function getSemesterTasks(state: AppState, semesterId: string) {
+  return state.tasks.filter((task) => task.semesterId === semesterId);
+}
+
+export function getCourseMinutes(state: AppState, courseId: string) {
+  return state.sessions
+    .filter((session) => session.courseId === courseId)
+    .reduce((sum, session) => sum + session.minutes, 0);
+}
+
+export function getRemainingUnits(task: Task) {
+  return Math.max(0, task.totalUnits - task.completedUnits);
+}
+
+export function calculateDailyWork(task: Task) {
+  const remaining = getRemainingUnits(task);
+  if (remaining <= 0) {
+    return { unitsPerDay: 0, daysLeft: 0, message: "Finished. Keep this as revision only." };
+  }
+
+  if (!task.dueDate) {
+    return {
+      unitsPerDay: remaining,
+      daysLeft: null,
+      message: `${remaining} units left. Add a due date for a realistic daily target.`,
+    };
+  }
+
+  const daysLeft = daysUntil(task.dueDate);
+  if (daysLeft <= 0) {
+    return {
+      unitsPerDay: remaining,
+      daysLeft,
+      message: `Due now. You need to clear ${remaining} units today.`,
+    };
+  }
+
+  const unitsPerDay = remaining / daysLeft;
+  return {
+    unitsPerDay,
+    daysLeft,
+    message: `${unitsPerDay.toFixed(1)} units per day keeps this on track.`,
+  };
+}
+
+function getOverdueTasks(tasks: Task[]) {
+  return tasks.filter((task) => task.dueDate && daysUntil(task.dueDate) < 0 && getRemainingUnits(task) > 0);
+}
+
+function getDueSoonTasks(tasks: Task[]) {
+  return tasks.filter((task) => {
+    if (!task.dueDate || getRemainingUnits(task) <= 0) return false;
+    const dueIn = daysUntil(task.dueDate);
+    return dueIn >= 0 && dueIn <= 3;
+  });
+}
+
+function getExamPressure(exams: Exam[]) {
+  return exams.reduce((penalty, exam) => {
+    const dueIn = daysUntil(exam.examDate);
+    if (dueIn < 0 || dueIn > 10) return penalty;
+    const urgency = (10 - dueIn) / 10;
+    return penalty + urgency * (100 - exam.preparedness) * 0.22;
+  }, 0);
+}
+
+export function getCourseHealth(state: AppState, course: Course) {
+  const tasks = getCourseTasks(state, course.id);
+  const exams = getCourseExams(state, course.id);
+  const totalUnits = tasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
+  const finishedUnits = tasks.reduce((sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits), 0);
+  const progressScore = totalUnits ? (finishedUnits / totalUnits) * 50 : 38;
+  const overduePenalty = getOverdueTasks(tasks).length * 12;
+  const dueSoonPenalty = getDueSoonTasks(tasks).length * 4;
+  const examPenalty = getExamPressure(exams);
+  const score = clamp(Math.round(40 + progressScore - overduePenalty - dueSoonPenalty - examPenalty), 0, 100);
+
+  let label = "Strong";
+  if (score < 75) label = "Steady";
+  if (score < 55) label = "Watch";
+  if (score < 35) label = "Critical";
+
+  return {
+    score,
+    label,
+    overdue: getOverdueTasks(tasks).length,
+    dueSoon: getDueSoonTasks(tasks).length,
+  };
+}
+
+export function getSemesterHealth(state: AppState, semester: Semester) {
+  const courses = getSemesterCourses(state, semester.id);
+  if (!courses.length) {
+    return { score: 60, label: "Preparing" };
+  }
+
+  const scores = courses.map((course) => getCourseHealth(state, course).score);
+  const score = Math.round(scores.reduce((sum, item) => sum + item, 0) / scores.length);
+  let label = "Strong";
+  if (score < 75) label = "Steady";
+  if (score < 55) label = "Watch";
+  if (score < 35) label = "Critical";
+  return { score, label };
+}
+
+export function getOverallHealth(state: AppState) {
+  if (!state.courses.length) return 68;
+  const scores = state.courses.map((course) => getCourseHealth(state, course).score);
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+}
+
+export function getWeeklyActivity(sessions: StudySession[]) {
+  const today = new Date();
+  const buckets = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (6 - index));
+    return {
+      key: isoDate(date),
+      label: new Intl.DateTimeFormat("en", { weekday: "short" }).format(date),
+      minutes: 0,
+    };
+  });
+
+  const map = new Map(buckets.map((bucket) => [bucket.key, bucket]));
+  sessions.forEach((session) => {
+    const key = session.endedAt.slice(0, 10);
+    const bucket = map.get(key);
+    if (bucket) bucket.minutes += session.minutes;
+  });
+  return buckets;
+}
+
+export function getTopPendingTasks(state: AppState) {
+  return [...state.tasks]
+    .filter((task) => getRemainingUnits(task) > 0)
+    .sort((a, b) => {
+      const aDue = a.dueDate ? daysUntil(a.dueDate) : 999;
+      const bDue = b.dueDate ? daysUntil(b.dueDate) : 999;
+      if (aDue !== bDue) return aDue - bDue;
+      const priorityWeight = { high: 0, medium: 1, low: 2 };
+      return priorityWeight[a.priority] - priorityWeight[b.priority];
+    })
+    .slice(0, 5);
+}
+
+export function getUpcomingExams(state: AppState) {
+  return [...state.exams]
+    .filter((exam) => daysUntil(exam.examDate) >= 0)
+    .sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))
+    .slice(0, 4);
+}
+
+export function getTodaySessions(state: AppState) {
+  const today = isoDate();
+  return state.sessions.filter((session) => session.endedAt.slice(0, 10) === today);
+}
+
+export function getTodayMinutes(state: AppState) {
+  return getTodaySessions(state).reduce((sum, session) => sum + session.minutes, 0);
+}
+
+export function getStreakDays(state: AppState) {
+  const sessionDays = new Set(state.sessions.map((session) => session.endedAt.slice(0, 10)));
+  let streak = 0;
+  const cursor = new Date();
+
+  while (sessionDays.has(isoDate(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+export function getFocusMomentum(state: AppState) {
+  const week = getWeeklyActivity(state.sessions);
+  const total = week.reduce((sum, day) => sum + day.minutes, 0);
+  const average = total / week.length;
+  if (average >= 110) return "Surging";
+  if (average >= 70) return "Stable";
+  if (average >= 35) return "Recovering";
+  return "Slipping";
+}
+
+export function buildDailyNoteMarkdown(state: AppState, noteDate = isoDate()) {
+  const courseLookup = new Map(state.courses.map((course) => [course.id, course]));
+  const sessions = state.sessions.filter((session) => session.endedAt.slice(0, 10) === noteDate);
+  const totalMinutes = sessions.reduce((sum, session) => sum + session.minutes, 0);
+  const learned = sessions.map((session) => session.learned).filter(Boolean);
+  const blockers = sessions.map((session) => session.blocker).filter(Boolean);
+  const nextSteps = sessions.map((session) => session.nextStep).filter(Boolean);
+
+  return `---
+date: ${noteDate}
+source: Study Tracker
+minutes: ${totalMinutes}
+---
+
+# ${noteDate}
+
+## Study Summary
+- Total focused time: ${formatMinutes(totalMinutes)}
+- Sessions logged: ${sessions.length}
+
+## What I Studied Today
+${sessions.length ? sessions.map((session) => `- ${courseLookup.get(session.courseId ?? "")?.name ?? "General"}: ${session.goal || "Focused work"} (${session.minutes} min)`).join("\n") : "- No sessions logged yet."}
+
+## What I Learned
+${learned.length ? learned.map((item) => `- ${item}`).join("\n") : "- Add a quick reflection after each session."}
+
+## What Is Still Weak
+${blockers.length ? blockers.map((item) => `- ${item}`).join("\n") : "- Nothing logged yet."}
+
+## What To Do Next
+${nextSteps.length ? nextSteps.map((item) => `- ${item}`).join("\n") : "- Pick the next highest-impact task."}
+`;
+}

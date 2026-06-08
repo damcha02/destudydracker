@@ -212,7 +212,7 @@ async function tick() {
   
   if (timerPaused) return;
   
-  console.log("[tick] guard", { endAtMs, timerMode, timerPaused });
+  // console.log("[tick] guard", { endAtMs, timerMode, timerPaused });
   if (!endAtMs) return;
 
   // Catch up through phases if we've been away
