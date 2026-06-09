@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent } from "react";
+import type { CSSProperties, DragEvent, FormEvent } from "react";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -38,6 +38,82 @@ const focusPresets = [
 
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 const TOTAL_WORKLOAD_ID = "__total_workload__";
+const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
+const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
+
+type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
+type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
+type DashboardWidgetWidth = "full" | "half" | "third";
+
+type DashboardWidgetLayout = {
+  id: DashboardWidgetId;
+  width: DashboardWidgetWidth;
+};
+
+const dashboardWidgetIds: DashboardWidgetId[] = [
+  "today",
+  "urgentTasks",
+  "weeklyFocus",
+  "courseRadar",
+  "examRunway",
+  "garden",
+  "stats",
+];
+
+const defaultCustomDashboardLayout: DashboardWidgetLayout[] = [
+  { id: "today", width: "half" },
+  { id: "urgentTasks", width: "half" },
+  { id: "weeklyFocus", width: "full" },
+  { id: "courseRadar", width: "half" },
+  { id: "examRunway", width: "half" },
+  { id: "garden", width: "third" },
+  { id: "stats", width: "third" },
+];
+
+function isDashboardLayout(value: string | null): value is DashboardLayout {
+  return value === "focus" || value === "cockpit" || value === "analyst" || value === "custom";
+}
+
+function isDashboardWidgetId(value: unknown): value is DashboardWidgetId {
+  return typeof value === "string" && dashboardWidgetIds.includes(value as DashboardWidgetId);
+}
+
+function isDashboardWidgetWidth(value: unknown): value is DashboardWidgetWidth {
+  return value === "full" || value === "half" || value === "third";
+}
+
+function loadDashboardLayout() {
+  const saved = localStorage.getItem(DASHBOARD_LAYOUT_KEY);
+  return isDashboardLayout(saved) ? saved : "cockpit";
+}
+
+function normalizeCustomDashboardLayout(value: unknown): DashboardWidgetLayout[] {
+  if (!Array.isArray(value)) return defaultCustomDashboardLayout;
+
+  const seen = new Set<DashboardWidgetId>();
+  const safeLayout = value.reduce<DashboardWidgetLayout[]>((items, item) => {
+    if (!item || typeof item !== "object") return items;
+    const record = item as Record<string, unknown>;
+    if (!isDashboardWidgetId(record.id) || seen.has(record.id)) return items;
+    seen.add(record.id);
+    items.push({ id: record.id, width: isDashboardWidgetWidth(record.width) ? record.width : "half" });
+    return items;
+  }, []);
+
+  defaultCustomDashboardLayout.forEach((item) => {
+    if (!seen.has(item.id)) safeLayout.push(item);
+  });
+
+  return safeLayout;
+}
+
+function loadCustomDashboardLayout() {
+  try {
+    return normalizeCustomDashboardLayout(JSON.parse(localStorage.getItem(CUSTOM_DASHBOARD_LAYOUT_KEY) ?? "null"));
+  } catch {
+    return defaultCustomDashboardLayout;
+  }
+}
 
 type CourseDraft = {
   semesterId: string;
@@ -131,8 +207,13 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
 
 function App() {
   const [state, setState] = useState<AppState>(loadAppState);
+  const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
+  const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
+  const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
+  const [dashboardEditing, setDashboardEditing] = useState(false);
+  const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
   const [semesterName, setSemesterName] = useState("");
   const [courseDraft, setCourseDraft] = useState<CourseDraft>({
     semesterId: "",
@@ -170,6 +251,23 @@ function App() {
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("study-tracker-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(DASHBOARD_LAYOUT_KEY, dashboardLayout);
+  }, [dashboardLayout]);
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOM_DASHBOARD_LAYOUT_KEY, JSON.stringify(customDashboardLayout));
+  }, [customDashboardLayout]);
+
+  useEffect(() => {
+    if (dashboardLayout !== "custom") setDashboardEditing(false);
+  }, [dashboardLayout]);
 
   useEffect(() => {
     if (!message) return undefined;
@@ -336,17 +434,32 @@ function App() {
   const overallHealth = useMemo(() => getOverallHealth(state), [state]);
   const notePreview = useMemo(() => buildDailyNoteMarkdown(state), [state]);
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
+  const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
+  const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
   const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const maxWeeklyMinutes = Math.max(30, ...weeklyActivity.map((entry) => entry.minutes));
+  const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
+  const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
   const completionOffset = completionCircumference - (selectedTaskProgress / 100) * completionCircumference;
 
   const timerCourses = state.timer.semesterId ? getSemesterCourses(state, state.timer.semesterId) : state.courses;
   const timerTasks = state.timer.courseId ? getCourseTasks(state, state.timer.courseId) : [];
+  const timerSelectableTasks = state.timer.courseId
+    ? timerTasks
+    : state.timer.semesterId
+      ? getSemesterTasks(state, state.timer.semesterId)
+      : state.tasks;
   const timerCourse = state.timer.courseId ? courseLookup.get(state.timer.courseId) : null;
+  const timerTask = state.timer.taskId ? taskLookup.get(state.timer.taskId) : null;
   const hasKnownTimerPreset = focusPresets.some((preset) => preset.label === state.timer.presetLabel);
+  const isCustomTimerPreset = !hasKnownTimerPreset || state.timer.presetLabel === "Custom";
+  const timerConfiguredSeconds = state.timer.phase === "break"
+    ? Math.max(1, state.timer.breakMinutes * 60)
+    : Math.max(1, (state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes) * 60);
+  const timerProgress = clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
 
   const gardenPlants = useMemo(
     () => state.sessions.slice(0, 16).map((session, index) => ({
@@ -671,26 +784,504 @@ function App() {
     }
   }
 
+  function healthClass(score: number) {
+    if (score >= 75) return "strong";
+    if (score >= 55) return "steady";
+    if (score >= 35) return "watch";
+    return "critical";
+  }
+
+  function focusTaskFromDashboard(task: Task) {
+    setSelectedTaskId(task.id);
+    setState((current) => ({
+      ...current,
+      activeTab: "timer",
+      timer: {
+        ...current.timer,
+        semesterId: task.semesterId,
+        courseId: task.courseId,
+        taskId: task.id,
+        goal: current.timer.goal || task.title,
+      },
+    }));
+    setMessage(`"${task.title}" sent to timer.`);
+  }
+
+  function renderTodayCard() {
+    const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+    return (
+      <article className="panel-card design-card design-today-card">
+        <div className="design-today-top">
+          <div>
+            <p className="eyebrow">Today · {todayLabel}</p>
+            <strong className="design-big-stat">{formatMinutes(getTodayMinutes(state))}</strong>
+            <span>focused</span>
+          </div>
+          <div className="design-icon-badge">⌖</div>
+        </div>
+
+        <div className="design-mini-metrics">
+          <div>
+            <span>Day streak</span>
+            <strong>{getStreakDays(state)}</strong>
+          </div>
+          <div>
+            <span>Momentum</span>
+            <strong>{getFocusMomentum(state)}</strong>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  function renderGardenCard(heightClass = "") {
+    return (
+      <article className={`panel-card design-card design-garden-card ${heightClass}`}>
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Knowledge Garden</p>
+            <h3>Growth from focus</h3>
+          </div>
+        </div>
+        <div className="garden-stage compact-garden" aria-hidden="true">
+          <div className="garden-caption">
+            <strong>Flourishing</strong>
+            <span>{formatMinutes(weeklyTotalMinutes)} this week</span>
+          </div>
+          {gardenPlants.map((plant) => (
+            <div
+              key={plant.id}
+              className="garden-plant"
+              style={{
+                left: `${plant.left}%`,
+                height: `${plant.height}px`,
+                transform: `translateX(-50%) scale(${plant.scale})`,
+                "--bloom": plant.bloom,
+              } as CSSProperties}
+            />
+          ))}
+        </div>
+      </article>
+    );
+  }
+
+  function renderUrgentTasks(limit = 5) {
+    const tasks = topTasks.slice(0, limit);
+    return (
+      <article className="panel-card design-card design-priority-card">
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Do this next</p>
+            <h3>Highest-impact tasks</h3>
+            <p className="section-note">Ranked by deadline and priority.</p>
+          </div>
+        </div>
+
+        <div className="design-task-list">
+          {tasks.length ? (
+            tasks.map((task) => {
+              const course = courseLookup.get(task.courseId);
+              const semester = semesterLookup.get(task.semesterId);
+              const remaining = getRemainingUnits(task);
+              const dueIn = task.dueDate ? daysUntil(task.dueDate) : null;
+              const urgent = dueIn !== null && dueIn <= 2;
+              const overdue = dueIn !== null && dueIn < 0;
+              return (
+                <div key={task.id} className={`design-task-item ${selectedTaskId === task.id ? "selected" : ""}`}>
+                  <button type="button" className="design-task-main" onClick={() => setSelectedTaskId(task.id)}>
+                    <span className="design-course-stripe" style={{ background: course?.color ?? "var(--accent)" }} />
+                    <span className="design-task-copy">
+                      <span className="design-task-title-line">
+                        <strong>{task.title}</strong>
+                        <em className={`priority-chip ${task.priority}`}>{task.priority}</em>
+                      </span>
+                      <span className="design-task-meta">
+                        <span>{course?.name ?? "No course"}</span>
+                        <span>{semester?.name ?? "No semester"}</span>
+                        <span>{remaining} units left</span>
+                      </span>
+                    </span>
+                  </button>
+                  <div className="design-task-side">
+                    <span className={`due-chip ${overdue ? "overdue" : urgent ? "urgent" : ""}`}>
+                      {task.dueDate ? (overdue ? `${Math.abs(dueIn ?? 0)}d overdue` : dueIn === 0 ? "Today" : dueIn === 1 ? "Tomorrow" : formatDate(task.dueDate)) : "No date"}
+                    </span>
+                    <button type="button" className="ghost-button small-button" onClick={() => focusTaskFromDashboard(task)}>
+                      Focus
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="empty-copy">Add a semester, course, and task. The riskiest work will show up here.</p>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  function renderWeeklyChart(heightClass = "") {
+    return (
+      <article className={`panel-card design-card design-weekly-card ${heightClass}`}>
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Last 7 days</p>
+            <h3>Weekly focus</h3>
+          </div>
+          <span className="design-chip">{formatMinutes(weeklyTotalMinutes)}</span>
+        </div>
+
+        <div className="design-weekly-bars">
+          {weeklyActivity.map((entry) => {
+            const height = Math.max(4, (entry.minutes / maxWeeklyMinutes) * 100);
+            return (
+              <div key={entry.key} className="design-weekly-column" title={`${entry.label}: ${entry.minutes} minutes`}>
+                <span>{entry.minutes || ""}</span>
+                <div className="design-weekly-track">
+                  <div className="design-weekly-fill" style={{ height: `${height}%` }} />
+                </div>
+                <strong>{entry.label}</strong>
+              </div>
+            );
+          })}
+        </div>
+      </article>
+    );
+  }
+
+  function renderCourseRadar() {
+    return (
+      <article className="panel-card design-card design-course-radar">
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Course radar</p>
+            <h3>Where you stand</h3>
+          </div>
+        </div>
+
+        <div className="design-course-list">
+          {state.courses.length ? (
+            state.courses.map((course) => {
+              const health = getCourseHealth(state, course);
+              const semester = semesterLookup.get(course.semesterId);
+              return (
+                <div className="design-course-row" key={course.id}>
+                  <span className="design-course-dot" style={{ background: course.color }} />
+                  <div>
+                    <div className="design-course-title-line">
+                      <strong>{course.name}</strong>
+                      <span className={healthClass(health.score)}>{health.score}</span>
+                    </div>
+                    <div className="health-track tight">
+                      <div className="health-fill" style={{ width: `${health.score}%`, background: course.color }} />
+                    </div>
+                    <small>
+                      {semester?.name ?? "No semester"} • {getCourseTasks(state, course.id).length} tasks • {formatMinutes(getCourseMinutes(state, course.id))} • Target {formatSwissGrade(course.targetGrade)}
+                      {health.overdue ? ` • ${health.overdue} overdue` : ""}
+                    </small>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="empty-copy">Courses will appear here once you start filling a semester.</p>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  function renderExamRunway() {
+    return (
+      <article className="panel-card design-card design-exam-runway">
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Exam runway</p>
+            <h3>What's coming</h3>
+          </div>
+        </div>
+
+        <div className="design-exam-list">
+          {upcomingExams.length ? (
+            upcomingExams.map((exam) => {
+              const course = courseLookup.get(exam.courseId);
+              const remainingDays = daysUntil(exam.examDate);
+              return (
+                <div key={exam.id} className="design-exam-item">
+                  <div className="design-exam-days">
+                    <strong>{remainingDays}</strong>
+                    <span>days</span>
+                  </div>
+                  <div className="design-exam-copy">
+                    <strong>{exam.title}</strong>
+                    <span>{course?.name ?? "No course"} • {exam.weight}% weight</span>
+                  </div>
+                  <div className="design-exam-prep">
+                    <strong>{exam.preparedness}%</strong>
+                    <div className="health-track tight">
+                      <div className="health-fill" style={{ width: `${exam.preparedness}%`, background: exam.preparedness >= 70 ? "var(--ok)" : exam.preparedness >= 40 ? "var(--warn)" : "var(--danger)" }} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <p className="empty-copy">Add exams so the dashboard can see grade pressure early.</p>
+          )}
+        </div>
+      </article>
+    );
+  }
+
+  function renderStatCard(label: string, value: string | number, detail: string, tone = "") {
+    return (
+      <article className={`panel-card design-card design-stat-card ${tone}`}>
+        <p className="eyebrow">{label}</p>
+        <strong>{value}</strong>
+        <span>{detail}</span>
+      </article>
+    );
+  }
+
+  function renderStatsWidget() {
+    return (
+      <article className="panel-card design-card design-stats-widget">
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Snapshot</p>
+            <h3>Study health</h3>
+          </div>
+          <span className={`design-chip ${healthState}`}>{healthLabel}</span>
+        </div>
+        <div className="design-stats-mini-grid">
+          <div>
+            <span>Focused today</span>
+            <strong>{formatMinutes(getTodayMinutes(state))}</strong>
+          </div>
+          <div>
+            <span>This week</span>
+            <strong>{formatMinutes(weeklyTotalMinutes)}</strong>
+          </div>
+          <div>
+            <span>Streak</span>
+            <strong>{getStreakDays(state)}</strong>
+          </div>
+          <div>
+            <span>Open tasks</span>
+            <strong>{openTaskCount}</strong>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  function renderDashboardWidgetContent(id: DashboardWidgetId) {
+    switch (id) {
+      case "today":
+        return renderTodayCard();
+      case "urgentTasks":
+        return renderUrgentTasks(5);
+      case "weeklyFocus":
+        return renderWeeklyChart();
+      case "courseRadar":
+        return renderCourseRadar();
+      case "examRunway":
+        return renderExamRunway();
+      case "garden":
+        return renderGardenCard("custom-garden");
+      case "stats":
+        return renderStatsWidget();
+    }
+  }
+
+  function moveDashboardWidget(fromId: DashboardWidgetId, toId: DashboardWidgetId) {
+    if (fromId === toId) return;
+    setCustomDashboardLayout((current) => {
+      const fromIndex = current.findIndex((item) => item.id === fromId);
+      const toIndex = current.findIndex((item) => item.id === toId);
+      if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return current;
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }
+
+  function changeDashboardWidgetWidth(id: DashboardWidgetId, width: DashboardWidgetWidth) {
+    setCustomDashboardLayout((current) => current.map((item) => (item.id === id ? { ...item, width } : item)));
+  }
+
+  function resetCustomDashboardLayout() {
+    setCustomDashboardLayout(defaultCustomDashboardLayout);
+    setDraggingWidgetId(null);
+    setMessage("Custom dashboard reset.");
+  }
+
+  function startWidgetDrag(event: DragEvent<HTMLElement>, id: DashboardWidgetId) {
+    setDraggingWidgetId(id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+
+  function dropWidget(event: DragEvent<HTMLElement>, toId: DashboardWidgetId) {
+    event.preventDefault();
+    const fromId = event.dataTransfer.getData("text/plain") as DashboardWidgetId;
+    if (isDashboardWidgetId(fromId)) moveDashboardWidget(fromId, toId);
+    setDraggingWidgetId(null);
+  }
+
+  function renderDashboardWidgetShell(widget: DashboardWidgetLayout) {
+    const labels: Record<DashboardWidgetId, string> = {
+      today: "Today",
+      urgentTasks: "Urgent tasks",
+      weeklyFocus: "Weekly focus",
+      courseRadar: "Course radar",
+      examRunway: "Exam runway",
+      garden: "Knowledge garden",
+      stats: "Stats",
+    };
+
+    return (
+      <div
+        key={widget.id}
+        className={`dashboard-widget ${widget.width} ${dashboardEditing ? "editing" : ""} ${draggingWidgetId === widget.id ? "dragging" : ""}`}
+        onDragOver={(event) => {
+          if (!dashboardEditing) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }}
+        onDrop={(event) => dropWidget(event, widget.id)}
+      >
+        {dashboardEditing ? (
+          <div className="widget-edit-bar">
+            <span
+              className="widget-drag-handle"
+              draggable
+              onDragStart={(event) => startWidgetDrag(event, widget.id)}
+              onDragEnd={() => setDraggingWidgetId(null)}
+              title={`Drag ${labels[widget.id]}`}
+            >
+              ⋮⋮ {labels[widget.id]}
+            </span>
+            <div className="widget-size-control" aria-label={`${labels[widget.id]} size`}>
+              {([
+                ["full", "Full"],
+                ["half", "Half"],
+                ["third", "Third"],
+              ] as [DashboardWidgetWidth, string][]).map(([width, label]) => (
+                <button
+                  key={width}
+                  type="button"
+                  className={widget.width === width ? "active" : ""}
+                  onClick={() => changeDashboardWidgetWidth(widget.id, width)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="dashboard-widget-content" aria-hidden={dashboardEditing ? true : undefined}>
+          {renderDashboardWidgetContent(widget.id)}
+        </div>
+      </div>
+    );
+  }
+
+  function renderCustomDashboard() {
+    return (
+      <div className="custom-dashboard-wrap">
+        <div className="custom-dashboard-toolbar">
+          <div>
+            <p className="eyebrow">Custom dashboard</p>
+            <strong>{dashboardEditing ? "Drag widgets, then choose Full, Half, or Third." : "Your saved widget layout."}</strong>
+          </div>
+          <div className="custom-dashboard-actions">
+            <button type="button" className="ghost-button" onClick={resetCustomDashboardLayout}>
+              Reset
+            </button>
+            <button type="button" className="ghost-button" onClick={() => setDashboardEditing((current) => !current)}>
+              {dashboardEditing ? "Done" : "Edit Dashboard"}
+            </button>
+          </div>
+        </div>
+        <div className={`custom-dashboard-grid ${dashboardEditing ? "editing" : ""}`}>
+          {customDashboardLayout.map((widget) => renderDashboardWidgetShell(widget))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
-        <div>
-          <p className="eyebrow">Desktop Study Command Center</p>
-          <h1>Study Tracker</h1>
-          <p className="subtitle">
-            Semester-based planning, calmer tracking, clearer workload, and room to think.
-          </p>
+        <div className="brand-cluster">
+          <div className="brand-mark" aria-hidden="true">
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M11 20A7 7 0 0 1 4 13c0-5 5-9 16-9 0 9-4 16-9 16z"/>
+              <path d="M11 20c0-5 2-9 7-13"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Study Tracker</h1>
+            <p className="subtitle">Semester planning, focus tracking, workload clarity, and study notes.</p>
+          </div>
         </div>
 
         <div className="topbar-actions">
-          <button className="ghost-button" onClick={() => downloadBackup(state)} type="button">
+          <div
+            className={`health-pill ${healthState}`}
+            title="Heuristic score based on task progress, overdue work, and exam pressure."
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "7px 8px 7px 14px", minWidth: 0 }}
+          >
+            <div>
+              <div className="eyebrow" style={{ fontSize: 8.5, marginBottom: 1 }}>Overall score</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 7, height: 7, borderRadius: 99, background: scoreColor, flexShrink: 0, display: "inline-block" }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: scoreColor }}>{healthLabel}</span>
+              </div>
+            </div>
+            <div style={{ position: "relative", width: 42, height: 42, flexShrink: 0 }}>
+              <svg width="42" height="42" style={{ transform: "rotate(-90deg)" }}>
+                <circle cx="21" cy="21" r="18.5" fill="none" stroke="var(--ring-track)" strokeWidth="5" />
+                <circle
+                  cx="21" cy="21" r="18.5" fill="none" stroke={scoreColor} strokeWidth="5"
+                  strokeDasharray="116.24"
+                  strokeDashoffset={116.24 - (overallHealth / 100) * 116.24}
+                  strokeLinecap="round"
+                  style={{ transition: "stroke-dashoffset 0.7s cubic-bezier(0.2,0.7,0.3,1)" }}
+                />
+              </svg>
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{overallHealth}</span>
+              </div>
+            </div>
+          </div>
+          <button className="ghost-button" onClick={() => downloadBackup(state)} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
+            </svg>
             Backup JSON
           </button>
-          <div className="health-pill" title="Heuristic score based on task progress, overdue work, and exam pressure.">
-            <small>Overall score</small>
-            <strong>{overallHealth}/100</strong>
-            <span>{healthLabel}</span>
-          </div>
+          <button
+            className="theme-toggle"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            type="button"
+            title="Toggle theme"
+            style={{ display: "grid", placeItems: "center" }}
+          >
+            {theme === "dark" ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="4"/>
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z"/>
+              </svg>
+            )}
+          </button>
         </div>
       </header>
 
@@ -707,6 +1298,12 @@ function App() {
             onClick={() => setActiveTab(key)}
             type="button"
           >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              {key === "dashboard" && <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 7h6V4h-6zM4 20h6v-3H4z" />}
+              {key === "planner" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M7 14h5M7 17h8" /></>}
+              {key === "timer" && <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M12 5V3M9 3h6" /></>}
+              {key === "vault" && <><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z" /><path d="M9 12l2 2 4-4" /></>}
+            </svg>
             {label}
           </button>
         ))}
@@ -715,182 +1312,83 @@ function App() {
       {message ? <div className="message-banner">{message}</div> : null}
 
       {state.activeTab === "dashboard" ? (
-        <section className="dashboard-stack">
-          <div className="dashboard-pair top-row">
-            <article className="today-card panel-card compact-card">
-              <div className="today-shell">
-                <div className="today-copy">
-                  <p className="eyebrow">Today</p>
-                  <h2>Finish the work that moves the semester forward.</h2>
-                  <p>
-                    The dashboard weighs overdue work, exam pressure, and real progress without forcing a long scroll.
-                  </p>
-
-                  <div className="hero-metrics today-metrics">
-                    <div>
-                      <span className="metric-label">Focused today</span>
-                      <strong>{formatMinutes(getTodayMinutes(state))}</strong>
-                    </div>
-                    <div>
-                      <span className="metric-label">Streak</span>
-                      <strong>{getStreakDays(state)} days</strong>
-                    </div>
-                    <div>
-                      <span className="metric-label">Momentum</span>
-                      <strong>{getFocusMomentum(state)}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="garden-card today-garden">
-                  <p className="eyebrow">Knowledge Garden</p>
-                  <div className="garden-stage compact-garden" aria-hidden="true">
-                    {gardenPlants.map((plant) => (
-                      <div
-                        key={plant.id}
-                        className="garden-plant"
-                        style={{
-                          left: `${plant.left}%`,
-                          height: `${plant.height}px`,
-                          transform: `translateX(-50%) scale(${plant.scale})`,
-                          "--bloom": plant.bloom,
-                        } as CSSProperties}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </article>
-
-            <article className="panel-card focus-card compact-card">
-              <div className="section-head compact-headline">
-                <div>
-                  <p className="eyebrow">Highest Impact</p>
-                  <h3>Urgent tasks</h3>
-                </div>
-              </div>
-
-              <div className="stack-list">
-                {topTasks.length ? (
-                  topTasks.map((task) => {
-                    const course = courseLookup.get(task.courseId);
-                    const semester = semesterLookup.get(task.semesterId);
-                    return (
-                      <button
-                        key={task.id}
-                        type="button"
-                        className={`focus-task ${selectedTaskId === task.id ? "selected" : ""}`}
-                        onClick={() => {
-                          setSelectedTaskId(task.id);
-                          setActiveTab("planner");
-                        }}
-                      >
-                        <span className="focus-task-top">
-                          <strong>{task.title}</strong>
-                          <em>{course?.name ?? "No course"}</em>
-                        </span>
-                        <span className="focus-task-meta">
-                          <span>{semester?.name ?? "No semester"}</span>
-                          <span>{getRemainingUnits(task)} units left</span>
-                          <span>{task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}</span>
-                        </span>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <p className="empty-copy">Add a semester, then courses, then tasks. The riskiest work will show up here.</p>
-                )}
-              </div>
-            </article>
-          </div>
-
-          <article className="panel-card stats-card compact-card weekly-row">
-            <div className="section-head compact-headline">
-              <div>
-                <p className="eyebrow">Weekly Focus</p>
-                <h3>Last 7 days</h3>
-              </div>
+        <section className="dashboard-design fade-up">
+          <div className="dashboard-design-head">
+            <div>
+              <h2>Good morning</h2>
+              <p>Here's what deserves your focus today.</p>
             </div>
-
-            <div className="bar-chart compact-chart">
-              {weeklyActivity.map((entry) => (
-                <div key={entry.key} className="bar-column" title={`${entry.label}: ${entry.minutes} minutes`}>
-                  <div className="bar-track compact-track">
-                    <div className="bar-fill" style={{ height: `${(entry.minutes / maxWeeklyMinutes) * 100}%` }} />
-                  </div>
-                  <span>{entry.label}</span>
-                  <strong>{entry.minutes}</strong>
-                </div>
+            <div className="layout-control" aria-label="Dashboard layout">
+              <span className="eyebrow">Layout</span>
+              {([
+                ["focus", "Focus"],
+                ["cockpit", "Cockpit"],
+                ["analyst", "Analyst"],
+                ["custom", "Custom"],
+              ] as [DashboardLayout, string][]).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={dashboardLayout === key ? "active" : ""}
+                  onClick={() => setDashboardLayout(key)}
+                >
+                  {label}
+                </button>
               ))}
             </div>
-          </article>
-
-          <div className="dashboard-pair bottom-row">
-            <article className="panel-card course-card compact-card">
-              <div className="section-head compact-headline">
-                <div>
-                  <p className="eyebrow">Course Radar</p>
-                  <h3>How your courses are holding up</h3>
-                </div>
-              </div>
-
-              <div className="course-health-list">
-                {state.courses.length ? (
-                  state.courses.map((course) => {
-                    const health = getCourseHealth(state, course);
-                    const semester = semesterLookup.get(course.semesterId);
-                    return (
-                      <div className="course-health-row" key={course.id}>
-                        <div className="course-badge" style={{ background: course.color }} />
-                        <div className="course-health-copy">
-                          <div className="course-health-title">
-                            <strong>{course.name}</strong>
-                            <span>{health.label}</span>
-                          </div>
-                          <div className="health-track">
-                            <div className="health-fill" style={{ width: `${health.score}%`, background: course.color }} />
-                          </div>
-                          <small>
-                            {semester?.name ?? "No semester"} • {getCourseTasks(state, course.id).length} tasks • {getCourseMinutes(state, course.id)} minutes • {health.overdue} overdue
-                          </small>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <p className="empty-copy">Courses will appear here once you start filling a semester.</p>
-                )}
-              </div>
-            </article>
-
-            <article className="panel-card exam-card compact-card">
-              <div className="section-head compact-headline">
-                <div>
-                  <p className="eyebrow">Exam Runway</p>
-                  <h3>What is getting close</h3>
-                </div>
-              </div>
-
-              <div className="stack-list compact">
-                {upcomingExams.length ? (
-                  upcomingExams.map((exam) => (
-                    <div key={exam.id} className="exam-row">
-                      <div>
-                        <strong>{exam.title}</strong>
-                        <p>{courseLookup.get(exam.courseId)?.name ?? "No course"}</p>
-                      </div>
-                      <div className="exam-side">
-                        <span>{daysUntil(exam.examDate)} days</span>
-                        <small>{exam.preparedness}% prepared</small>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="empty-copy">Add exams so the dashboard can see grade pressure early.</p>
-                )}
-              </div>
-            </article>
           </div>
+
+          {dashboardLayout === "cockpit" ? (
+            <div className="dash-3col">
+              <div className="design-stack">
+                {renderTodayCard()}
+                {renderGardenCard()}
+              </div>
+              <div className="design-stack">
+                {renderUrgentTasks(4)}
+                {renderWeeklyChart()}
+              </div>
+              <div className="design-stack">
+                {renderCourseRadar()}
+                {renderExamRunway()}
+              </div>
+            </div>
+          ) : null}
+
+          {dashboardLayout === "focus" ? (
+            <div className="dash-focus-claude">
+              {renderTodayCard()}
+              {renderGardenCard("hero-garden")}
+              <div className="dash-focus-support">
+                {renderUrgentTasks(4)}
+                {renderWeeklyChart("short-weekly")}
+                {renderExamRunway()}
+              </div>
+            </div>
+          ) : null}
+
+          {dashboardLayout === "analyst" ? (
+            <div className="design-stack">
+              <div className="dash-stats-grid">
+                {renderStatCard("Focused today", formatMinutes(getTodayMinutes(state)), "Logged study time")}
+                {renderStatCard("This week", formatMinutes(weeklyTotalMinutes), "Last 7 days")}
+                {renderStatCard("Day streak", getStreakDays(state), "Consecutive active days", "warm")}
+                {renderStatCard("Open tasks", openTaskCount, "Still in progress")}
+              </div>
+              <div className="dash-analyst-grid">
+                <div className="design-stack">
+                  {renderWeeklyChart("tall-weekly")}
+                  {renderUrgentTasks(4)}
+                </div>
+                <div className="design-stack">
+                  {renderCourseRadar()}
+                  {renderExamRunway()}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {dashboardLayout === "custom" ? renderCustomDashboard() : null}
         </section>
       ) : null}
 
@@ -960,8 +1458,12 @@ function App() {
                             className="ghost-button small-button"
                             onClick={() => {
                               const firstCourse = courses[0];
+                              if (!firstCourse) {
+                                setMessage("Add a course before adding an exam.");
+                                return;
+                              }
                               setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
-                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: firstCourse?.id ?? "" }));
+                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: firstCourse.id }));
                               setAddingExamSemesterId((current) => (current === semester.id ? null : semester.id));
                             }}
                           >
@@ -1427,55 +1929,202 @@ function App() {
               <span className="section-note">Keep the default view simple. Add course, task, and reflection only when you need it.</span>
             </div>
 
-            <div className="timer-basics roomy-top">
-              <label className="field timer-preset-select">
-                <span>Timer setting</span>
-                <select
-                  value={hasKnownTimerPreset ? state.timer.presetLabel : "custom"}
-                  onChange={(event) => {
-                    const preset = focusPresets.find((item) => item.label === event.target.value);
-                    if (preset) applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode);
-                  }}
+            <div className="timer-board roomy-top">
+              <div className="timer-preset-cards">
+                {focusPresets.map((preset) => (
+                  <button
+                    key={preset.label}
+                    type="button"
+                    className={`timer-preset-card ${state.timer.presetLabel === preset.label ? "active" : ""}`}
+                    disabled={state.timer.running}
+                    onClick={() => applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode)}
+                  >
+                    <strong>{preset.label.replace(" 25/5", "").replace(" 52/17", "").replace(" 90/20", "")}</strong>
+                    <span>{preset.mode === "exam" ? `${preset.study} min` : `${preset.study} / ${preset.breakMinutes}`}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className={`timer-preset-card ${isCustomTimerPreset ? "active" : ""}`}
                   disabled={state.timer.running}
+                  onClick={() =>
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        presetLabel: "Custom",
+                        mode: current.timer.mode === "exam" ? "exam" : "focus",
+                        remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
+                      },
+                    }))
+                  }
                 >
-                  {!hasKnownTimerPreset ? <option value="custom">Custom</option> : null}
-                  {focusPresets.map((preset) => (
-                    <option key={preset.label} value={preset.label}>
-                      {preset.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <div className="timer-setting-summary">
-                <strong>{state.timer.mode === "exam" ? `${state.timer.examMinutes} min exam prep` : `${state.timer.studyMinutes} min focus`}</strong>
-                <span>{state.timer.mode === "exam" ? "No break, logged as exam prep" : `${state.timer.breakMinutes} min break after completion`}</span>
+                  <strong>Custom</strong>
+                  <span>Custom</span>
+                </button>
               </div>
-            </div>
 
-            <div className="timer-face spacious-face">
-              <p>{state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</p>
-              <strong>{formatClock(state.timer.remainingSeconds)}</strong>
-              <span>{timerCourse?.name ?? "General focus"}</span>
-            </div>
+              <div className="timer-link-strip">
+                <label className="field compact-field">
+                  <span>Semester</span>
+                  <select
+                    value={state.timer.semesterId ?? ""}
+                    onChange={(event) => {
+                      const semesterId = event.target.value || null;
+                      const firstCourse = state.courses.find((course) => course.semesterId === semesterId);
+                      setState((current) => ({
+                        ...current,
+                        timer: { ...current.timer, semesterId, courseId: firstCourse?.id ?? null, taskId: null },
+                      }));
+                    }}
+                  >
+                    <option value="">Any semester</option>
+                    {state.semesters.map((semester) => (
+                      <option key={semester.id} value={semester.id}>{semester.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field compact-field">
+                  <span>Course</span>
+                  <select
+                    value={state.timer.courseId ?? ""}
+                    onChange={(event) => {
+                      const courseId = event.target.value || null;
+                      const course = courseId ? courseLookup.get(courseId) : null;
+                      setState((current) => ({
+                        ...current,
+                        timer: { ...current.timer, semesterId: course?.semesterId ?? current.timer.semesterId, courseId, taskId: null },
+                      }));
+                    }}
+                  >
+                    <option value="">No linked course</option>
+                    {timerCourses.map((course) => (
+                      <option key={course.id} value={course.id}>{course.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field compact-field task-switch-field">
+                  <span>Task</span>
+                  <select
+                    value={state.timer.taskId ?? ""}
+                    onChange={(event) => {
+                      const taskId = event.target.value || null;
+                      const task = taskId ? taskLookup.get(taskId) : null;
+                      setState((current) => ({
+                        ...current,
+                        timer: {
+                          ...current.timer,
+                          semesterId: task?.semesterId ?? current.timer.semesterId,
+                          courseId: task?.courseId ?? current.timer.courseId,
+                          taskId,
+                          goal: task ? task.title : current.timer.goal,
+                        },
+                      }));
+                    }}
+                  >
+                    <option value="">No linked task</option>
+                    {timerSelectableTasks.map((task) => (
+                      <option key={task.id} value={task.id}>{task.title}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
 
-            <div className="control-row roomy-top">
-              <button type="button" onClick={startTimer} disabled={state.timer.running}>
-                Start
-              </button>
-              <button type="button" onClick={pauseTimer} disabled={state.timer.phase === "idle"}>
-                {state.timer.running ? "Pause" : "Resume"}
-              </button>
-              <button type="button" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
-                Save session now
-              </button>
-              <button type="button" className="ghost-button" onClick={resetTimer}>
-                Reset
-              </button>
+              {isCustomTimerPreset ? (
+                <div className="timer-custom-row">
+                  <label className="field compact-field">
+                    <span>Focus minutes</span>
+                    <input
+                      type="number"
+                      min="1"
+                      value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
+                      disabled={state.timer.running}
+                      onChange={(event) => {
+                        const next = Number(event.target.value) || 1;
+                        setState((current) => ({
+                          ...current,
+                          timer: {
+                            ...current.timer,
+                            studyMinutes: next,
+                            examMinutes: next,
+                            remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
+                            presetLabel: "Custom",
+                          },
+                        }));
+                      }}
+                    />
+                  </label>
+                  <label className="field compact-field">
+                    <span>Break minutes</span>
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={state.timer.running || state.timer.mode === "exam"}
+                      value={state.timer.breakMinutes}
+                      onChange={(event) =>
+                        setState((current) => ({
+                          ...current,
+                          timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+              ) : null}
+
+              <div className="timer-face spacious-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg` } as CSSProperties}>
+                <div className="timer-phase-row">
+                  <span className="timer-phase-pill">{state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
+                  <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
+                  <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
+                </div>
+                <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+                <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
+              </div>
+
+              <div className="timer-action-row roomy-top">
+                <button
+                  type="button"
+                  className="timer-primary-action"
+                  onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}
+                >
+                  <span>▷</span>
+                  {state.timer.phase === "idle" ? "Start" : state.timer.running ? "Pause" : "Resume"}
+                </button>
+                <button type="button" className="timer-save-action" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
+                  ▣ Save
+                </button>
+                <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
+                  ↻
+                </button>
+              </div>
+
+              {state.timer.mode !== "exam" ? (
+                <button
+                  type="button"
+                  className="timer-break-switch"
+                  onClick={() => {
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        running: false,
+                        phase: current.timer.phase === "break" ? "study" : "break",
+                        remainingSeconds: (current.timer.phase === "break" ? current.timer.studyMinutes : current.timer.breakMinutes) * 60,
+                        endsAt: null,
+                      },
+                    }));
+                  }}
+                >
+                  Switch to {state.timer.phase === "break" ? "study" : "break"} →
+                </button>
+              ) : null}
             </div>
 
             <button type="button" className="timer-advanced-toggle ghost-button" onClick={() => setTimerAdvancedOpen((current) => !current)}>
-              {timerAdvancedOpen ? "Hide advanced settings" : "Advanced settings"}
+              <span>✎ Session log & links</span>
+              <em>optional</em>
+              <strong>{timerAdvancedOpen ? "⌄" : "›"}</strong>
             </button>
 
             {timerAdvancedOpen ? (
@@ -1657,8 +2306,9 @@ function App() {
             <div className="section-head">
               <div>
                 <p className="eyebrow">Recent Sessions</p>
-                <h2>What you actually learned</h2>
+                <h2>Your focus log</h2>
               </div>
+              <span className="design-chip">{state.sessions.length}</span>
             </div>
 
             <div className="stack-list compact">

@@ -1,0 +1,210 @@
+/* ============================================================
+   Study Tracker — Design Tokens
+   Dark-first, editorial warmth + crisp modern
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* type families */
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* radii */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 13px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* spacing scale */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 56px;
+
+  /* accent (shared across themes) — soft blue */
+  --accent: oklch(0.70 0.10 245);
+  --accent-strong: oklch(0.64 0.13 245);
+  --accent-soft: oklch(0.70 0.10 245 / 0.14);
+  --accent-line: oklch(0.70 0.10 245 / 0.30);
+
+  /* warm urgency — amber */
+  --warn: oklch(0.80 0.13 70);
+  --warn-soft: oklch(0.80 0.13 70 / 0.15);
+
+  /* danger — soft coral */
+  --danger: oklch(0.68 0.16 22);
+  --danger-soft: oklch(0.68 0.16 22 / 0.14);
+
+  /* garden — sage */
+  --garden: oklch(0.76 0.07 150);
+  --garden-deep: oklch(0.64 0.08 152);
+  --garden-soft: oklch(0.76 0.07 150 / 0.16);
+
+  /* health states */
+  --ok: oklch(0.74 0.10 155);
+  --steady: oklch(0.78 0.11 215);
+  --watch: oklch(0.80 0.13 70);
+  --critical: oklch(0.66 0.17 22);
+}
+
+/* ---------------- DARK (default) ---------------- */
+:root, [data-theme="dark"] {
+  --bg: oklch(0.19 0.018 252);
+  --bg-grad-1: oklch(0.21 0.022 258);
+  --bg-grad-2: oklch(0.17 0.016 248);
+
+  --surface: oklch(0.235 0.018 252);
+  --surface-2: oklch(0.27 0.020 252);
+  --surface-raised: oklch(0.255 0.020 254);
+  --surface-inset: oklch(0.205 0.016 250);
+  --hover: oklch(0.30 0.022 254);
+
+  --line: oklch(0.36 0.02 252 / 0.55);
+  --line-soft: oklch(0.36 0.02 252 / 0.30);
+  --line-strong: oklch(0.45 0.02 252 / 0.7);
+
+  --ink: oklch(0.96 0.008 250);
+  --ink-2: oklch(0.82 0.012 250);
+  --ink-3: oklch(0.66 0.014 250);
+  --ink-4: oklch(0.54 0.014 250);
+
+  --shadow-sm: 0 1px 2px oklch(0.10 0.02 250 / 0.4);
+  --shadow-md: 0 6px 22px oklch(0.08 0.02 250 / 0.45);
+  --shadow-lg: 0 18px 50px oklch(0.06 0.02 250 / 0.55);
+
+  --ring-track: oklch(0.32 0.02 252);
+  --garden-sky: oklch(0.24 0.02 250);
+  --garden-soil: oklch(0.30 0.025 60);
+  color-scheme: dark;
+}
+
+/* ---------------- LIGHT ---------------- */
+[data-theme="light"] {
+  --bg: oklch(0.975 0.006 95);
+  --bg-grad-1: oklch(0.985 0.008 95);
+  --bg-grad-2: oklch(0.955 0.008 90);
+
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0.006 95);
+  --surface-raised: oklch(1 0 0);
+  --surface-inset: oklch(0.965 0.008 92);
+  --hover: oklch(0.94 0.010 92);
+
+  --line: oklch(0.30 0.01 260 / 0.14);
+  --line-soft: oklch(0.30 0.01 260 / 0.08);
+  --line-strong: oklch(0.30 0.01 260 / 0.24);
+
+  --ink: oklch(0.25 0.02 258);
+  --ink-2: oklch(0.38 0.02 258);
+  --ink-3: oklch(0.52 0.018 258);
+  --ink-4: oklch(0.62 0.016 258);
+
+  --accent: oklch(0.58 0.13 248);
+  --accent-strong: oklch(0.52 0.15 248);
+  --accent-soft: oklch(0.58 0.13 248 / 0.10);
+  --accent-line: oklch(0.58 0.13 248 / 0.28);
+
+  --warn: oklch(0.68 0.14 62);
+  --warn-soft: oklch(0.68 0.14 62 / 0.13);
+  --danger: oklch(0.58 0.18 24);
+  --danger-soft: oklch(0.58 0.18 24 / 0.10);
+  --garden: oklch(0.60 0.10 150);
+  --garden-deep: oklch(0.50 0.10 152);
+  --garden-soft: oklch(0.60 0.10 150 / 0.12);
+
+  --shadow-sm: 0 1px 2px oklch(0.5 0.02 250 / 0.10);
+  --shadow-md: 0 8px 24px oklch(0.5 0.03 250 / 0.10);
+  --shadow-lg: 0 20px 50px oklch(0.5 0.04 250 / 0.14);
+
+  --ring-track: oklch(0.90 0.01 250);
+  --garden-sky: oklch(0.93 0.02 220);
+  --garden-soil: oklch(0.80 0.03 60);
+  color-scheme: light;
+}
+
+/* ============================================================
+   Base
+   ============================================================ */
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(1200px 700px at 80% -10%, var(--bg-grad-1), transparent 60%),
+    radial-gradient(900px 600px at 0% 110%, var(--bg-grad-2), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  letter-spacing: 0.005em;
+}
+
+#root { min-height: 100vh; }
+
+::selection { background: var(--accent-soft); color: var(--ink); }
+
+/* scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+*::-webkit-scrollbar-thumb:hover { background: var(--ink-4); background-clip: content-box; }
+
+/* ============================================================
+   Reusable utility primitives
+   ============================================================ */
+.serif { font-family: var(--font-serif); }
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum" 1; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.card-raised {
+  background: linear-gradient(180deg, var(--surface-raised), var(--surface));
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.hairline { height: 1px; background: var(--line-soft); border: 0; margin: 0; }
+
+/* focus visibility */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-xs);
+}
+
+/* buttons base reset */
+button { font-family: inherit; cursor: pointer; }
+
+/* subtle entrance */
+@keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes growUp { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes popIn { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+.fade-up { animation: fadeUp 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
