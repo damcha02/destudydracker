@@ -1303,10 +1303,24 @@ button[type="submit"],
   border: 1px solid var(--line-soft);
   border-radius: var(--r-lg);
   background: var(--surface-inset);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.theme-choice-card:hover {
+  background: var(--hover);
+  border-color: var(--line);
 }
 
 .theme-choice-card.active {
   border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.theme-choice-card.active:hover {
   background: var(--accent-soft);
 }
 

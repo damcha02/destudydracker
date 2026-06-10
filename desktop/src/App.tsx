@@ -39,7 +39,9 @@ const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
+const PALETTE_STORAGE_KEY = "study-tracker-palette";
 
+type ThemePalette = "default" | "parchment" | "cosmic" | "grove";
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
 type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
 type DashboardWidgetWidth = "full" | "half" | "third";
@@ -340,6 +342,7 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
 function App() {
   const [state, setState] = useState<AppState>(loadAppState);
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
+  const [palette, setPalette] = useState<ThemePalette>(() => (localStorage.getItem(PALETTE_STORAGE_KEY) || "default") as ThemePalette);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
   const [dashboardEditing, setDashboardEditing] = useState(false);
@@ -410,6 +413,15 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("study-tracker-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (palette === "default") {
+      delete document.documentElement.dataset.palette;
+    } else {
+      document.documentElement.dataset.palette = palette;
+    }
+    localStorage.setItem(PALETTE_STORAGE_KEY, palette);
+  }, [palette]);
 
   useEffect(() => {
     localStorage.setItem(DASHBOARD_LAYOUT_KEY, dashboardLayout);
@@ -701,16 +713,16 @@ function App() {
     [calendarToday, state.calendarEntries, taskLookup],
   );
 
-  const gardenPlants = useMemo(
-    () => state.sessions.slice(0, 16).map((session, index) => ({
-      id: session.id,
-      left: 7 + (index % 4) * 22 + (index % 2) * 4,
-      height: 58 + (session.minutes % 70),
-      scale: 0.85 + session.confidence / 10,
-      bloom: session.kind === "exam" ? "var(--danger)" : courseLookup.get(session.courseId ?? "")?.color ?? "var(--accent)",
-    })),
-    [courseLookup, state.sessions],
-  );
+  const gardenCoursePlants = useMemo(() => {
+    const gardenStageThresholds = [0, 30, 90, 210, 420, 720];
+    const stage = gardenStageThresholds.filter((t) => weeklyTotalMinutes >= t).length - 1;
+    const courses = state.courses
+      .map((course) => ({ course, minutes: getCourseMinutes(state, course.id) }))
+      .sort((a, b) => b.minutes - a.minutes)
+      .slice(0, 9);
+    const maxMinutes = Math.max(60, ...courses.map((c) => c.minutes));
+    return { stage, courses, maxMinutes };
+  }, [state, weeklyTotalMinutes]);
 
   function setActiveTab(activeTab: TabKey) {
     setState((current) => ({ ...current, activeTab }));
@@ -1491,6 +1503,9 @@ function App() {
   }
 
   function renderGardenCard(heightClass = "") {
+    const gardenStageNames = ["Dormant", "Sprouting", "Growing", "Leafy", "Blooming", "Flourishing"];
+    const { stage, courses, maxMinutes } = gardenCoursePlants;
+
     return (
       <article className={`panel-card design-card design-garden-card ${heightClass}`}>
         <div className="section-head compact-headline">
@@ -1499,23 +1514,104 @@ function App() {
             <h3>Growth from focus</h3>
           </div>
         </div>
-        <div className="garden-stage compact-garden" aria-hidden="true">
-          <div className="garden-caption">
-            <strong>Flourishing</strong>
-            <span>{formatMinutes(weeklyTotalMinutes)} this week</span>
+        <div className="garden-stage" aria-hidden="true">
+          {/* stage progress dots */}
+          <div style={{ position: "absolute", top: 12, left: 14, display: "flex", alignItems: "center", gap: 4, zIndex: 2 }}>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <span
+                key={i}
+                style={{
+                  display: "inline-block",
+                  width: 5, height: 5, borderRadius: 99,
+                  background: i < stage ? "var(--garden)" : "var(--line-strong)",
+                  transition: "background 0.4s",
+                }}
+              />
+            ))}
           </div>
-          {gardenPlants.map((plant) => (
+
+          {/* course plants */}
+          {courses.length ? (
             <div
-              key={plant.id}
-              className="garden-plant"
               style={{
-                left: `${plant.left}%`,
-                height: `${plant.height}px`,
-                transform: `translateX(-50%) scale(${plant.scale})`,
-                "--bloom": plant.bloom,
-              } as CSSProperties}
-            />
-          ))}
+                position: "absolute", left: 0, right: 0, bottom: 14,
+                display: "flex", alignItems: "flex-end", justifyContent: "space-around",
+                padding: "0 16px", gap: 8,
+              }}
+            >
+              {courses.map(({ course, minutes }, i) => {
+                const grow = Math.max(0.12, minutes / maxMinutes);
+                const plantH = Math.round(160 * grow);
+                const leaves = Math.min(4, Math.max(1, Math.round(grow * 4)));
+                return (
+                  <div
+                    key={course.id}
+                    title={`${course.name} · ${formatMinutes(minutes)}`}
+                    style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative", flex: 1, minWidth: 0 }}
+                  >
+                    <div
+                      style={{
+                        position: "relative", width: 4, height: plantH,
+                        transformOrigin: "bottom",
+                        animation: `growUp 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) ${i * 0.08}s both`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          position: "absolute", left: 1, top: 0, bottom: 0, width: 2.5,
+                          background: `linear-gradient(180deg, ${course.color}, var(--garden-deep))`,
+                          borderRadius: 2,
+                        }}
+                      />
+                      {Array.from({ length: leaves }).map((_, li) => {
+                        const leafTop = ((li + 0.6) / (leaves + 0.4)) * plantH;
+                        const side = li % 2 === 0 ? -1 : 1;
+                        return (
+                          <span
+                            key={li}
+                            style={{
+                              position: "absolute", top: leafTop,
+                              left: side < 0 ? -8 : 4,
+                              width: 9, height: 6,
+                              background: course.color, opacity: 0.85,
+                              borderRadius: side < 0 ? "60% 10% 60% 10%" : "10% 60% 10% 60%",
+                              transform: `rotate(${side * 18}deg)`,
+                              display: "block",
+                            }}
+                          />
+                        );
+                      })}
+                      {grow > 0.55 && (
+                        <span
+                          style={{
+                            position: "absolute", top: -5, left: -2.5,
+                            width: 9, height: 9, borderRadius: 99,
+                            background: course.color,
+                            boxShadow: `0 0 8px ${course.color}66`,
+                            display: "block",
+                          }}
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="empty-copy compact-empty" style={{ position: "absolute", bottom: 28, left: 0, right: 0, textAlign: "center", zIndex: 2 }}>
+              Add courses and start studying to grow your garden.
+            </p>
+          )}
+
+          {/* stage name + weekly time */}
+          <div style={{ position: "absolute", bottom: 20, left: 14, display: "flex", alignItems: "baseline", gap: 7, zIndex: 2 }}>
+            <span className="serif" style={{ fontSize: 15, color: "var(--ink)", fontStyle: "italic" }}>
+              {gardenStageNames[stage]}
+            </span>
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)" }}>
+              {formatMinutes(weeklyTotalMinutes)} this week
+            </span>
+          </div>
         </div>
       </article>
     );
@@ -1887,13 +1983,30 @@ function App() {
 
           {activeMenuPanel === "theme" ? (
             <div className="settings-panel-body">
-              <div className="theme-choice-card active">
-                <div>
-                  <strong>Normal theme</strong>
-                  <span>The default Study Tracker look.</span>
-                </div>
-                <span className="design-chip">Active</span>
-              </div>
+              {(
+                [
+                  { id: "default", name: "Default", desc: "Blue accents on deep blue-grey.", swatch: "oklch(0.70 0.10 245)" },
+                  { id: "parchment", name: "Parchment", desc: "Warm sepia & ink, like a leather-bound notebook.", swatch: "oklch(0.76 0.11 66)" },
+                  { id: "cosmic", name: "Cosmic", desc: "Deep indigo & violet with a luminous orchid glow.", swatch: "oklch(0.72 0.14 300)" },
+                  { id: "grove", name: "Grove", desc: "Forest greens & honey light, grounded woodland calm.", swatch: "oklch(0.80 0.12 92)" },
+                ] as { id: ThemePalette; name: string; desc: string; swatch: string }[]
+              ).map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
+                  onClick={() => setPalette(p.id)}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ width: 14, height: 14, borderRadius: "50%", background: p.swatch, flexShrink: 0, display: "inline-block", boxShadow: "0 0 0 2px var(--line-strong)" }} />
+                    <div>
+                      <strong>{p.name}</strong>
+                      <span>{p.desc}</span>
+                    </div>
+                  </div>
+                  {palette === p.id ? <span className="design-chip">Active</span> : null}
+                </button>
+              ))}
               <div className="theme-mode-row" aria-label="Theme mode">
                 {(["light", "dark"] as const).map((mode) => (
                   <button
