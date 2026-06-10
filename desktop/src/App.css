@@ -4131,6 +4131,82 @@ input[type="color"] {
   line-height: 1.35;
 }
 
+/* Planned Today stays compact so the header note remains visible. */
+.design-priority-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.design-priority-card .section-head {
+  margin-bottom: 2px;
+}
+
+.design-priority-card .section-note {
+  margin-top: 3px;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.design-priority-card .design-task-list {
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+  padding-right: 3px;
+}
+
+.design-priority-card .design-task-item {
+  gap: 8px;
+  padding: 7px 9px;
+  align-items: center;
+}
+
+.design-priority-card .design-task-main {
+  gap: 8px;
+}
+
+.design-priority-card .design-task-copy {
+  gap: 3px;
+}
+
+.design-priority-card .design-task-title-line {
+  gap: 6px;
+}
+
+.design-priority-card .design-task-title-line strong {
+  font-size: 0.8rem;
+}
+
+.design-priority-card .priority-chip {
+  min-height: 19px;
+  padding: 2px 6px;
+  font-size: 0.56rem;
+}
+
+.design-priority-card .design-task-meta {
+  gap: 6px;
+}
+
+.design-priority-card .design-task-meta span {
+  font-size: 0.58rem;
+}
+
+.design-priority-card .design-task-side {
+  gap: 5px;
+}
+
+.design-priority-card .dashboard-task-check {
+  width: 15px;
+  height: 15px;
+}
+
+.design-priority-card .small-button {
+  min-height: 28px;
+  padding: 6px 9px;
+  font-size: 0.72rem;
+}
+
 @media (max-width: 1180px) {
   .timer-grid {
     grid-template-columns: 1fr;

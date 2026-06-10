@@ -114,49 +114,81 @@ function getExamPressure(exams: Exam[]) {
   }, 0);
 }
 
-export function getCourseHealth(state: AppState, course: Course) {
-  const tasks = getCourseTasks(state, course.id);
-  const exams = getCourseExams(state, course.id);
-  const totalUnits = tasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
-  const finishedUnits = tasks.reduce((sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits), 0);
-  const progressScore = totalUnits ? (finishedUnits / totalUnits) * 50 : 38;
-  const overduePenalty = getOverdueTasks(tasks).length * 12;
-  const dueSoonPenalty = getDueSoonTasks(tasks).length * 4;
-  const examPenalty = getExamPressure(exams);
-  const score = clamp(Math.round(40 + progressScore - overduePenalty - dueSoonPenalty - examPenalty), 0, 100);
+function getNearestDeadline(tasks: Task[]) {
+  return tasks
+    .filter((task) => task.dueDate && getRemainingUnits(task) > 0)
+    .sort((a, b) => daysUntil(a.dueDate ?? "") - daysUntil(b.dueDate ?? ""))[0]?.dueDate ?? null;
+}
 
+function getUnitsPerDay(tasks: Task[]) {
+  const remainingUnits = tasks.reduce((sum, task) => sum + getRemainingUnits(task), 0);
+  if (remainingUnits <= 0) return 0;
+
+  const nearestDeadline = getNearestDeadline(tasks);
+  if (!nearestDeadline) return remainingUnits;
+
+  const daysLeft = daysUntil(nearestDeadline);
+  return daysLeft <= 0 ? remainingUnits : remainingUnits / daysLeft;
+}
+
+function getPacePenalty(unitsPerDay: number) {
+  return clamp((unitsPerDay - 1) * 10, 0, 45);
+}
+
+function getHealthLabel(score: number) {
   let label = "Strong";
   if (score < 75) label = "Steady";
   if (score < 55) label = "Watch";
   if (score < 35) label = "Critical";
+  return label;
+}
+
+function calculateWorkloadHealth(tasks: Task[], exams: Exam[]) {
+  const totalUnits = tasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
+  const finishedUnits = tasks.reduce((sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits), 0);
+
+  if (!totalUnits) {
+    return { score: 0, label: "Preparing", overdue: 0, dueSoon: 0, unitsPerDay: 0 };
+  }
+
+  const progressPercent = (finishedUnits / totalUnits) * 100;
+  const unitsPerDay = getUnitsPerDay(tasks);
+  const manageabilityScore = 100 - getPacePenalty(unitsPerDay);
+  const overdueTasks = getOverdueTasks(tasks);
+  const dueSoonTasks = getDueSoonTasks(tasks);
+  const overduePenalty = overdueTasks.length * 12;
+  const dueSoonPenalty = dueSoonTasks.length * 2;
+  const examPenalty = getExamPressure(exams);
+  const score = clamp(
+    Math.round(progressPercent * 0.65 + manageabilityScore * 0.35 - overduePenalty - dueSoonPenalty - examPenalty),
+    0,
+    100,
+  );
 
   return {
     score,
-    label,
-    overdue: getOverdueTasks(tasks).length,
-    dueSoon: getDueSoonTasks(tasks).length,
+    label: getHealthLabel(score),
+    overdue: overdueTasks.length,
+    dueSoon: dueSoonTasks.length,
+    unitsPerDay,
   };
 }
 
-export function getSemesterHealth(state: AppState, semester: Semester) {
-  const courses = getSemesterCourses(state, semester.id);
-  if (!courses.length) {
-    return { score: 60, label: "Preparing" };
-  }
+export function getCourseHealth(state: AppState, course: Course) {
+  const tasks = getCourseTasks(state, course.id);
+  const exams = getCourseExams(state, course.id);
+  return calculateWorkloadHealth(tasks, exams);
+}
 
-  const scores = courses.map((course) => getCourseHealth(state, course).score);
-  const score = Math.round(scores.reduce((sum, item) => sum + item, 0) / scores.length);
-  let label = "Strong";
-  if (score < 75) label = "Steady";
-  if (score < 55) label = "Watch";
-  if (score < 35) label = "Critical";
-  return { score, label };
+export function getSemesterHealth(state: AppState, semester: Semester) {
+  const tasks = getSemesterTasks(state, semester.id);
+  const exams = state.exams.filter((exam) => exam.semesterId === semester.id);
+  return calculateWorkloadHealth(tasks, exams);
 }
 
 export function getOverallHealth(state: AppState) {
-  if (!state.courses.length) return 68;
-  const scores = state.courses.map((course) => getCourseHealth(state, course).score);
-  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+  if (!state.tasks.length) return 0;
+  return calculateWorkloadHealth(state.tasks, state.exams).score;
 }
 
 export function getWeeklyActivity(sessions: StudySession[]) {
