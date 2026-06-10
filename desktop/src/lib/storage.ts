@@ -1,4 +1,4 @@
-import type { AppState, Course, Exam, Semester, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 
@@ -37,10 +37,13 @@ export const defaultState: AppState = {
   courses: [],
   tasks: [],
   exams: [],
+  calendarEntries: [],
   sessions: [],
   exports: [],
   settings: {
     accent: "#8fb4ff",
+    userName: "",
+    themeFamily: "normal",
     vaultPath: null,
     vaultName: "StudyTrackerVault",
     anthropicApiKey: "",
@@ -137,6 +140,27 @@ function migrateSemesters(parsed: Record<string, unknown>) {
   };
 }
 
+function normalizeCalendarEntries(entries: unknown): CalendarEntry[] {
+  if (!Array.isArray(entries)) return [];
+
+  return entries.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Partial<CalendarEntry> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.taskId !== "string" || typeof record.date !== "string") return [];
+    const unitAmount = record.unitAmount === 0.5 || record.unitAmount === 0.25 ? record.unitAmount : 1;
+
+    return [{
+      id: record.id,
+      taskId: record.taskId,
+      date: record.date,
+      unitAmount,
+      completed: Boolean(record.completed),
+      completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+}
+
 export function loadAppState(): AppState {
   const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("study-tracker-desktop-v1");
   if (!raw) return defaultState;
@@ -157,6 +181,7 @@ export function loadAppState(): AppState {
         : [],
       tasks: Array.isArray(migrated.tasks) ? migrated.tasks : [],
       exams: Array.isArray(migrated.exams) ? migrated.exams : [],
+      calendarEntries: normalizeCalendarEntries(parsed.calendarEntries),
       settings: {
         ...defaultState.settings,
         ...parsed.settings,

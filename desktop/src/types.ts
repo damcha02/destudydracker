@@ -42,6 +42,16 @@ export interface Exam {
   preparedness: number;
 }
 
+export interface CalendarEntry {
+  id: string;
+  taskId: string;
+  date: string;
+  unitAmount: 1 | 0.5 | 0.25;
+  completed: boolean;
+  completedAt: string | null;
+  createdAt: string;
+}
+
 export interface StudySession {
   id: string;
   semesterId: string | null;
@@ -68,6 +78,8 @@ export interface VaultExport {
 
 export interface Settings {
   accent: string;
+  userName: string;
+  themeFamily: "normal";
   vaultPath: string | null;
   vaultName: string;
   anthropicApiKey: string;
@@ -100,6 +112,7 @@ export interface AppState {
   courses: Course[];
   tasks: Task[];
   exams: Exam[];
+  calendarEntries: CalendarEntry[];
   sessions: StudySession[];
   exports: VaultExport[];
   settings: Settings;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent } from "react";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -20,14 +20,13 @@ import {
   getStreakDays,
   getTaskProgress,
   getTodayMinutes,
-  getTopPendingTasks,
   getUpcomingExams,
   getWeeklyActivity,
   isoDate,
 } from "./lib/metrics";
 import { createVault, exportDailyNote, isTauriApp, pickVaultParentDirectory } from "./lib/obsidian";
-import { defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
+import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
 const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
@@ -49,6 +48,17 @@ type DashboardWidgetLayout = {
   id: DashboardWidgetId;
   width: DashboardWidgetWidth;
 };
+
+type CalendarView = "month" | "week";
+type MenuPanel = "theme" | "personal" | "settings" | null;
+
+type CalendarDay = {
+  date: Date;
+  iso: string;
+  inCurrentMonth: boolean;
+};
+
+type CalendarUnitAmount = CalendarEntry["unitAmount"];
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
   "today",
@@ -160,6 +170,128 @@ function toggleId(list: string[], id: string) {
   return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
 }
 
+function localIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseCalendarDate(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function addCalendarDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function getMonday(date: Date) {
+  const start = new Date(date);
+  const day = start.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  start.setDate(start.getDate() + diff);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function buildMonthDays(cursor: Date): CalendarDay[] {
+  const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+  const gridStart = getMonday(monthStart);
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = addCalendarDays(gridStart, index);
+    return {
+      date,
+      iso: localIsoDate(date),
+      inCurrentMonth: date.getMonth() === cursor.getMonth(),
+    };
+  });
+}
+
+function buildWeekDays(cursor: Date): CalendarDay[] {
+  const weekStart = getMonday(cursor);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = addCalendarDays(weekStart, index);
+    return {
+      date,
+      iso: localIsoDate(date),
+      inCurrentMonth: true,
+    };
+  });
+}
+
+function formatCalendarTitle(cursor: Date, view: CalendarView) {
+  if (view === "month") {
+    return new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(cursor);
+  }
+
+  const weekStart = getMonday(cursor);
+  const weekEnd = addCalendarDays(weekStart, 6);
+  const sameYear = weekStart.getFullYear() === weekEnd.getFullYear();
+  const startLabel = new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    year: sameYear ? undefined : "numeric",
+  }).format(weekStart);
+  const endLabel = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(weekEnd);
+  return `${startLabel} - ${endLabel}`;
+}
+
+function carryOverCalendarEntries(state: AppState, today = localIsoDate()): AppState {
+  let changed = false;
+  const taskLookup = new Map(state.tasks.map((task) => [task.id, task]));
+  const calendarEntries = state.calendarEntries.map((entry) => {
+    if (entry.completed || entry.date >= today) return entry;
+
+    const task = taskLookup.get(entry.taskId);
+    if (!task) return entry;
+
+    const nextDate = task.dueDate && task.dueDate < today ? task.dueDate : today;
+    if (entry.date === nextDate) return entry;
+    changed = true;
+    return { ...entry, date: nextDate };
+  });
+
+  return changed ? { ...state, calendarEntries } : state;
+}
+
+function getCalendarEntryAmount(entry: CalendarEntry) {
+  return entry.unitAmount ?? 1;
+}
+
+function getCompletedCalendarWholeUnits(entries: CalendarEntry[], taskId: string) {
+  const amount = entries.reduce((sum, entry) => {
+    if (!entry.completed || entry.taskId !== taskId) return sum;
+    return sum + getCalendarEntryAmount(entry);
+  }, 0);
+  return Math.floor(amount + 0.0001);
+}
+
+function formatUnitAmount(amount: number) {
+  if (amount === 1) return "1 unit";
+  if (amount === 0.5) return "1/2 unit";
+  if (amount === 0.25) return "1/4 unit";
+  return `${Number.isInteger(amount) ? amount : amount.toFixed(2)} units`;
+}
+
+function formatUnitsLeft(amount: number) {
+  const safeAmount = Math.max(0, amount);
+  if (Number.isInteger(safeAmount)) return safeAmount.toString();
+  return safeAmount.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function getTimeGreeting(date = new Date()) {
+  const hour = date.getHours();
+  if (hour >= 5 && hour < 11) return "Good morning";
+  if (hour >= 11 && hour < 13) return "Good day";
+  if (hour >= 13 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 22) return "Good evening";
+  return "Good night";
+}
+
 function getTimerMinutes(timer: TimerState) {
   if (!timer.startedAt || (timer.phase !== "study" && timer.phase !== "exam")) return 0;
 
@@ -213,6 +345,9 @@ function App() {
   const [dashboardEditing, setDashboardEditing] = useState(false);
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
   const [semesterName, setSemesterName] = useState("");
   const [courseDraft, setCourseDraft] = useState<CourseDraft>({
@@ -247,10 +382,29 @@ function App() {
   const [addingExamSemesterId, setAddingExamSemesterId] = useState<string | null>(null);
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
+  const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
+  const [calendarToday, setCalendarToday] = useState(localIsoDate);
+  const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
 
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useEffect(() => {
+    setState((current) => carryOverCalendarEntries(current, calendarToday));
+  }, [calendarToday]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const nextToday = localIsoDate();
+      setCalendarToday((current) => (current === nextToday ? current : nextToday));
+    }, 60000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -429,13 +583,14 @@ function App() {
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions), [state.sessions]);
-  const topTasks = useMemo(() => getTopPendingTasks(state), [state]);
   const upcomingExams = useMemo(() => getUpcomingExams(state), [state]);
   const overallHealth = useMemo(() => getOverallHealth(state), [state]);
   const notePreview = useMemo(() => buildDailyNoteMarkdown(state), [state]);
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
+  const greetingName = state.settings.userName.trim();
+  const dashboardGreeting = `${getTimeGreeting()}${greetingName ? `, ${greetingName}` : ""}`;
   const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const maxWeeklyMinutes = Math.max(30, ...weeklyActivity.map((entry) => entry.minutes));
@@ -461,6 +616,91 @@ function App() {
     : Math.max(1, (state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes) * 60);
   const timerProgress = clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
 
+  const calendarDays = useMemo(
+    () => (calendarView === "month" ? buildMonthDays(calendarCursorDate) : buildWeekDays(calendarCursorDate)),
+    [calendarCursorDate, calendarView],
+  );
+  const calendarTitle = useMemo(
+    () => formatCalendarTitle(calendarCursorDate, calendarView),
+    [calendarCursorDate, calendarView],
+  );
+  const calendarEntriesByDate = useMemo(() => {
+    const map = new Map<string, CalendarEntry[]>();
+    state.calendarEntries.forEach((entry) => {
+      const entries = map.get(entry.date) ?? [];
+      entries.push(entry);
+      map.set(entry.date, entries);
+    });
+    map.forEach((entries) => entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+    return map;
+  }, [state.calendarEntries]);
+  const examsByDate = useMemo(() => {
+    const map = new Map<string, Exam[]>();
+    state.exams.forEach((exam) => {
+      const exams = map.get(exam.examDate) ?? [];
+      exams.push(exam);
+      map.set(exam.examDate, exams);
+    });
+    return map;
+  }, [state.exams]);
+  const deadlinesByDate = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    state.tasks.forEach((task) => {
+      if (!task.dueDate) return;
+      const tasks = map.get(task.dueDate) ?? [];
+      tasks.push(task);
+      map.set(task.dueDate, tasks);
+    });
+    return map;
+  }, [state.tasks]);
+  const scheduledIncompleteByTask = useMemo(() => {
+    const map = new Map<string, number>();
+    state.calendarEntries.forEach((entry) => {
+      if (entry.completed) return;
+      map.set(entry.taskId, (map.get(entry.taskId) ?? 0) + getCalendarEntryAmount(entry));
+    });
+    return map;
+  }, [state.calendarEntries]);
+  const completedCalendarRemainderByTask = useMemo(() => {
+    const totals = new Map<string, number>();
+    state.calendarEntries.forEach((entry) => {
+      if (!entry.completed) return;
+      totals.set(entry.taskId, (totals.get(entry.taskId) ?? 0) + getCalendarEntryAmount(entry));
+    });
+    const remainders = new Map<string, number>();
+    totals.forEach((amount, taskId) => remainders.set(taskId, amount - Math.floor(amount + 0.0001)));
+    return remainders;
+  }, [state.calendarEntries]);
+  const calendarFillTasks = useMemo(
+    () =>
+      [...state.tasks]
+        .map((task) => ({
+          task,
+          unscheduledUnits: Math.max(
+            0,
+            getRemainingUnits(task) - (scheduledIncompleteByTask.get(task.id) ?? 0) - (completedCalendarRemainderByTask.get(task.id) ?? 0),
+          ),
+        }))
+        .filter((item) => item.unscheduledUnits >= 0.25)
+        .sort((a, b) => {
+          const aDue = a.task.dueDate ? daysUntil(a.task.dueDate) : 999;
+          const bDue = b.task.dueDate ? daysUntil(b.task.dueDate) : 999;
+          if (aDue !== bDue) return aDue - bDue;
+          return a.task.title.localeCompare(b.task.title);
+        }),
+    [completedCalendarRemainderByTask, scheduledIncompleteByTask, state.tasks],
+  );
+  const todayCalendarEntries = useMemo(
+    () =>
+      state.calendarEntries
+        .filter((entry) => entry.date === calendarToday && taskLookup.has(entry.taskId))
+        .sort((a, b) => {
+          if (a.completed !== b.completed) return a.completed ? 1 : -1;
+          return a.createdAt.localeCompare(b.createdAt);
+        }),
+    [calendarToday, state.calendarEntries, taskLookup],
+  );
+
   const gardenPlants = useMemo(
     () => state.sessions.slice(0, 16).map((session, index) => ({
       id: session.id,
@@ -474,6 +714,58 @@ function App() {
 
   function setActiveTab(activeTab: TabKey) {
     setState((current) => ({ ...current, activeTab }));
+  }
+
+  function openMenuPanel(panel: Exclude<MenuPanel, null>) {
+    setActiveMenuPanel(panel);
+    setMenuOpen(false);
+    setDeleteConfirmOpen(false);
+    if (panel === "personal") setPersonalNameDraft(state.settings.userName);
+  }
+
+  function closeMenuPanel() {
+    setActiveMenuPanel(null);
+    setDeleteConfirmOpen(false);
+  }
+
+  function savePersonalSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const userName = personalNameDraft.trim();
+    setState((current) => ({ ...current, settings: { ...current.settings, userName } }));
+    setMessage(userName ? `Personal greeting saved for ${userName}.` : "Personal greeting cleared.");
+    closeMenuPanel();
+  }
+
+  function deleteAllData() {
+    const cleanState: AppState = {
+      ...defaultState,
+      settings: {
+        ...defaultState.settings,
+        themeFamily: "normal",
+      },
+    };
+    setState(cleanState);
+    setDashboardLayout("cockpit");
+    setCustomDashboardLayout(defaultCustomDashboardLayout);
+    setSelectedTaskId(TOTAL_WORKLOAD_ID);
+    setSemesterName("");
+    setCourseDraft({ semesterId: "", name: "", targetGrade: "4.0", color: "#8fb4ff" });
+    setTaskDraft({ semesterId: "", courseId: "", title: "", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" });
+    setExamDraft({ semesterId: "", courseId: "", title: "", examDate: "", weight: "40", preparedness: "35" });
+    setShowSemesterForm(false);
+    setExpandedSemesterIds([]);
+    setExpandedCourseIds([]);
+    setAddingCourseSemesterId(null);
+    setAddingTaskCourseId(null);
+    setAddingExamSemesterId(null);
+    setSelectedCalendarDate(null);
+    setPersonalNameDraft("");
+    localStorage.removeItem("study-tracker-desktop-v2");
+    localStorage.removeItem("study-tracker-desktop-v1");
+    localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
+    localStorage.removeItem(CUSTOM_DASHBOARD_LAYOUT_KEY);
+    closeMenuPanel();
+    setMessage("All study tracker data deleted.");
   }
 
   function addSemester(event: FormEvent<HTMLFormElement>) {
@@ -563,6 +855,12 @@ function App() {
     setMessage(`${task.title} is now tracked.`);
   }
 
+  function confirmTaskDueDate(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.currentTarget.blur();
+  }
+
   function addExam(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!examDraft.semesterId || !examDraft.courseId || !examDraft.title.trim() || !examDraft.examDate) {
@@ -599,6 +897,7 @@ function App() {
     setState((current) => ({
       ...current,
       tasks: current.tasks.filter((task) => task.id !== taskId),
+      calendarEntries: current.calendarEntries.filter((entry) => entry.taskId !== taskId),
       timer: current.timer.taskId === taskId ? { ...current.timer, taskId: null } : current.timer,
     }));
   }
@@ -606,6 +905,10 @@ function App() {
   function removeCourse(courseId: string) {
     setState((current) => ({
       ...current,
+      calendarEntries: current.calendarEntries.filter((entry) => {
+        const task = current.tasks.find((item) => item.id === entry.taskId);
+        return task?.courseId !== courseId;
+      }),
       courses: current.courses.filter((course) => course.id !== courseId),
       tasks: current.tasks.filter((task) => task.courseId !== courseId),
       exams: current.exams.filter((exam) => exam.courseId !== courseId),
@@ -622,6 +925,10 @@ function App() {
     const courseIds = state.courses.filter((course) => course.semesterId === semesterId).map((course) => course.id);
     setState((current) => ({
       ...current,
+      calendarEntries: current.calendarEntries.filter((entry) => {
+        const task = current.tasks.find((item) => item.id === entry.taskId);
+        return task?.semesterId !== semesterId;
+      }),
       semesters: current.semesters.filter((semester) => semester.id !== semesterId),
       courses: current.courses.filter((course) => course.semesterId !== semesterId),
       tasks: current.tasks.filter((task) => task.semesterId !== semesterId),
@@ -640,6 +947,106 @@ function App() {
 
   function removeExam(examId: string) {
     setState((current) => ({ ...current, exams: current.exams.filter((exam) => exam.id !== examId) }));
+  }
+
+  function addCalendarEntry(task: Task, date: string) {
+    if (task.dueDate && date > task.dueDate) {
+      setMessage(`"${task.title}" cannot be scheduled after ${formatDate(task.dueDate)}.`);
+      return;
+    }
+
+    const unscheduledUnits = Math.max(
+      0,
+      getRemainingUnits(task) - (scheduledIncompleteByTask.get(task.id) ?? 0) - (completedCalendarRemainderByTask.get(task.id) ?? 0),
+    );
+    if (unscheduledUnits < calendarUnitAmount) {
+      setMessage(`All remaining units for "${task.title}" are already planned.`);
+      return;
+    }
+
+    const entry: CalendarEntry = {
+      id: makeId(),
+      taskId: task.id,
+      date,
+      unitAmount: calendarUnitAmount,
+      completed: false,
+      completedAt: null,
+      createdAt: new Date().toISOString(),
+    };
+
+    setState((current) => ({ ...current, calendarEntries: [...current.calendarEntries, entry] }));
+  }
+
+  function toggleCalendarEntry(entryId: string) {
+    setState((current) => {
+      const entry = current.calendarEntries.find((item) => item.id === entryId);
+      if (!entry) return current;
+
+      const completing = !entry.completed;
+      const beforeWholeUnits = getCompletedCalendarWholeUnits(current.calendarEntries, entry.taskId);
+      const calendarEntries = current.calendarEntries.map((item) =>
+        item.id === entryId
+          ? { ...item, completed: completing, completedAt: completing ? new Date().toISOString() : null }
+          : item,
+      );
+      const afterWholeUnits = getCompletedCalendarWholeUnits(calendarEntries, entry.taskId);
+      const wholeUnitDelta = afterWholeUnits - beforeWholeUnits;
+
+      return {
+        ...current,
+        calendarEntries,
+        tasks: current.tasks.map((task) =>
+          task.id === entry.taskId
+            ? { ...task, completedUnits: clamp(task.completedUnits + wholeUnitDelta, 0, task.totalUnits) }
+            : task,
+        ),
+      };
+    });
+  }
+
+  function removeCalendarEntry(entryId: string) {
+    setState((current) => ({
+      ...current,
+      calendarEntries: current.calendarEntries.filter((entry) => entry.id !== entryId || entry.completed),
+    }));
+  }
+
+  function shiftCalendar(direction: -1 | 1) {
+    setCalendarCursorDate((current) => {
+      if (calendarView === "month") {
+        return new Date(current.getFullYear(), current.getMonth() + direction, 1);
+      }
+      return addCalendarDays(current, direction * 7);
+    });
+  }
+
+  function jumpCalendarToToday() {
+    const today = new Date();
+    setCalendarCursorDate(today);
+    setSelectedCalendarDate(localIsoDate(today));
+  }
+
+  function setPlannerCalendarView(view: CalendarView) {
+    setCalendarView(view);
+    if (view === "week") {
+      setCalendarCursorDate(new Date());
+    }
+  }
+
+  function openCalendarDrawer(date: string) {
+    setSelectedCalendarDate(date);
+  }
+
+  function closeCalendarDrawer() {
+    setSelectedCalendarDate(null);
+  }
+
+  function openNextCalendarDay() {
+    setSelectedCalendarDate((current) => {
+      const nextDate = addCalendarDays(current ? parseCalendarDate(current) : new Date(), 1);
+      setCalendarCursorDate(nextDate);
+      return localIsoDate(nextDate);
+    });
   }
 
   function toggleSemester(semesterId: string) {
@@ -807,6 +1214,255 @@ function App() {
     setMessage(`"${task.title}" sent to timer.`);
   }
 
+  function renderPlannerCalendar() {
+    const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const selectedDate = selectedCalendarDate ? parseCalendarDate(selectedCalendarDate) : null;
+    const selectedEntries = selectedCalendarDate ? (calendarEntriesByDate.get(selectedCalendarDate) ?? []) : [];
+    const selectedExams = selectedCalendarDate ? (examsByDate.get(selectedCalendarDate) ?? []) : [];
+    const selectedDeadlines = selectedCalendarDate ? (deadlinesByDate.get(selectedCalendarDate) ?? []) : [];
+
+    return (
+      <article className="panel-card planner-calendar-card">
+        <div className="section-head planner-calendar-head">
+          <div>
+            <p className="eyebrow">Calendar</p>
+            <h2>{calendarTitle}</h2>
+            <p className="section-note">Plan one task unit at a time. Exams and task deadlines appear automatically.</p>
+          </div>
+          <div className="planner-calendar-controls">
+            <div className="calendar-view-toggle" aria-label="Calendar view">
+              {(["month", "week"] as CalendarView[]).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  className={calendarView === view ? "active" : ""}
+                  onClick={() => setPlannerCalendarView(view)}
+                >
+                  {view === "month" ? "Month" : "Week"}
+                </button>
+              ))}
+            </div>
+            <div className="calendar-nav-buttons">
+              <button type="button" className="ghost-button small-button" onClick={() => shiftCalendar(-1)}>
+                Prev
+              </button>
+              <button type="button" className="ghost-button small-button" onClick={jumpCalendarToToday}>
+                Today
+              </button>
+              <button type="button" className="ghost-button small-button" onClick={() => shiftCalendar(1)}>
+                Next
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="calendar-weekday-row" aria-hidden="true">
+          {weekdayLabels.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </div>
+
+        <div className={`calendar-grid ${calendarView === "week" ? "week-view" : "month-view"}`}>
+          {calendarDays.map((day) => {
+            const entries = calendarEntriesByDate.get(day.iso) ?? [];
+            const exams = examsByDate.get(day.iso) ?? [];
+            const deadlines = deadlinesByDate.get(day.iso) ?? [];
+            const isSelected = selectedCalendarDate === day.iso;
+            const isToday = day.iso === calendarToday;
+            const visibleItemCount = Math.min(entries.length, 3) + Math.min(exams.length, 2) + Math.min(deadlines.length, 2);
+            const hiddenItemCount = entries.length + exams.length + deadlines.length - visibleItemCount;
+
+            return (
+              <section
+                key={day.iso}
+                className={`calendar-day-card ${day.inCurrentMonth ? "" : "muted-month"} ${isToday ? "today" : ""} ${isSelected ? "selected" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="calendar-day-top"
+                  onClick={() => openCalendarDrawer(day.iso)}
+                >
+                  <span>{day.date.getDate()}</span>
+                  <small>{new Intl.DateTimeFormat("en", { month: "short", year: "numeric" }).format(day.date)}</small>
+                </button>
+
+                <div className="calendar-day-items">
+                  {entries.slice(0, 3).map((entry) => {
+                    const task = taskLookup.get(entry.taskId);
+                    if (!task) return null;
+                    const course = courseLookup.get(task.courseId);
+                    return (
+                      <div key={entry.id} className={`calendar-pill task-pill ${entry.completed ? "completed" : ""}`} style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}>
+                        <input
+                          className="calendar-task-checkbox"
+                          type="checkbox"
+                          checked={entry.completed}
+                          onChange={() => toggleCalendarEntry(entry.id)}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                        <span className="calendar-task-copy">
+                          <span className="calendar-task-title">{task.title}</span>
+                          <span className="calendar-task-course">{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {exams.slice(0, 2).map((exam) => {
+                    const course = courseLookup.get(exam.courseId);
+                    return (
+                      <div key={exam.id} className="calendar-pill exam-pill" style={{ "--pill-color": course?.color ?? "var(--danger)" } as CSSProperties}>
+                        <span>Exam: {exam.title}</span>
+                      </div>
+                    );
+                  })}
+                  {deadlines.slice(0, 2).map((task) => {
+                    const course = courseLookup.get(task.courseId);
+                    return (
+                      <div key={task.id} className="calendar-pill deadline-pill" style={{ "--pill-color": course?.color ?? "var(--warn)" } as CSSProperties}>
+                        <span>Due: {task.title}</span>
+                      </div>
+                    );
+                  })}
+                  {hiddenItemCount > 0 ? (
+                    <span className="calendar-more">+{hiddenItemCount} more</span>
+                  ) : null}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+
+        {selectedCalendarDate && selectedDate ? (
+          <div className="calendar-drawer-backdrop" onMouseDown={closeCalendarDrawer}>
+            <aside className="calendar-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day planner">
+              <div className="calendar-drawer-head">
+                <div>
+                  <p className="eyebrow">Plan day</p>
+                  <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
+                </div>
+                <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
+                  Done
+                </button>
+              </div>
+
+              <div className="calendar-drawer-section">
+                <div>
+                  <strong>Scheduled units</strong>
+                  <small>Click an unfinished unit to remove it. Use the checkbox to mark work done.</small>
+                </div>
+                <div className="calendar-expanded-list drawer-list">
+                  {selectedEntries.length ? (
+                    selectedEntries.map((entry) => {
+                      const task = taskLookup.get(entry.taskId);
+                      if (!task) return null;
+                      const course = courseLookup.get(task.courseId);
+                      return (
+                        <div key={entry.id} className={`calendar-entry-row ${entry.completed ? "done" : ""}`}>
+                          <div className="calendar-entry-main">
+                            <input type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} />
+                            <button
+                              type="button"
+                              className="calendar-unit-button"
+                              disabled={entry.completed}
+                              onClick={() => removeCalendarEntry(entry.id)}
+                              style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}
+                            >
+                              <span>{task.title}</span>
+                              <small>{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</small>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="empty-copy compact-empty">No task units scheduled yet.</p>
+                  )}
+                </div>
+              </div>
+
+              {selectedExams.length || selectedDeadlines.length ? (
+                <div className="calendar-drawer-section">
+                  <div>
+                    <strong>Fixed markers</strong>
+                    <small>Exams and deadlines are pulled from the planner.</small>
+                  </div>
+                  <div className="calendar-expanded-list drawer-list">
+                    {selectedExams.map((exam) => (
+                      <div key={exam.id} className="calendar-marker-row exam-marker">
+                        <strong>Exam</strong>
+                        <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
+                      </div>
+                    ))}
+                    {selectedDeadlines.map((task) => (
+                      <div key={task.id} className="calendar-marker-row deadline-marker">
+                        <strong>Deadline</strong>
+                        <span>{task.title} · {courseLookup.get(task.courseId)?.name ?? "No course"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="calendar-fill-panel drawer-fill-panel">
+                <div>
+                  <strong>Add task units</strong>
+                  <small>Each click schedules the selected amount for this day.</small>
+                </div>
+                <div className="calendar-unit-toggle" aria-label="Calendar unit amount">
+                  {([1, 0.5, 0.25] as CalendarUnitAmount[]).map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      className={calendarUnitAmount === amount ? "active" : ""}
+                      onClick={() => setCalendarUnitAmount(amount)}
+                    >
+                      {amount === 1 ? "1" : amount === 0.5 ? "1/2" : "1/4"}
+                    </button>
+                  ))}
+                </div>
+                <div className="calendar-fill-list">
+                  {calendarFillTasks.length ? (
+                    calendarFillTasks.map(({ task, unscheduledUnits }) => {
+                      const course = courseLookup.get(task.courseId);
+                      const pastDeadline = Boolean(task.dueDate && selectedCalendarDate > task.dueDate);
+                      const notEnoughUnits = unscheduledUnits < calendarUnitAmount;
+                      return (
+                        <button
+                          key={task.id}
+                          type="button"
+                          className="calendar-fill-task"
+                          disabled={pastDeadline || notEnoughUnits}
+                          onClick={() => addCalendarEntry(task, selectedCalendarDate)}
+                          style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}
+                        >
+                          <span>{task.title}</span>
+                          <small>
+                            {formatUnitsLeft(unscheduledUnits)} left{task.dueDate ? ` · due ${formatDate(task.dueDate)}` : " · no due date"}
+                          </small>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <p className="empty-copy compact-empty">Every remaining task unit is already planned.</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="calendar-drawer-actions">
+                <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
+                  Next day
+                </button>
+                <button type="button" className="calendar-primary-button" onClick={closeCalendarDrawer}>
+                  Done
+                </button>
+              </div>
+            </aside>
+          </div>
+        ) : null}
+      </article>
+    );
+  }
+
   function renderTodayCard() {
     const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
     return (
@@ -866,46 +1522,48 @@ function App() {
   }
 
   function renderUrgentTasks(limit = 5) {
-    const tasks = topTasks.slice(0, limit);
+    const entries = todayCalendarEntries.slice(0, limit);
     return (
       <article className="panel-card design-card design-priority-card">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Do this next</p>
-            <h3>Highest-impact tasks</h3>
-            <p className="section-note">Ranked by deadline and priority.</p>
+            <h3>Planned today</h3>
+            <p className="section-note">From your calendar schedule.</p>
           </div>
         </div>
 
         <div className="design-task-list">
-          {tasks.length ? (
-            tasks.map((task) => {
+          {entries.length ? (
+            entries.map((entry) => {
+              const task = taskLookup.get(entry.taskId);
+              if (!task) return null;
               const course = courseLookup.get(task.courseId);
               const semester = semesterLookup.get(task.semesterId);
-              const remaining = getRemainingUnits(task);
-              const dueIn = task.dueDate ? daysUntil(task.dueDate) : null;
-              const urgent = dueIn !== null && dueIn <= 2;
-              const overdue = dueIn !== null && dueIn < 0;
               return (
-                <div key={task.id} className={`design-task-item ${selectedTaskId === task.id ? "selected" : ""}`}>
+                <div key={entry.id} className={`design-task-item ${selectedTaskId === task.id ? "selected" : ""}`}>
                   <button type="button" className="design-task-main" onClick={() => setSelectedTaskId(task.id)}>
                     <span className="design-course-stripe" style={{ background: course?.color ?? "var(--accent)" }} />
                     <span className="design-task-copy">
                       <span className="design-task-title-line">
                         <strong>{task.title}</strong>
-                        <em className={`priority-chip ${task.priority}`}>{task.priority}</em>
+                        <em className={`priority-chip ${entry.completed ? "low" : task.priority}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
                       </span>
                       <span className="design-task-meta">
                         <span>{course?.name ?? "No course"}</span>
                         <span>{semester?.name ?? "No semester"}</span>
-                        <span>{remaining} units left</span>
+                        <span>{task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}</span>
                       </span>
                     </span>
                   </button>
                   <div className="design-task-side">
-                    <span className={`due-chip ${overdue ? "overdue" : urgent ? "urgent" : ""}`}>
-                      {task.dueDate ? (overdue ? `${Math.abs(dueIn ?? 0)}d overdue` : dueIn === 0 ? "Today" : dueIn === 1 ? "Tomorrow" : formatDate(task.dueDate)) : "No date"}
-                    </span>
+                    <input
+                      className="dashboard-task-check"
+                      type="checkbox"
+                      checked={entry.completed}
+                      onChange={() => toggleCalendarEntry(entry.id)}
+                      title="Mark scheduled unit done"
+                    />
                     <button type="button" className="ghost-button small-button" onClick={() => focusTaskFromDashboard(task)}>
                       Focus
                     </button>
@@ -914,7 +1572,7 @@ function App() {
               );
             })
           ) : (
-            <p className="empty-copy">Add a semester, course, and task. The riskiest work will show up here.</p>
+            <p className="empty-copy">Nothing planned for today. Add tasks from the planner calendar.</p>
           )}
         </div>
       </article>
@@ -1213,6 +1871,86 @@ function App() {
     );
   }
 
+  function renderMenuPanel() {
+    if (!activeMenuPanel) return null;
+
+    return (
+      <div className="settings-panel-backdrop" onMouseDown={closeMenuPanel}>
+        <section className="settings-panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="settings-panel-head">
+            <div>
+              <p className="eyebrow">Menu</p>
+              <h2>{activeMenuPanel === "theme" ? "Theme" : activeMenuPanel === "personal" ? "Personal" : "Settings"}</h2>
+            </div>
+            <button type="button" className="ghost-button small-button" onClick={closeMenuPanel}>Close</button>
+          </div>
+
+          {activeMenuPanel === "theme" ? (
+            <div className="settings-panel-body">
+              <div className="theme-choice-card active">
+                <div>
+                  <strong>Normal theme</strong>
+                  <span>The default Study Tracker look.</span>
+                </div>
+                <span className="design-chip">Active</span>
+              </div>
+              <div className="theme-mode-row" aria-label="Theme mode">
+                {(["light", "dark"] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={theme === mode ? "active" : ""}
+                    onClick={() => setTheme(mode)}
+                  >
+                    {mode === "light" ? "Light" : "Dark"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {activeMenuPanel === "personal" ? (
+            <form className="settings-panel-body" onSubmit={savePersonalSettings}>
+              <label className="field">
+                <span>Your name</span>
+                <input
+                  value={personalNameDraft}
+                  onChange={(event) => setPersonalNameDraft(event.target.value)}
+                  placeholder="e.g. Damcha"
+                />
+              </label>
+              <div className="inline-form-actions">
+                <button type="submit">Save personal info</button>
+                <button type="button" className="ghost-button" onClick={() => setPersonalNameDraft("")}>Clear</button>
+              </div>
+            </form>
+          ) : null}
+
+          {activeMenuPanel === "settings" ? (
+            <div className="settings-panel-body settings-danger-zone">
+              <p className="empty-copy compact-empty">More settings will appear here later.</p>
+              <div className="delete-data-card">
+                <div>
+                  <strong>Delete all data</strong>
+                  <span>This clears semesters, courses, tasks, calendar entries, exams, sessions, exports, and personal info.</span>
+                </div>
+                {deleteConfirmOpen ? (
+                  <div className="delete-confirm-row">
+                    <span>Are you sure?</span>
+                    <button type="button" className="ghost-button small-button" onClick={() => setDeleteConfirmOpen(false)}>No</button>
+                    <button type="button" className="danger-button" onClick={deleteAllData}>Yes, delete</button>
+                  </div>
+                ) : (
+                  <button type="button" className="danger-button" onClick={() => setDeleteConfirmOpen(true)}>Delete all data</button>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
@@ -1258,12 +1996,6 @@ function App() {
               </div>
             </div>
           </div>
-          <button className="ghost-button" onClick={() => downloadBackup(state)} type="button" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
-            </svg>
-            Backup JSON
-          </button>
           <button
             className="theme-toggle"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -1282,8 +2014,40 @@ function App() {
               </svg>
             )}
           </button>
+          <div className="topbar-menu-wrap">
+            <button
+              type="button"
+              className="hamburger-button"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((current) => !current)}
+            >
+              <span />
+              <span />
+              <span />
+            </button>
+            {menuOpen ? (
+              <div className="topbar-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    downloadBackup(state);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Backup JSON
+                </button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
+
+      {renderMenuPanel()}
 
       <nav className="tab-row" aria-label="Primary navigation">
         {([
@@ -1315,7 +2079,7 @@ function App() {
         <section className="dashboard-design fade-up">
           <div className="dashboard-design-head">
             <div>
-              <h2>Good morning</h2>
+              <h2>{dashboardGreeting}</h2>
               <p>Here's what deserves your focus today.</p>
             </div>
             <div className="layout-control" aria-label="Dashboard layout">
@@ -1584,7 +2348,12 @@ function App() {
                                               </label>
                                               <label className="field">
                                                 <span>Due date (optional)</span>
-                                                <input type="date" value={taskDraft.dueDate} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, dueDate: event.target.value }))} />
+                                                <input
+                                                  type="date"
+                                                  value={taskDraft.dueDate}
+                                                  onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, dueDate: event.target.value }))}
+                                                  onKeyDown={confirmTaskDueDate}
+                                                />
                                               </label>
                                               <label className="field task-notes-field">
                                                 <span>Notes</span>
@@ -1757,6 +2526,8 @@ function App() {
               )}
             </div>
           </article>
+
+          {renderPlannerCalendar()}
 
           <div className="planner-support-grid">
             <article className="panel-card calculator-card">
