@@ -28,6 +28,8 @@ import { createVault, exportDailyNote, isTauriApp, pickVaultParentDirectory } fr
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
+const bellSound = new Audio("/bell.mp3");
+
 const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
   { label: "Deep Work 52/17", study: 52, breakMinutes: 17, mode: "focus" as const },
@@ -447,6 +449,7 @@ function App() {
         if (timer.phase === "study") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
+            bellSound.play().catch(() => null);
             return {
               ...current,
               sessions: [session, ...current.sessions].slice(0, 120),
@@ -461,6 +464,7 @@ function App() {
             };
           }
 
+          bellSound.play().catch(() => null);
           return {
             ...current,
             sessions: [session, ...current.sessions].slice(0, 120),
@@ -470,6 +474,7 @@ function App() {
 
         if (timer.phase === "exam") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
+          bellSound.play().catch(() => null);
           return {
             ...current,
             sessions: [session, ...current.sessions].slice(0, 120),
@@ -477,6 +482,7 @@ function App() {
           };
         }
 
+        bellSound.play().catch(() => null);
         return {
           ...current,
           timer: { ...defaultTimer, ...keepTimerContext(timer) },
