@@ -46,8 +46,6 @@ export const defaultState: AppState = {
     themeFamily: "normal",
     vaultPath: null,
     vaultName: "StudyTrackerVault",
-    anthropicApiKey: "",
-    aiModel: "claude-3-5-haiku-latest",
   },
   timer: defaultTimer,
   activeTab: "dashboard",
