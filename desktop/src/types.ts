@@ -82,8 +82,6 @@ export interface Settings {
   themeFamily: "normal";
   vaultPath: string | null;
   vaultName: string;
-  anthropicApiKey: string;
-  aiModel: string;
 }
 
 export interface TimerState {

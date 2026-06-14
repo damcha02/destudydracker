@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn sanitize_segment(value: &str) -> String {
   value
@@ -23,7 +23,7 @@ fn create_obsidian_vault(base_path: String, vault_name: String) -> Result<String
   let vault_path = PathBuf::from(base_path).join(vault_name);
   fs::create_dir_all(&vault_path).map_err(|error| error.to_string())?;
 
-  for directory in ["Inbox", "Daily", "Weekly", "Subjects", "Exams", "Summaries", "Templates"] {
+  for directory in [".obsidian", "Inbox", "Daily", "Weekly", "Subjects", "Exams", "Summaries", "Templates"] {
     fs::create_dir_all(vault_path.join(directory)).map_err(|error| error.to_string())?;
   }
 
@@ -31,6 +31,49 @@ fn create_obsidian_vault(base_path: String, vault_name: String) -> Result<String
   fs::write(vault_path.join("README.md"), readme).map_err(|error| error.to_string())?;
 
   Ok(vault_path.to_string_lossy().to_string())
+}
+
+fn daily_note_path(vault_path: &str, note_date: &str) -> PathBuf {
+  Path::new(vault_path).join("Daily").join(format!("{}.md", sanitize_segment(note_date)))
+}
+
+#[tauri::command]
+fn link_obsidian_vault(vault_path: String) -> Result<String, String> {
+  let root = PathBuf::from(&vault_path);
+  if !root.exists() {
+    return Err("Selected vault folder does not exist.".into());
+  }
+  if !root.is_dir() {
+    return Err("Selected path is not a folder.".into());
+  }
+
+  for directory in [".obsidian", "Inbox", "Daily", "Weekly", "Subjects", "Exams", "Summaries", "Templates"] {
+    fs::create_dir_all(root.join(directory)).map_err(|error| error.to_string())?;
+  }
+
+  Ok(root.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn read_daily_note(vault_path: String, note_date: String) -> Result<Option<String>, String> {
+  let note_path = daily_note_path(&vault_path, &note_date);
+  if !note_path.exists() {
+    return Ok(None);
+  }
+
+  fs::read_to_string(note_path).map(Some).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn write_daily_note(vault_path: String, note_date: String, content: String) -> Result<String, String> {
+  let root = PathBuf::from(vault_path);
+  let daily_dir = root.join("Daily");
+  fs::create_dir_all(&daily_dir).map_err(|error| error.to_string())?;
+
+  let note_path = daily_dir.join(format!("{}.md", sanitize_segment(&note_date)));
+  fs::write(&note_path, content).map_err(|error| error.to_string())?;
+
+  Ok(note_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -51,7 +94,7 @@ pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
     .plugin(tauri_plugin_dialog::init())
-    .invoke_handler(tauri::generate_handler![create_obsidian_vault, export_daily_note])
+    .invoke_handler(tauri::generate_handler![create_obsidian_vault, link_obsidian_vault, read_daily_note, write_daily_note, export_daily_note])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

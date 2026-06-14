@@ -246,6 +246,10 @@ export function getStreakDays(state: AppState) {
   let streak = 0;
   const cursor = new Date();
 
+  if (!sessionDays.has(isoDate(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
   while (sessionDays.has(isoDate(cursor))) {
     streak += 1;
     cursor.setDate(cursor.getDate() - 1);
@@ -257,6 +261,11 @@ export function getFocusMomentum(state: AppState) {
   const week = getWeeklyActivity(state.sessions);
   const total = week.reduce((sum, day) => sum + day.minutes, 0);
   const average = total / week.length;
+  const streak = getStreakDays(state);
+
+  if (streak >= 5 && average >= 35) return "Surging";
+  if (streak >= 5) return "Stable";
+  if (streak >= 3) return "Recovering";
   if (average >= 110) return "Surging";
   if (average >= 70) return "Stable";
   if (average >= 35) return "Recovering";

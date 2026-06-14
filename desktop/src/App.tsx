@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -22,9 +22,8 @@ import {
   getTodayMinutes,
   getUpcomingExams,
   getWeeklyActivity,
-  isoDate,
 } from "./lib/metrics";
-import { createVault, exportDailyNote, isTauriApp, pickVaultParentDirectory } from "./lib/obsidian";
+import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, writeDailyNote } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
@@ -43,7 +42,23 @@ const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 
-type ThemePalette = "default" | "parchment" | "cosmic" | "grove";
+type ThemePalette =
+  | "default"
+  | "original"
+  | "midnight"
+  | "paper"
+  | "cyberpunk"
+  | "retrowave"
+  | "forest"
+  | "ocean"
+  | "ume"
+  | "copper"
+  | "terminal"
+  | "organs"
+  | "lavender"
+  | "gpt"
+  | "claude"
+  | "cute";
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
 type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
 type DashboardWidgetWidth = "full" | "half" | "third";
@@ -63,6 +78,38 @@ type CalendarDay = {
 };
 
 type CalendarUnitAmount = CalendarEntry["unitAmount"];
+
+const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: string }[] = [
+  { id: "default", name: "Default", desc: "Editorial blue-grey with soft study accents.", swatch: "oklch(0.70 0.10 245)" },
+  { id: "original", name: "Original", desc: "Slate, cyan ink, and coral-red accents.", swatch: "#e06c75" },
+  { id: "midnight", name: "Midnight", desc: "GitHub-dark ink with a bright red accent.", swatch: "#f85149" },
+  { id: "paper", name: "Paper", desc: "Warm cream paper with mustard ink.", swatch: "#c5ac4a" },
+  { id: "cyberpunk", name: "Cyberpunk", desc: "Neon cyan, electric purple, and magenta.", swatch: "#e040fb" },
+  { id: "retrowave", name: "Retrowave", desc: "Synthwave indigo, purple, and hot pink.", swatch: "#e94560" },
+  { id: "forest", name: "Forest", desc: "Deep woodland greens for quiet focus.", swatch: "#7cb871" },
+  { id: "ocean", name: "Ocean", desc: "Deep-sea navy with bright blue focus.", swatch: "#4facfe" },
+  { id: "ume", name: "Ume", desc: "Plum-blossom aubergine and pink.", swatch: "#f5a0c0" },
+  { id: "copper", name: "Copper", desc: "Burnished copper and espresso warmth.", swatch: "#d4764e" },
+  { id: "terminal", name: "Terminal", desc: "Matrix green on pure black.", swatch: "#00ff41" },
+  { id: "organs", name: "Organs", desc: "Cream on near-black with oxblood red.", swatch: "#c83240" },
+  { id: "lavender", name: "Lavender", desc: "Soft violet on lilac white.", swatch: "#9b6dcc" },
+  { id: "gpt", name: "GPT", desc: "Monochrome graphite and grey.", swatch: "#949494" },
+  { id: "claude", name: "Claude", desc: "Clay-orange on warm charcoal.", swatch: "#c6613f" },
+  { id: "cute", name: "Cute", desc: "Kawaii pastel pinks.", swatch: "#ff6b9d" },
+];
+
+function isThemePalette(value: string | null): value is ThemePalette {
+  return themePalettes.some((palette) => palette.id === value);
+}
+
+function loadThemePalette(): ThemePalette {
+  const saved = localStorage.getItem(PALETTE_STORAGE_KEY);
+  if (isThemePalette(saved)) return saved;
+  if (saved === "parchment") return "paper";
+  if (saved === "cosmic") return "retrowave";
+  if (saved === "grove") return "forest";
+  return "default";
+}
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
   "today",
@@ -322,6 +369,126 @@ function keepTimerContext(timer: TimerState) {
   };
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return fallback;
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string) {
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
+  return parts.map((part, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
+    if (part.startsWith("**") && part.endsWith("**")) return <strong key={key}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*")) return <em key={key}>{part.slice(1, -1)}</em>;
+
+    const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (link) {
+      return (
+        <a key={key} href={link[2]} target="_blank" rel="noreferrer">
+          {link[1]}
+        </a>
+      );
+    }
+
+    return part;
+  });
+}
+
+function renderMarkdownPreview(markdown: string) {
+  const lines = markdown.split("\n");
+  const elements: ReactNode[] = [];
+  let listItems: string[] = [];
+  let orderedItems: string[] = [];
+  let codeLines: string[] = [];
+  let inCode = false;
+
+  function flushLists(key: string) {
+    if (listItems.length) {
+      elements.push(
+        <ul key={`${key}-ul`}>
+          {listItems.map((item, index) => <li key={index}>{renderInlineMarkdown(item, `${key}-ul-${index}`)}</li>)}
+        </ul>,
+      );
+      listItems = [];
+    }
+    if (orderedItems.length) {
+      elements.push(
+        <ol key={`${key}-ol`}>
+          {orderedItems.map((item, index) => <li key={index}>{renderInlineMarkdown(item, `${key}-ol-${index}`)}</li>)}
+        </ol>,
+      );
+      orderedItems = [];
+    }
+  }
+
+  lines.forEach((line, index) => {
+    const key = `md-${index}`;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCode) {
+        elements.push(<pre key={key}><code>{codeLines.join("\n")}</code></pre>);
+        codeLines = [];
+        inCode = false;
+      } else {
+        flushLists(key);
+        inCode = true;
+      }
+      return;
+    }
+
+    if (inCode) {
+      codeLines.push(line);
+      return;
+    }
+
+    if (!trimmed) {
+      flushLists(key);
+      return;
+    }
+
+    const heading = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushLists(key);
+      const content = renderInlineMarkdown(heading[2], key);
+      if (heading[1].length === 1) elements.push(<h1 key={key}>{content}</h1>);
+      if (heading[1].length === 2) elements.push(<h2 key={key}>{content}</h2>);
+      if (heading[1].length === 3) elements.push(<h3 key={key}>{content}</h3>);
+      return;
+    }
+
+    if (trimmed.startsWith(">")) {
+      flushLists(key);
+      elements.push(<blockquote key={key}>{renderInlineMarkdown(trimmed.replace(/^>\s?/, ""), key)}</blockquote>);
+      return;
+    }
+
+    const bullet = trimmed.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      orderedItems = [];
+      listItems.push(bullet[1]);
+      return;
+    }
+
+    const ordered = trimmed.match(/^\d+\.\s+(.+)$/);
+    if (ordered) {
+      listItems = [];
+      orderedItems.push(ordered[1]);
+      return;
+    }
+
+    flushLists(key);
+    elements.push(<p key={key}>{renderInlineMarkdown(trimmed, key)}</p>);
+  });
+
+  flushLists("end");
+  if (inCode && codeLines.length) elements.push(<pre key="end-code"><code>{codeLines.join("\n")}</code></pre>);
+
+  return elements;
+}
+
 function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: number): StudySession {
   return {
     id: makeId(),
@@ -344,7 +511,7 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
 function App() {
   const [state, setState] = useState<AppState>(loadAppState);
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
-  const [palette, setPalette] = useState<ThemePalette>(() => (localStorage.getItem(PALETTE_STORAGE_KEY) || "default") as ThemePalette);
+  const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
   const [dashboardEditing, setDashboardEditing] = useState(false);
@@ -393,6 +560,12 @@ function App() {
   const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
   const [calendarToday, setCalendarToday] = useState(localIsoDate);
   const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
+  const [vaultNoteDate, setVaultNoteDate] = useState(localIsoDate);
+  const [vaultNoteContent, setVaultNoteContent] = useState("");
+  const [vaultNotePath, setVaultNotePath] = useState<string | null>(null);
+  const [vaultNoteDirty, setVaultNoteDirty] = useState(false);
+  const [vaultNoteLoading, setVaultNoteLoading] = useState(false);
+  const [vaultSetupOpen, setVaultSetupOpen] = useState(() => !state.settings.vaultPath);
 
   useEffect(() => {
     saveAppState(state);
@@ -603,7 +776,7 @@ function App() {
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions), [state.sessions]);
   const upcomingExams = useMemo(() => getUpcomingExams(state), [state]);
   const overallHealth = useMemo(() => getOverallHealth(state), [state]);
-  const notePreview = useMemo(() => buildDailyNoteMarkdown(state), [state]);
+  const notePreview = useMemo(() => buildDailyNoteMarkdown(state, vaultNoteDate), [state, vaultNoteDate]);
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
@@ -1177,36 +1350,90 @@ function App() {
         activeTab: "vault",
         settings: { ...current.settings, vaultPath },
       }));
+      await loadVaultNote(vaultPath, vaultNoteDate);
       setMessage(`Vault created at ${vaultPath}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not create the vault.");
+      setMessage(getErrorMessage(error, "Could not create the vault."));
     }
   }
 
-  async function handleExportDailyNote() {
-    if (!state.settings.vaultPath) {
-      setMessage("Create the Obsidian vault first.");
+  async function handleLinkVault() {
+    if (!isTauriApp()) {
+      setMessage("Linking a vault works inside the desktop build.");
       return;
     }
 
     try {
-      const notePath = await exportDailyNote(state.settings.vaultPath, isoDate(), notePreview);
+      const selected = await pickExistingVaultDirectory();
+      if (!selected) return;
+      const vaultPath = await linkVault(selected);
+      setState((current) => ({
+        ...current,
+        activeTab: "vault",
+        settings: { ...current.settings, vaultPath },
+      }));
+      await loadVaultNote(vaultPath, vaultNoteDate);
+      setMessage(`Vault linked at ${vaultPath}`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not link the vault."));
+    }
+  }
+
+  async function loadVaultNote(vaultPath = state.settings.vaultPath, noteDate = vaultNoteDate) {
+    if (!vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+
+    setVaultNoteLoading(true);
+    try {
+      const existing = await readDailyNote(vaultPath, noteDate);
+      setVaultNoteContent(existing ?? buildDailyNoteMarkdown(state, noteDate));
+      setVaultNotePath(`${vaultPath}/Daily/${noteDate}.md`);
+      setVaultNoteDirty(false);
+      setMessage(existing ? `Loaded ${noteDate}.md` : `Created an unsaved draft for ${noteDate}.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not load the daily note."));
+    } finally {
+      setVaultNoteLoading(false);
+    }
+  }
+
+  async function handleSaveVaultNote() {
+    if (!state.settings.vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+
+    setVaultNoteLoading(true);
+    try {
+      const notePath = await writeDailyNote(state.settings.vaultPath, vaultNoteDate, vaultNoteContent || notePreview);
+      setVaultNotePath(notePath);
+      setVaultNoteDirty(false);
       setState((current) => ({
         ...current,
         exports: [
           {
             id: makeId(),
             exportedAt: new Date().toISOString(),
-            noteDate: isoDate(),
+            noteDate: vaultNoteDate,
             notePath,
           },
           ...current.exports,
         ].slice(0, 20),
       }));
-      setMessage(`Daily note exported to ${notePath}`);
+      setMessage(`Saved daily note to ${notePath}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not export today’s note.");
+      setMessage(getErrorMessage(error, "Could not save the daily note."));
+    } finally {
+      setVaultNoteLoading(false);
     }
+  }
+
+  function handleUseGeneratedNote() {
+    setVaultNoteContent(notePreview);
+    setVaultNoteDirty(true);
+    setMessage("Generated markdown copied into the editor. Save it when you are ready.");
   }
 
   function healthClass(score: number) {
@@ -1453,7 +1680,8 @@ function App() {
                           onClick={() => addCalendarEntry(task, selectedCalendarDate)}
                           style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}
                         >
-                          <span>{task.title}</span>
+                          <span className="calendar-fill-task-title">{task.title}</span>
+                          <span className="calendar-fill-task-course">{course?.name ?? "No course"}</span>
                           <small>
                             {formatUnitsLeft(unscheduledUnits)} left{task.dueDate ? ` · due ${formatDate(task.dueDate)}` : " · no due date"}
                           </small>
@@ -1694,12 +1922,12 @@ function App() {
 
         <div className="design-weekly-bars">
           {weeklyActivity.map((entry) => {
-            const height = Math.max(4, (entry.minutes / maxWeeklyMinutes) * 100);
+            const height = entry.minutes ? Math.max(4, (entry.minutes / maxWeeklyMinutes) * 100) : 0;
             return (
               <div key={entry.key} className="design-weekly-column" title={`${entry.label}: ${entry.minutes} minutes`}>
                 <span>{entry.minutes || ""}</span>
                 <div className="design-weekly-track">
-                  <div className="design-weekly-fill" style={{ height: `${height}%` }} />
+                  {entry.minutes ? <div className="design-weekly-fill" style={{ height: `${height}%` }} /> : null}
                 </div>
                 <strong>{entry.label}</strong>
               </div>
@@ -1989,30 +2217,25 @@ function App() {
 
           {activeMenuPanel === "theme" ? (
             <div className="settings-panel-body">
-              {(
-                [
-                  { id: "default", name: "Default", desc: "Blue accents on deep blue-grey.", swatch: "oklch(0.70 0.10 245)" },
-                  { id: "parchment", name: "Parchment", desc: "Warm sepia & ink, like a leather-bound notebook.", swatch: "oklch(0.76 0.11 66)" },
-                  { id: "cosmic", name: "Cosmic", desc: "Deep indigo & violet with a luminous orchid glow.", swatch: "oklch(0.72 0.14 300)" },
-                  { id: "grove", name: "Grove", desc: "Forest greens & honey light, grounded woodland calm.", swatch: "oklch(0.80 0.12 92)" },
-                ] as { id: ThemePalette; name: string; desc: string; swatch: string }[]
-              ).map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
-                  onClick={() => setPalette(p.id)}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: "50%", background: p.swatch, flexShrink: 0, display: "inline-block", boxShadow: "0 0 0 2px var(--line-strong)" }} />
-                    <div>
-                      <strong>{p.name}</strong>
-                      <span>{p.desc}</span>
+              <div className="theme-choice-grid">
+                {themePalettes.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
+                    onClick={() => setPalette(p.id)}
+                  >
+                    <div className="theme-choice-main">
+                      <span className="theme-choice-swatch" style={{ background: p.swatch }} />
+                      <div>
+                        <strong>{p.name}</strong>
+                        <span>{p.desc}</span>
+                      </div>
                     </div>
-                  </div>
-                  {palette === p.id ? <span className="design-chip">Active</span> : null}
-                </button>
-              ))}
+                    {palette === p.id ? <span className="design-chip">Active</span> : null}
+                  </button>
+                ))}
+              </div>
               <div className="theme-mode-row" aria-label="Theme mode">
                 {(["light", "dark"] as const).map((mode) => (
                   <button
@@ -2173,7 +2396,7 @@ function App() {
           ["dashboard", "Dashboard"],
           ["planner", "Planner"],
           ["timer", "Timer"],
-          ["vault", "Vault + AI"],
+          ["vault", "Vault"],
         ] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -3228,49 +3451,105 @@ function App() {
 
       {state.activeTab === "vault" ? (
         <section className="vault-grid">
-          <article className="panel-card vault-card">
+          <article className="panel-card vault-card vault-setup-card">
             <div className="section-head">
               <div>
                 <p className="eyebrow">Obsidian</p>
-                <h2>Create your vault and export notes</h2>
+                <h2>Create or link your markdown vault</h2>
               </div>
-            </div>
-
-            <label className="field">
-              <span>Vault name</span>
-              <input
-                value={state.settings.vaultName}
-                onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
-                placeholder="StudyTrackerVault"
-              />
-            </label>
-
-            <label className="field">
-              <span>Current vault path</span>
-              <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
-            </label>
-
-            <div className="control-row left roomy-top">
-              <button type="button" onClick={handleCreateVault}>
-                Create new vault
-              </button>
-              <button type="button" className="ghost-button" onClick={handleExportDailyNote}>
-                Export today’s note
+              <button type="button" className="ghost-button" onClick={() => setVaultSetupOpen((current) => !current)}>
+                {vaultSetupOpen ? "Hide setup" : "Show setup"}
               </button>
             </div>
 
-            <p className="section-note">The app creates Daily, Weekly, Subjects, Exams, Summaries, Templates, and Inbox automatically.</p>
+            {vaultSetupOpen ? (
+              <>
+                <div className="form-grid compact-grid">
+                  <label className="field">
+                    <span>Vault name</span>
+                    <input
+                      value={state.settings.vaultName}
+                      onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
+                      placeholder="StudyTrackerVault"
+                    />
+                  </label>
+
+                  <label className="field wide">
+                    <span>Current vault path</span>
+                    <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
+                  </label>
+                </div>
+
+                <div className="control-row left roomy-top">
+                  <button type="button" onClick={handleCreateVault}>
+                    Create new vault
+                  </button>
+                  <button type="button" className="ghost-button" onClick={handleLinkVault}>
+                    Link existing vault
+                  </button>
+                </div>
+
+                <p className="section-note">An Obsidian vault is just a folder of markdown files. Study Tracker creates or uses Daily, Weekly, Subjects, Exams, Summaries, Templates, and Inbox without locking you into the app.</p>
+              </>
+            ) : (
+              <p className="section-note">{state.settings.vaultPath ? `Linked vault: ${state.settings.vaultPath}` : "No vault linked yet. Open setup to create or link one."}</p>
+            )}
           </article>
 
           <article className="panel-card note-card">
             <div className="section-head">
               <div>
-                <p className="eyebrow">Preview</p>
-                <h2>Today’s markdown note</h2>
+                <p className="eyebrow">Markdown</p>
+                <h2>Daily note editor</h2>
               </div>
+              <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
             </div>
 
-            <textarea className="note-preview" value={notePreview} readOnly />
+            <div className="form-grid compact-grid">
+              <label className="field">
+                <span>Note date</span>
+                <input
+                  type="date"
+                  value={vaultNoteDate}
+                  onChange={(event) => {
+                    setVaultNoteDate(event.target.value || localIsoDate());
+                    setVaultNotePath(null);
+                    setVaultNoteContent("");
+                    setVaultNoteDirty(false);
+                  }}
+                />
+              </label>
+              <label className="field wide">
+                <span>Note path</span>
+                <button type="button" className="path-button" onClick={handleLinkVault}>
+                  {vaultNotePath ?? (state.settings.vaultPath ? `${state.settings.vaultPath}/Daily/${vaultNoteDate}.md` : "No vault linked yet")}
+                </button>
+              </label>
+            </div>
+
+            <textarea
+              className="note-preview"
+              value={vaultNoteContent}
+              onChange={(event) => {
+                setVaultNoteContent(event.target.value);
+                setVaultNoteDirty(true);
+              }}
+              placeholder="Load a daily note from your vault or generate a draft from today's Study Tracker sessions."
+            />
+
+            <div className="control-row left roomy-top">
+              <button type="button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>
+                {vaultNoteLoading ? "Working..." : "Load note"}
+              </button>
+              <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>
+                Generate from sessions
+              </button>
+              <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading || !state.settings.vaultPath}>
+                Save note
+              </button>
+            </div>
+
+            <p className="section-note">Saving writes this editor to the markdown file. Timer sessions stay inside Study Tracker until you choose to generate or save a note.</p>
 
             <div className="stack-list compact export-list">
               {state.exports.length ? (
@@ -3289,37 +3568,16 @@ function App() {
             </div>
           </article>
 
-          <article className="panel-card ai-card">
+          <article className="panel-card markdown-preview-card">
             <div className="section-head">
               <div>
-                <p className="eyebrow">AI Foundation</p>
-                <h2>Anthropic settings for the next step</h2>
+                <p className="eyebrow">Preview</p>
+                <h2>Markdown preview</h2>
               </div>
             </div>
 
-            <label className="field">
-              <span>Anthropic API key</span>
-              <input
-                type="password"
-                value={state.settings.anthropicApiKey}
-                onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, anthropicApiKey: event.target.value } }))}
-                placeholder="Optional for now"
-              />
-            </label>
-
-            <label className="field">
-              <span>Preferred model</span>
-              <input
-                value={state.settings.aiModel}
-                onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, aiModel: event.target.value } }))}
-              />
-            </label>
-
-            <div className="ai-note">
-              <strong>Current build status</strong>
-              <p>
-                The local planner and vault flow are cleaned up first. The next implementation step is a real Anthropic summary action from this screen.
-              </p>
+            <div className="markdown-preview">
+              {vaultNoteContent.trim() ? renderMarkdownPreview(vaultNoteContent) : <p className="empty-copy">Your formatted markdown preview will appear here as you type.</p>}
             </div>
           </article>
         </section>
