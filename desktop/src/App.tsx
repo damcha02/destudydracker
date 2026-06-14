@@ -28,6 +28,83 @@ import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveA
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
+bellSound.preload = "auto";
+let bellAudioContext: AudioContext | null = null;
+let bellAudioBuffer: AudioBuffer | null = null;
+let bellAudioPromise: Promise<AudioBuffer | null> | null = null;
+
+function getBellContext() {
+  if (bellAudioContext) return bellAudioContext;
+
+  const audioWindow = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+  const BellAudioContext = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+  if (!BellAudioContext) return null;
+
+  bellAudioContext = new BellAudioContext();
+  return bellAudioContext;
+}
+
+async function loadBellBuffer() {
+  if (bellAudioBuffer) return bellAudioBuffer;
+  if (bellAudioPromise) return bellAudioPromise;
+
+  bellAudioPromise = (async () => {
+    const context = getBellContext();
+    if (!context) return null;
+
+    try {
+      const response = await fetch("/bell.mp3");
+      if (!response.ok) throw new Error(`Could not load bell.mp3: ${response.status}`);
+      bellAudioBuffer = await context.decodeAudioData(await response.arrayBuffer());
+      return bellAudioBuffer;
+    } catch (error: unknown) {
+      console.warn("Bell sound could not be decoded.", error);
+      bellAudioPromise = null;
+      return null;
+    }
+  })();
+
+  return bellAudioPromise;
+}
+
+async function playBellSound() {
+  const context = getBellContext();
+  const buffer = await loadBellBuffer();
+  if (context && buffer) {
+    try {
+      if (context.state === "suspended") await context.resume();
+      if (context.state === "running") {
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        source.start();
+        return true;
+      }
+    } catch (error: unknown) {
+      console.warn("Bell sound failed through Web Audio.", error);
+    }
+  }
+
+  bellSound.currentTime = 0;
+  try {
+    await bellSound.play();
+    return true;
+  } catch (error: unknown) {
+    console.warn("Bell sound failed to play.", error);
+    return false;
+  }
+}
+
+async function prepareBellSound() {
+  bellSound.load();
+  const context = getBellContext();
+  try {
+    if (context?.state === "suspended") await context.resume();
+    await loadBellBuffer();
+  } catch (error: unknown) {
+    console.warn("Bell sound could not be prepared.", error);
+  }
+}
 
 const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
@@ -619,6 +696,12 @@ function App() {
   useEffect(() => {
     if (!state.timer.running) return undefined;
 
+    function ringBell() {
+      playBellSound().then((played) => {
+        if (!played) setMessage("Bell sound could not play. Check the app/system audio output.");
+      });
+    }
+
     const interval = window.setInterval(() => {
       setState((current) => {
         const timer = current.timer;
@@ -634,7 +717,7 @@ function App() {
         if (timer.phase === "study") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
-            bellSound.play().catch(() => null);
+            ringBell();
             return {
               ...current,
               sessions: [session, ...current.sessions].slice(0, 120),
@@ -649,7 +732,7 @@ function App() {
             };
           }
 
-          bellSound.play().catch(() => null);
+          ringBell();
           return {
             ...current,
             sessions: [session, ...current.sessions].slice(0, 120),
@@ -659,7 +742,7 @@ function App() {
 
         if (timer.phase === "exam") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
-          bellSound.play().catch(() => null);
+          ringBell();
           return {
             ...current,
             sessions: [session, ...current.sessions].slice(0, 120),
@@ -667,7 +750,7 @@ function App() {
           };
         }
 
-        bellSound.play().catch(() => null);
+        ringBell();
         return {
           ...current,
           timer: { ...defaultTimer, ...keepTimerContext(timer) },
@@ -1268,6 +1351,7 @@ function App() {
     const isExam = state.timer.mode === "exam";
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
+    void prepareBellSound();
 
     setState((current) => ({
       ...current,
@@ -1284,6 +1368,8 @@ function App() {
   }
 
   function pauseTimer() {
+    if (!state.timer.running) void prepareBellSound();
+
     setState((current) => {
       const timer = current.timer;
       if (timer.phase === "idle") return current;
