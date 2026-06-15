@@ -32,77 +32,175 @@ bellSound.preload = "auto";
 let bellAudioContext: AudioContext | null = null;
 let bellAudioBuffer: AudioBuffer | null = null;
 let bellAudioPromise: Promise<AudioBuffer | null> | null = null;
+let bellAudioContextFailure: string | null = null;
+let bellAudioContextFailureStage: BellStage | null = null;
+let bellAudioFailure: Extract<BellResult, { ok: false }> | null = null;
+
+type BellMethod = "web-audio" | "html-audio" | "prepared";
+type BellStage =
+  | "audio-context-unavailable"
+  | "audio-context-create-failed"
+  | "fetch-failed"
+  | "decode-failed"
+  | "context-suspended"
+  | "web-audio-play-failed"
+  | "html-audio-play-failed"
+  | "html-audio-error";
+type BellResult = { ok: true; method: BellMethod } | { ok: false; stage: BellStage; method?: BellMethod; detail: string };
+type BellBufferResult = { ok: true; context: AudioContext; buffer: AudioBuffer } | Extract<BellResult, { ok: false }>;
+
+function bellErrorDetail(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  return "Unknown audio error";
+}
+
+function bellFailure(stage: BellStage, detail: string, method?: BellMethod): Extract<BellResult, { ok: false }> {
+  return { ok: false, stage, method, detail };
+}
+
+function getBellMediaError() {
+  const error = bellSound.error;
+  if (!error) return null;
+  const labels: Record<number, string> = {
+    [MediaError.MEDIA_ERR_ABORTED]: "aborted",
+    [MediaError.MEDIA_ERR_NETWORK]: "network",
+    [MediaError.MEDIA_ERR_DECODE]: "decode",
+    [MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]: "source-not-supported",
+  };
+  return `${labels[error.code] ?? "unknown"} (${error.code})${error.message ? `: ${error.message}` : ""}`;
+}
+
+function formatBellResult(result: BellResult) {
+  if (result.ok) return `Bell sound played via ${result.method}.`;
+  return `Bell failed (${result.stage})${result.method ? ` via ${result.method}` : ""}: ${result.detail}`;
+}
 
 function getBellContext() {
   if (bellAudioContext) return bellAudioContext;
+  if (bellAudioContextFailure) return null;
 
   const audioWindow = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
   const BellAudioContext = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
-  if (!BellAudioContext) return null;
+  if (!BellAudioContext) {
+    bellAudioContextFailure = "This WebView does not expose AudioContext or webkitAudioContext.";
+    bellAudioContextFailureStage = "audio-context-unavailable";
+    return null;
+  }
 
-  bellAudioContext = new BellAudioContext();
-  return bellAudioContext;
+  try {
+    bellAudioContext = new BellAudioContext();
+    return bellAudioContext;
+  } catch (error: unknown) {
+    bellAudioContextFailure = bellErrorDetail(error);
+    bellAudioContextFailureStage = "audio-context-create-failed";
+    console.warn("Bell audio context could not be created.", error);
+    return null;
+  }
 }
 
-async function loadBellBuffer() {
-  if (bellAudioBuffer) return bellAudioBuffer;
-  if (bellAudioPromise) return bellAudioPromise;
+async function loadBellBuffer(): Promise<BellBufferResult> {
+  const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+  if (bellAudioBuffer) return { ok: true, context, buffer: bellAudioBuffer };
+  if (bellAudioPromise) {
+    const buffer = await bellAudioPromise;
+    return buffer ? { ok: true, context, buffer } : bellFailure("decode-failed", "The previous MP3 decode attempt failed.", "web-audio");
+  }
 
   bellAudioPromise = (async () => {
-    const context = getBellContext();
-    if (!context) return null;
+    let audioData: ArrayBuffer;
 
     try {
       const response = await fetch("/bell.mp3");
       if (!response.ok) throw new Error(`Could not load bell.mp3: ${response.status}`);
-      bellAudioBuffer = await context.decodeAudioData(await response.arrayBuffer());
+      audioData = await response.arrayBuffer();
+    } catch (error: unknown) {
+      bellAudioFailure = bellFailure("fetch-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be fetched.", { result: bellAudioFailure, error });
+      bellAudioPromise = null;
+      return null;
+    }
+
+    try {
+      bellAudioBuffer = await context.decodeAudioData(audioData);
+      bellAudioFailure = null;
       return bellAudioBuffer;
     } catch (error: unknown) {
-      console.warn("Bell sound could not be decoded.", error);
+      bellAudioFailure = bellFailure("decode-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be decoded.", { result: bellAudioFailure, error });
       bellAudioPromise = null;
       return null;
     }
   })();
 
-  return bellAudioPromise;
+  const buffer = await bellAudioPromise;
+  if (!buffer) return bellAudioFailure ?? bellFailure("decode-failed", "The bell MP3 could not be fetched or decoded by the Web Audio backend.", "web-audio");
+  return { ok: true, context, buffer };
 }
 
-async function playBellSound() {
-  const context = getBellContext();
-  const buffer = await loadBellBuffer();
-  if (context && buffer) {
+async function playBellSound(): Promise<BellResult> {
+  const webAudio = await loadBellBuffer();
+  if (webAudio.ok) {
     try {
+      const { context, buffer } = webAudio;
       if (context.state === "suspended") await context.resume();
       if (context.state === "running") {
         const source = context.createBufferSource();
         source.buffer = buffer;
         source.connect(context.destination);
         source.start();
-        return true;
+        return { ok: true, method: "web-audio" };
       }
+      console.warn("Bell Web Audio context is not running.", context.state);
     } catch (error: unknown) {
       console.warn("Bell sound failed through Web Audio.", error);
+      return bellFailure("web-audio-play-failed", bellErrorDetail(error), "web-audio");
     }
+  } else {
+    console.warn("Bell Web Audio unavailable.", webAudio);
   }
 
   bellSound.currentTime = 0;
   try {
     await bellSound.play();
-    return true;
+    return { ok: true, method: "html-audio" };
   } catch (error: unknown) {
-    console.warn("Bell sound failed to play.", error);
-    return false;
+    const mediaError = getBellMediaError();
+    const result = bellFailure(
+      mediaError ? "html-audio-error" : "html-audio-play-failed",
+      mediaError ?? bellErrorDetail(error),
+      "html-audio",
+    );
+    console.warn("Bell sound failed to play.", { result, error });
+    return result;
   }
 }
 
-async function prepareBellSound() {
+async function prepareBellSound(): Promise<BellResult> {
   bellSound.load();
   const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+
   try {
-    if (context?.state === "suspended") await context.resume();
-    await loadBellBuffer();
+    if (context.state === "suspended") await context.resume();
+    if (context.state === "suspended") return bellFailure("context-suspended", "AudioContext stayed suspended after resume().", "web-audio");
+    const buffer = await loadBellBuffer();
+    if (!buffer.ok) return buffer;
+    return { ok: true, method: "prepared" };
   } catch (error: unknown) {
     console.warn("Bell sound could not be prepared.", error);
+    return bellFailure("context-suspended", bellErrorDetail(error), "web-audio");
   }
 }
 
@@ -623,6 +721,7 @@ function App() {
   const [dashboardEditing, setDashboardEditing] = useState(false);
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [bellStatus, setBellStatus] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -751,8 +850,11 @@ function App() {
     if (!state.timer.running) return undefined;
 
     function ringBell() {
-      playBellSound().then((played) => {
-        if (!played) setMessage("Bell sound could not play. Check the app/system audio output.");
+      playBellSound().then((result) => {
+        const status = formatBellResult(result);
+        console.info("Bell diagnostic", result);
+        setBellStatus(status);
+        if (!result.ok) setMessage(status);
       });
     }
 
@@ -1565,7 +1667,12 @@ function App() {
     const isExam = state.timer.mode === "exam";
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
-    void prepareBellSound();
+    void prepareBellSound().then((result) => {
+      const status = formatBellResult(result);
+      console.info("Bell diagnostic", result);
+      setBellStatus(status);
+      if (!result.ok) setMessage(status);
+    });
 
     setState((current) => ({
       ...current,
@@ -1582,7 +1689,14 @@ function App() {
   }
 
   function pauseTimer() {
-    if (!state.timer.running) void prepareBellSound();
+    if (!state.timer.running) {
+      void prepareBellSound().then((result) => {
+        const status = formatBellResult(result);
+        console.info("Bell diagnostic", result);
+        setBellStatus(status);
+        if (!result.ok) setMessage(status);
+      });
+    }
 
     setState((current) => {
       const timer = current.timer;
@@ -1613,6 +1727,14 @@ function App() {
         remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
       },
     }));
+  }
+
+  async function testBellSound() {
+    const result = await playBellSound();
+    const status = formatBellResult(result);
+    console.info("Bell diagnostic", result);
+    setBellStatus(status);
+    setMessage(status);
   }
 
   function completeSessionManually() {
@@ -3624,7 +3746,12 @@ function App() {
                 <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
                   ↻
                 </button>
+                <button type="button" className="timer-save-action" onClick={testBellSound} title="Play the bell and show diagnostics">
+                  Test bell
+                </button>
               </div>
+
+              {bellStatus ? <p className="section-note">Bell diagnostic: {bellStatus}</p> : null}
 
               {state.timer.mode !== "exam" ? (
                 <button
