@@ -71,11 +71,6 @@ function getBellMediaError() {
   return `${labels[error.code] ?? "unknown"} (${error.code})${error.message ? `: ${error.message}` : ""}`;
 }
 
-function formatBellResult(result: BellResult) {
-  if (result.ok) return `Bell sound played via ${result.method}.`;
-  return `Bell failed (${result.stage})${result.method ? ` via ${result.method}` : ""}: ${result.detail}`;
-}
-
 function getBellContext() {
   if (bellAudioContext) return bellAudioContext;
   if (bellAudioContextFailure) return null;
@@ -217,6 +212,7 @@ const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const CURRENT_APP_VERSION = "0.1.2";
+const UPDATE_CHECKS_ENABLED = false;
 const RELEASES_API_URL = "https://api.github.com/repos/damcha02/destudydracker/releases/latest";
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 
@@ -721,7 +717,6 @@ function App() {
   const [dashboardEditing, setDashboardEditing] = useState(false);
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [bellStatus, setBellStatus] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -779,7 +774,7 @@ function App() {
   });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
-  const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
@@ -794,7 +789,7 @@ function App() {
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
-    message: "Check whether a newer release is available on GitHub.",
+    message: UPDATE_CHECKS_ENABLED ? "Check whether a newer release is available on GitHub." : "Update checks are temporarily disabled.",
   });
 
   useEffect(() => {
@@ -851,10 +846,7 @@ function App() {
 
     function ringBell() {
       playBellSound().then((result) => {
-        const status = formatBellResult(result);
-        console.info("Bell diagnostic", result);
-        setBellStatus(status);
-        if (!result.ok) setMessage(status);
+        if (!result.ok) console.warn("Bell sound could not play.", result);
       });
     }
 
@@ -1668,10 +1660,7 @@ function App() {
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
     void prepareBellSound().then((result) => {
-      const status = formatBellResult(result);
-      console.info("Bell diagnostic", result);
-      setBellStatus(status);
-      if (!result.ok) setMessage(status);
+      if (!result.ok) console.warn("Bell sound could not be prepared.", result);
     });
 
     setState((current) => ({
@@ -1691,10 +1680,7 @@ function App() {
   function pauseTimer() {
     if (!state.timer.running) {
       void prepareBellSound().then((result) => {
-        const status = formatBellResult(result);
-        console.info("Bell diagnostic", result);
-        setBellStatus(status);
-        if (!result.ok) setMessage(status);
+        if (!result.ok) console.warn("Bell sound could not be prepared.", result);
       });
     }
 
@@ -1727,14 +1713,6 @@ function App() {
         remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
       },
     }));
-  }
-
-  async function testBellSound() {
-    const result = await playBellSound();
-    const status = formatBellResult(result);
-    console.info("Bell diagnostic", result);
-    setBellStatus(status);
-    setMessage(status);
   }
 
   function completeSessionManually() {
@@ -2698,16 +2676,18 @@ function App() {
                   <span>Current version: {CURRENT_APP_VERSION}</span>
                   <p>{updateInfo.message}</p>
                 </div>
-                <div className="update-actions">
-                  <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
-                    {updateChecking ? "Checking..." : "Check for updates"}
-                  </button>
-                  {updateInfo.status === "available" ? (
-                    <button type="button" onClick={() => window.open(updateInfo.releaseUrl ?? RELEASES_PAGE_URL, "_blank", "noopener,noreferrer")}>
-                      Open release page
+                {UPDATE_CHECKS_ENABLED ? (
+                  <div className="update-actions">
+                    <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
+                      {updateChecking ? "Checking..." : "Check for updates"}
                     </button>
-                  ) : null}
-                </div>
+                    {updateInfo.status === "available" ? (
+                      <button type="button" onClick={() => window.open(updateInfo.releaseUrl ?? RELEASES_PAGE_URL, "_blank", "noopener,noreferrer")}>
+                        Open release page
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="delete-data-card">
                 <div>
@@ -3746,12 +3726,7 @@ function App() {
                 <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
                   ↻
                 </button>
-                <button type="button" className="timer-save-action" onClick={testBellSound} title="Play the bell and show diagnostics">
-                  Test bell
-                </button>
               </div>
-
-              {bellStatus ? <p className="section-note">Bell diagnostic: {bellStatus}</p> : null}
 
               {state.timer.mode !== "exam" ? (
                 <button
