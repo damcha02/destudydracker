@@ -113,6 +113,23 @@
     });
   });
 
+  /* ---------- Linux distro chooser ---------- */
+  var distroOptions = document.querySelectorAll('.distro-option');
+  var distroPanels = document.querySelectorAll('.distro-panel');
+  distroOptions.forEach(function (option) {
+    option.addEventListener('click', function () {
+      var distro = option.getAttribute('data-distro');
+      distroOptions.forEach(function (o) {
+        var on = o === option;
+        o.classList.toggle('on', on);
+        o.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+      distroPanels.forEach(function (p) {
+        p.classList.toggle('on', p.getAttribute('data-distro') === distro);
+      });
+    });
+  });
+
   /* Auto-select the visitor's OS on first load */
   (function detectOS() {
     var ua = (navigator.userAgent || '').toLowerCase();

@@ -29,9 +29,14 @@ You do not need to build the app yourself. Download the latest installer from th
 
 Choose the file that matches your operating system:
 
-- Windows: `.msi` or `.exe` installer.
-- macOS: `.dmg` disk image.
-- Linux: AppImage or `.deb` package.
+- Windows: use the `.exe` installer for normal installs. Use `.msi` mainly for managed or admin deployments.
+- macOS: use the `.dmg` disk image. Choose `aarch64` for Apple Silicon Macs.
+- Linux:
+  - Ubuntu, Debian, Linux Mint, Pop!_OS, Zorin: `.deb`.
+  - Fedora, RHEL, openSUSE: `.rpm`.
+  - Arch, Manjaro, EndeavourOS, NixOS, Void, Gentoo, or unknown Linux distributions: AppImage.
+
+For normal Intel/AMD computers, choose files named `amd64`, `x86_64`, or `x64`. Avoid `aarch64` or `arm64` unless you are using an ARM device.
 
 Because Study Tracker is a new unsigned app, Windows or macOS may show a one-time security warning. The landing page includes platform-specific install notes.
 

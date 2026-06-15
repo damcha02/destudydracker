@@ -257,7 +257,7 @@
           <h3 class="serif">Windows</h3>
           <p class="lead">Tested on Windows 10 and 11.</p>
           <ol class="ol">
-            <li><span class="st">Download the <strong>Windows installer</strong> (<code>.msi</code> or <code>.exe</code>) from the latest GitHub release.</span></li>
+            <li><span class="st">Download the <strong>Windows <code>.exe</code> installer</strong> from the latest GitHub release. Use <code>.msi</code> mainly for managed or admin deployments.</span></li>
             <li><span class="st">Run the installer by double-clicking it.</span></li>
             <li><span class="st">If <strong>Microsoft Defender SmartScreen</strong> appears, click <strong>More info</strong>.</span></li>
             <li><span class="st">Then click <strong>Run anyway</strong> to continue the installation.</span></li>
@@ -272,7 +272,7 @@
         <!-- macOS -->
         <div class="os-panel" data-os="mac">
           <h3 class="serif">macOS</h3>
-          <p class="lead">Works on Apple Silicon and Intel Macs.</p>
+          <p class="lead">Works on supported Mac builds. Choose <code>aarch64</code> for Apple Silicon Macs.</p>
           <ol class="ol">
             <li><span class="st">Download the macOS <strong><code>.dmg</code></strong> file from the latest GitHub release.</span></li>
             <li><span class="st">Open the <code>.dmg</code> and drag <strong>Study Tracker</strong> into your <strong>Applications</strong> folder.</span></li>
@@ -288,16 +288,36 @@
         <!-- Linux -->
         <div class="os-panel" data-os="linux">
           <h3 class="serif">Linux</h3>
-          <p class="lead">Available as AppImage and <code>.deb</code>.</p>
+          <p class="lead">Available as AppImage, <code>.deb</code>, and <code>.rpm</code>. Choose the package for your distribution.</p>
+          <div class="distro-picker" aria-label="Choose your Linux distribution">
+            <button class="distro-option on" type="button" data-distro="debian" aria-pressed="true">Ubuntu / Debian</button>
+            <button class="distro-option" type="button" data-distro="fedora" aria-pressed="false">Fedora / openSUSE</button>
+            <button class="distro-option" type="button" data-distro="arch" aria-pressed="false">Arch / Other</button>
+          </div>
+          <div class="distro-panels">
+            <div class="distro-panel on" data-distro="debian">
+              <strong>Download the <code>amd64.deb</code> file</strong>
+              <span>Best for Ubuntu, Debian, Linux Mint, Pop!_OS, Zorin, and similar distributions.</span>
+            </div>
+            <div class="distro-panel" data-distro="fedora">
+              <strong>Download the <code>x86_64.rpm</code> file</strong>
+              <span>Best for Fedora, RHEL-based distributions, and openSUSE.</span>
+            </div>
+            <div class="distro-panel" data-distro="arch">
+              <strong>Download the <code>amd64.AppImage</code> file</strong>
+              <span>Best for Arch, Manjaro, EndeavourOS, NixOS, Void, Gentoo, and unknown Linux distributions.</span>
+            </div>
+          </div>
           <ol class="ol">
-            <li><span class="st">Download the <strong>AppImage</strong> or <strong><code>.deb</code></strong> file from the latest GitHub release.</span></li>
-            <li><span class="st"><strong>AppImage:</strong> make it executable, then run it — <code>chmod +x Study-Tracker.AppImage</code> followed by <code>./Study-Tracker.AppImage</code>.</span></li>
-            <li><span class="st"><strong>.deb:</strong> install with your package manager, e.g. <code>sudo apt install ./study-tracker.deb</code> or <code>sudo dpkg -i study-tracker.deb</code>.</span></li>
+            <li><span class="st">Download the recommended Linux file from the latest GitHub release.</span></li>
+            <li><span class="st"><strong>AppImage:</strong> make it executable, then run it — <code>chmod +x Study.Tracker_*_amd64.AppImage</code> followed by <code>./Study.Tracker_*_amd64.AppImage</code>.</span></li>
+            <li><span class="st"><strong>.deb:</strong> install with <code>sudo apt install ./Study.Tracker_*_amd64.deb</code>.</span></li>
+            <li><span class="st"><strong>.rpm:</strong> install with <code>sudo dnf install ./Study.Tracker-*.x86_64.rpm</code>.</span></li>
             <li><span class="st">Launch it from your applications menu or the terminal.</span></li>
           </ol>
           <div class="note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-            <p><strong>Tip:</strong> if the AppImage won't run, install <code>libfuse2</code> (<code>sudo apt install libfuse2</code>). Most desktop distributions need it for AppImages.</p>
+            <p><strong>Tip:</strong> if you are not on ARM, avoid files named <code>aarch64</code> or <code>arm64</code>. Choose <code>amd64</code>, <code>x86_64</code>, or <code>x64</code> for normal Intel/AMD PCs. If the AppImage won't run, install <code>libfuse2</code>.</p>
           </div>
         </div>
       </div>
