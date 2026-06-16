@@ -12,8 +12,8 @@
     original:  { type: 'none' },
     default:   { type: 'none' },
     midnight: {
-      dark:  { type: 'rain', color: '#ffffff', intensity: 0.5 },
-      light: { type: 'rain', color: '#0969da', intensity: 0.22 }
+      dark:  { type: 'rain', color: '#ffffff', intensity: 0.7 },
+      light: { type: 'rain', color: '#0969da', intensity: 0.7 }
     },
     paper: {
       dark:  { type: 'dots', color: '#d0aa3f', intensity: 0.65 },
