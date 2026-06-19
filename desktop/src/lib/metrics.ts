@@ -20,7 +20,14 @@ export function formatDate(date: string) {
 }
 
 export function isoDate(date = new Date()) {
-  return date.toISOString().slice(0, 10);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function sessionDateKey(session: StudySession) {
+  return isoDate(new Date(session.endedAt));
 }
 
 export function daysUntil(date: string) {
@@ -205,7 +212,7 @@ export function getWeeklyActivity(sessions: StudySession[]) {
 
   const map = new Map(buckets.map((bucket) => [bucket.key, bucket]));
   sessions.forEach((session) => {
-    const key = session.endedAt.slice(0, 10);
+    const key = sessionDateKey(session);
     const bucket = map.get(key);
     if (bucket) bucket.minutes += session.minutes;
   });
@@ -234,7 +241,7 @@ export function getUpcomingExams(state: AppState) {
 
 export function getTodaySessions(state: AppState) {
   const today = isoDate();
-  return state.sessions.filter((session) => session.endedAt.slice(0, 10) === today);
+  return state.sessions.filter((session) => sessionDateKey(session) === today);
 }
 
 export function getTodayMinutes(state: AppState) {
@@ -242,7 +249,7 @@ export function getTodayMinutes(state: AppState) {
 }
 
 export function getStreakDays(state: AppState) {
-  const sessionDays = new Set(state.sessions.map((session) => session.endedAt.slice(0, 10)));
+  const sessionDays = new Set(state.sessions.map(sessionDateKey));
   let streak = 0;
   const cursor = new Date();
 
@@ -274,7 +281,7 @@ export function getFocusMomentum(state: AppState) {
 
 export function buildDailyNoteMarkdown(state: AppState, noteDate = isoDate()) {
   const courseLookup = new Map(state.courses.map((course) => [course.id, course]));
-  const sessions = state.sessions.filter((session) => session.endedAt.slice(0, 10) === noteDate);
+  const sessions = state.sessions.filter((session) => sessionDateKey(session) === noteDate);
   const totalMinutes = sessions.reduce((sum, session) => sum + session.minutes, 0);
   const learned = sessions.map((session) => session.learned).filter(Boolean);
   const blockers = sessions.map((session) => session.blocker).filter(Boolean);

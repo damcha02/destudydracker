@@ -7,63 +7,24 @@
 (function () {
   'use strict';
 
-  // palette -> { type, color: optional CSS bias color, intensity } or { dark, light }
+  // palette -> { type, color: 'fg' | hex, intensity }
   var CONFIG = {
     original:  { type: 'none' },
     default:   { type: 'none' },
-    midnight: {
-      dark:  { type: 'rain', color: '#ffffff', intensity: 0.7 },
-      light: { type: 'rain', color: '#0969da', intensity: 0.7 }
-    },
-    paper: {
-      dark:  { type: 'dots', color: '#d0aa3f', intensity: 0.65 },
-      light: { type: 'dots', color: 'fg', intensity: 0.9 }
-    },
-    cyberpunk: {
-      dark:  { type: 'synapse', color: '#0ff0fc', intensity: 1 },
-      light: { type: 'synapse', color: '#d100ff', intensity: 0.58 }
-    },
-    retrowave: {
-      dark:  { type: 'embers', color: '#e94560', intensity: 1 },
-      light: { type: 'embers', color: '#e33570', intensity: 0.55 }
-    },
-    forest: {
-      dark:  { type: 'petals', color: '#bce0b2', intensity: 0.85 },
-      light: { type: 'petals', color: '#4a9a3f', intensity: 0.55 }
-    },
-    ocean: {
-      dark:  { type: 'constellations', color: '#64d2ff', intensity: 1 },
-      light: { type: 'constellations', color: '#0aa3b4', intensity: 0.56 }
-    },
-    terminal: {
-      dark:  { type: 'perlinflow', color: '#00ff41', intensity: 0.8 },
-      light: { type: 'perlinflow', color: '#1d8f37', intensity: 0.38 }
-    },
-    organs: {
-      dark:  { type: 'rain', color: '#5a1e22', intensity: 0.65 },
-      light: { type: 'rain', color: '#b6242f', intensity: 0.28 }
-    },
-    ume: {
-      dark:  { type: 'petals', color: '#f5a0c0', intensity: 1 },
-      light: { type: 'petals', color: '#df7aa5', intensity: 0.58 }
-    },
-    cute: {
-      dark:  { type: 'sparkles', color: '#ff8cb8', intensity: 1 },
-      light: { type: 'sparkles', color: '#ff6b9d', intensity: 0.58 }
-    },
-    copper: {
-      dark:  { type: 'embers', color: '#d4764e', intensity: 0.45 },
-      light: { type: 'embers', color: '#c2643d', intensity: 0.3 }
-    },
-    lavender: {
-      dark:  { type: 'dots', color: '#b384e3', intensity: 0.65 },
-      light: { type: 'dots', color: 'fg', intensity: 0.7 }
-    },
+    midnight:  { type: 'rain',           color: '#ffffff', intensity: 0.5 },
+    paper:     { type: 'dots',           color: 'fg',      intensity: 1 },
+    cyberpunk: { type: 'synapse',        color: 'fg',      intensity: 1 },
+    retrowave: { type: 'embers',         color: 'fg',      intensity: 1 },
+    forest:    { type: 'petals',         color: 'fg',      intensity: 1 },
+    ocean:     { type: 'constellations', color: 'fg',      intensity: 1 },
+    terminal:  { type: 'perlinflow',     color: 'fg',      intensity: 0.8 },
+    organs:    { type: 'rain',           color: '#451616', intensity: 0.65 },
+    ume:       { type: 'petals',         color: '#f5a0c0', intensity: 1 },
+    cute:      { type: 'sparkles',       color: '#ff8cb8', intensity: 1 },
+    copper:    { type: 'none' },
+    lavender:  { type: 'dots',           color: 'fg',      intensity: 0.7 },
     gpt:       { type: 'none' },
-    claude: {
-      dark:  { type: 'embers', color: '#c6613f', intensity: 0.28 },
-      light: { type: 'embers', color: '#b85f3d', intensity: 0.22 }
-    }
+    claude:    { type: 'none' }
   };
 
   var canvas, ctx, W = 0, H = 0, DPR = 1, raf = 0, t = 0;
@@ -101,40 +62,12 @@
   function cssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   }
-  function resolveColor(c) { return toRgbString((!c || c === 'fg') ? (cssVar('--ink') || '#888') : c); }
-
-  function resolveEffectColor(cfg) {
-    var bg = averageRgb(colorToRgb(toRgbString(cssVar('--bg') || '#111')), colorToRgb(toRgbString(cssVar('--bg-grad-1') || cssVar('--bg') || '#111')));
-    var complement = complementRgb(bg);
-    var bias = cfg.color ? colorToRgb(resolveColor(cfg.color)) : colorToRgb(toRgbString(cssVar('--accent') || '#888'));
-    var mixed = blendRgb(complement, bias, 0.28);
-    return 'rgb(' + Math.round(mixed[0]) + ', ' + Math.round(mixed[1]) + ', ' + Math.round(mixed[2]) + ')';
-  }
-
-  function toRgbString(color) {
-    var probe = toRgbString.probe;
-    if (!probe) {
-      probe = document.createElement('span');
-      probe.style.position = 'fixed';
-      probe.style.left = '-9999px';
-      probe.style.color = '#888888';
-      document.body.appendChild(probe);
-      toRgbString.probe = probe;
-    }
-    probe.style.color = '#888888';
-    probe.style.color = color;
-    return getComputedStyle(probe).color || '#888888';
-  }
-
-  function getModeConfig(config, mode) {
-    return config && (config.dark || config.light) ? (config[mode] || config.dark || config.light) : config;
-  }
+  function resolveColor(c) { return (!c || c === 'fg') ? (cssVar('--ink') || '#888') : c; }
 
   function apply() {
     var pal = document.documentElement.getAttribute('data-palette') || 'default';
-    var mode = document.documentElement.getAttribute('data-theme') || 'dark';
-    var cfg = getModeConfig(CONFIG[pal] || CONFIG.default, mode);
-    current = { type: cfg.type, color: resolveEffectColor(cfg), intensity: cfg.intensity || 1 };
+    var cfg = CONFIG[pal] || CONFIG.default;
+    current = { type: cfg.type, color: resolveColor(cfg.color), intensity: cfg.intensity || 1 };
     cancelAnimationFrame(raf);
     ctx.clearRect(0, 0, W, H);
     if (current.type === 'none') { canvas.style.opacity = '0'; return; }
@@ -176,76 +109,12 @@
     }
   }
 
-  function colorToRgb(color) {
-    var m = String(color || '').match(/rgba?\(([^)]+)\)/);
-    if (m) {
-      var parts = m[1].split(/[ ,/]+/).map(parseFloat);
-      return [parts[0] || 136, parts[1] || 136, parts[2] || 136];
-    }
-    var h = String(color || '#888888').replace('#', '');
+  function hexToRgb(h) {
+    h = (h || '#888888').replace('#', '');
     if (h.length === 3) h = h.split('').map(function (x) { return x + x; }).join('');
     return [parseInt(h.slice(0, 2), 16) || 136, parseInt(h.slice(2, 4), 16) || 136, parseInt(h.slice(4, 6), 16) || 136];
   }
-
-  function averageRgb(a, b) {
-    return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-  }
-
-  function blendRgb(a, b, amount) {
-    return [
-      a[0] * (1 - amount) + b[0] * amount,
-      a[1] * (1 - amount) + b[1] * amount,
-      a[2] * (1 - amount) + b[2] * amount
-    ];
-  }
-
-  function complementRgb(rgb) {
-    var hsl = rgbToHsl(rgb[0], rgb[1], rgb[2]);
-    hsl[0] = (hsl[0] + 0.5) % 1;
-    hsl[1] = Math.max(0.42, Math.min(0.86, hsl[1] + 0.16));
-    hsl[2] = hsl[2] < 0.5 ? Math.min(0.82, hsl[2] + 0.36) : Math.max(0.20, hsl[2] - 0.34);
-    return hslToRgb(hsl[0], hsl[1], hsl[2]);
-  }
-
-  function rgbToHsl(r, g, b) {
-    r /= 255; g /= 255; b /= 255;
-    var max = Math.max(r, g, b), min = Math.min(r, g, b);
-    var h = 0, s = 0, l = (max + min) / 2;
-    if (max !== min) {
-      var d = max - min;
-      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-      if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
-      else if (max === g) h = (b - r) / d + 2;
-      else h = (r - g) / d + 4;
-      h /= 6;
-    }
-    return [h, s, l];
-  }
-
-  function hslToRgb(h, s, l) {
-    var r, g, b;
-    if (s === 0) {
-      r = g = b = l;
-    } else {
-      var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-      var p = 2 * l - q;
-      r = hueToRgb(p, q, h + 1 / 3);
-      g = hueToRgb(p, q, h);
-      b = hueToRgb(p, q, h - 1 / 3);
-    }
-    return [r * 255, g * 255, b * 255];
-  }
-
-  function hueToRgb(p, q, t) {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  }
-
-  function rgba(color, a) { var c = colorToRgb(color); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+  function rgba(h, a) { var c = hexToRgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 
   // ---- static renderers ----
   function drawDots() {
@@ -267,7 +136,7 @@
 
     if (type === 'perlinflow') {
       // fade trails instead of hard clear
-      ctx.fillStyle = rgba(toRgbString(cssVar('--bg') || '#000'), 0.12);
+      ctx.fillStyle = rgba(cssVar('--bg') || '#000', 0.12);
       ctx.fillRect(0, 0, W, H);
     } else {
       ctx.clearRect(0, 0, W, H);

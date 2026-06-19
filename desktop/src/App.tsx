@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -211,6 +212,8 @@ const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
+const SESSION_HISTORY_DAYS = 365;
+const SESSION_HISTORY_MAX = 3000;
 const CURRENT_APP_VERSION = "0.1.2";
 const UPDATE_CHECKS_ENABLED = false;
 const RELEASES_API_URL = "https://api.github.com/repos/damcha02/destudydracker/releases/latest";
@@ -708,8 +711,41 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
   };
 }
 
+function pruneSessionHistory(sessions: StudySession[], today = new Date()) {
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - SESSION_HISTORY_DAYS);
+  cutoff.setHours(0, 0, 0, 0);
+
+  return sessions
+    .filter((session) => new Date(session.endedAt) >= cutoff)
+    .slice(0, SESSION_HISTORY_MAX);
+}
+
+async function startWindowDrag() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().startDragging();
+}
+
+async function minimizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().minimize();
+}
+
+async function toggleMaximizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().toggleMaximize();
+}
+
+async function closeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().close();
+}
+
 function App() {
-  const [state, setState] = useState<AppState>(loadAppState);
+  const [state, setState] = useState<AppState>(() => {
+    const loaded = loadAppState();
+    return { ...loaded, sessions: pruneSessionHistory(loaded.sessions) };
+  });
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
@@ -868,7 +904,7 @@ function App() {
             ringBell();
             return {
               ...current,
-              sessions: [session, ...current.sessions].slice(0, 120),
+              sessions: pruneSessionHistory([session, ...current.sessions]),
               timer: {
                 ...timer,
                 phase: "break",
@@ -883,7 +919,7 @@ function App() {
           ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -893,7 +929,7 @@ function App() {
           ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -1728,7 +1764,7 @@ function App() {
       const session = buildSessionFromTimer(timer, new Date().toISOString(), minutes);
       return {
         ...current,
-        sessions: [session, ...current.sessions].slice(0, 120),
+        sessions: pruneSessionHistory([session, ...current.sessions]),
         timer: { ...defaultTimer, ...keepTimerContext(timer) },
       };
     });
@@ -2711,8 +2747,28 @@ function App() {
     );
   }
 
+  const showWindowTitlebar = isTauriApp();
+
   return (
-    <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
+    <>
+      {showWindowTitlebar ? (
+        <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>
+          <div className="window-titlebar-title">Study Tracker</div>
+          <div className="window-titlebar-controls" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => void minimizeWindow()} aria-label="Minimize window" title="Minimize">
+              <span aria-hidden="true">-</span>
+            </button>
+            <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label="Maximize or restore window" title="Maximize or restore">
+              <span aria-hidden="true">□</span>
+            </button>
+            <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
           <div className="brand-mark" aria-hidden="true">
@@ -4098,7 +4154,8 @@ function App() {
           </article>
         </section>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }
 
