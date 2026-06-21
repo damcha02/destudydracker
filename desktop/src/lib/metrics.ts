@@ -287,13 +287,7 @@ export function buildDailyNoteMarkdown(state: AppState, noteDate = isoDate()) {
   const blockers = sessions.map((session) => session.blocker).filter(Boolean);
   const nextSteps = sessions.map((session) => session.nextStep).filter(Boolean);
 
-  return `---
-date: ${noteDate}
-source: Study Tracker
-minutes: ${totalMinutes}
----
-
-# ${noteDate}
+  return `# ${noteDate}
 
 ## Study Summary
 - Total focused time: ${formatMinutes(totalMinutes)}
