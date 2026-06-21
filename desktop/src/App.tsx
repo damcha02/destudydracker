@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -23,7 +24,7 @@ import {
   getUpcomingExams,
   getWeeklyActivity,
 } from "./lib/metrics";
-import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, writeDailyNote } from "./lib/obsidian";
+import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
@@ -68,6 +69,16 @@ type DashboardWidgetLayout = {
 
 type CalendarView = "month" | "week";
 type MenuPanel = "theme" | "personal" | "settings" | null;
+type VaultSpace = "daily" | "references";
+
+const vaultSpaces: Array<{ id: VaultSpace | "summaries" | "exams" | "templates" | "inbox"; label: string; soon?: boolean }> = [
+  { id: "daily", label: "Daily" },
+  { id: "references", label: "References" },
+  { id: "summaries", label: "Summaries", soon: true },
+  { id: "exams", label: "Exams", soon: true },
+  { id: "templates", label: "Templates", soon: true },
+  { id: "inbox", label: "Inbox", soon: true },
+];
 
 type CalendarDay = {
   date: Date;
@@ -373,8 +384,68 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function buildReferenceNoteMarkdown(course: Course) {
+  return `# ${course.name} References
+
+> Useful links, docs, recordings, exercises, and exam prep for ${course.name}.
+
+## Official Links
+- [Course page](https://example.com)
+- [Moodle / LMS](https://example.com)
+
+## Lecture Resources
+- [Lecture recordings](https://example.com)
+- [Slides folder](https://example.com)
+
+## Exercises
+- [Exercise sheets](https://example.com)
+- [Solutions](https://example.com)
+
+## Exam Prep
+- [Past exams](https://example.com)
+- [Formula sheet](https://example.com)
+`;
+}
+
+function stripMarkdownFrontmatter(markdown: string) {
+  return markdown.replace(/^---\n[\s\S]*?\n---\n+/, "");
+}
+
+function isExternalWebUrl(url: string) {
+  return /^https?:\/\//i.test(url.trim());
+}
+
+function openExternalLink(url: string) {
+  const target = url.trim();
+  if (!isExternalWebUrl(target)) return;
+
+  if (isTauriApp()) {
+    void openUrl(target);
+    return;
+  }
+
+  window.open(target, "_blank", "noreferrer");
+}
+
+function renderExternalLink(label: ReactNode, url: string, key: string) {
+  return (
+    <a
+      key={key}
+      href={url}
+      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        openExternalLink(url);
+      }}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {label}
+    </a>
+  );
+}
+
 function renderInlineMarkdown(text: string, keyPrefix: string) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<)]+)/g).filter(Boolean);
   return parts.map((part, index) => {
     const key = `${keyPrefix}-${index}`;
     if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
@@ -383,12 +454,10 @@ function renderInlineMarkdown(text: string, keyPrefix: string) {
 
     const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (link) {
-      return (
-        <a key={key} href={link[2]} target="_blank" rel="noreferrer">
-          {link[1]}
-        </a>
-      );
+      return renderExternalLink(link[1], link[2], key);
     }
+
+    if (isExternalWebUrl(part)) return renderExternalLink(part, part, key);
 
     return part;
   });
@@ -552,7 +621,7 @@ function App() {
   const [addingExamSemesterId, setAddingExamSemesterId] = useState<string | null>(null);
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
-  const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
@@ -564,6 +633,18 @@ function App() {
   const [vaultNoteDirty, setVaultNoteDirty] = useState(false);
   const [vaultNoteLoading, setVaultNoteLoading] = useState(false);
   const [vaultSetupOpen, setVaultSetupOpen] = useState(() => !state.settings.vaultPath);
+  const [vaultDailyEditing, setVaultDailyEditing] = useState(false);
+  const [markdownCheatsheetOpen, setMarkdownCheatsheetOpen] = useState(false);
+  const [vaultSpace, setVaultSpace] = useState<VaultSpace>("daily");
+  const [referenceSemesterId, setReferenceSemesterId] = useState("");
+  const [referenceCourseId, setReferenceCourseId] = useState("");
+  const [referenceContent, setReferenceContent] = useState("");
+  const [referencePath, setReferencePath] = useState<string | null>(null);
+  const [referenceDirty, setReferenceDirty] = useState(false);
+  const [referenceLoading, setReferenceLoading] = useState(false);
+  const [referenceEditing, setReferenceEditing] = useState(false);
+  const [referencePathVisible, setReferencePathVisible] = useState(false);
+  const referenceLoadRequestRef = useRef(0);
 
   useEffect(() => {
     saveAppState(state);
@@ -613,6 +694,16 @@ function App() {
     const timeout = window.setTimeout(() => setMessage(null), 3200);
     return () => window.clearTimeout(timeout);
   }, [message]);
+
+  useEffect(() => {
+    if (!markdownCheatsheetOpen) return undefined;
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setMarkdownCheatsheetOpen(false);
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [markdownCheatsheetOpen]);
 
   useEffect(() => {
     if (!state.timer.running) return undefined;
@@ -714,7 +805,49 @@ function App() {
     () => new Map(state.courses.map((course) => [course.id, course])),
     [state.courses],
   );
+  const referenceCourses = useMemo(
+    () => referenceSemesterId ? getSemesterCourses(state, referenceSemesterId) : [],
+    [referenceSemesterId, state],
+  );
+  const selectedReferenceSemester = referenceSemesterId ? semesterLookup.get(referenceSemesterId) ?? null : null;
+  const selectedReferenceCourse = referenceCourseId ? courseLookup.get(referenceCourseId) ?? null : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
+
+  useEffect(() => {
+    const firstSemester = state.semesters[0]?.id ?? "";
+    if (!referenceSemesterId && firstSemester) {
+      setReferenceSemesterId(firstSemester);
+      return;
+    }
+    if (referenceSemesterId && !state.semesters.some((semester) => semester.id === referenceSemesterId)) {
+      setReferenceSemesterId(firstSemester);
+      setReferenceCourseId("");
+    }
+  }, [referenceSemesterId, state.semesters]);
+
+  useEffect(() => {
+    const firstCourse = referenceCourses[0]?.id ?? "";
+    if (!referenceCourseId && firstCourse) {
+      setReferenceCourseId(firstCourse);
+      return;
+    }
+    if (referenceCourseId && !referenceCourses.some((course) => course.id === referenceCourseId)) {
+      setReferenceCourseId(firstCourse);
+    }
+  }, [referenceCourseId, referenceCourses]);
+
+  useEffect(() => {
+    setReferenceContent("");
+    setReferencePath(null);
+    setReferenceDirty(false);
+    setReferenceEditing(false);
+    setReferencePathVisible(false);
+  }, [referenceSemesterId, referenceCourseId]);
+
+  useEffect(() => {
+    if (vaultSpace !== "references" || !state.settings.vaultPath || !selectedReferenceSemester || !selectedReferenceCourse) return;
+    void loadReferenceNote(state.settings.vaultPath, selectedReferenceSemester, selectedReferenceCourse, { silent: true });
+  }, [selectedReferenceCourse, selectedReferenceSemester, state.settings.vaultPath, vaultSpace]);
   const selectedTask = useMemo(
     () => state.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, state.tasks],
@@ -771,6 +904,10 @@ function App() {
   const upcomingExams = useMemo(() => getUpcomingExams(state), [state]);
   const overallHealth = useMemo(() => getOverallHealth(state), [state]);
   const notePreview = useMemo(() => buildDailyNoteMarkdown(state, vaultNoteDate), [state, vaultNoteDate]);
+  const dailyPreviewContent = stripMarkdownFrontmatter(vaultNoteContent || notePreview);
+  const referencePreview = selectedReferenceSemester && selectedReferenceCourse
+    ? stripMarkdownFrontmatter(referenceContent || buildReferenceNoteMarkdown(selectedReferenceCourse))
+    : "";
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
@@ -1382,9 +1519,10 @@ function App() {
     setVaultNoteLoading(true);
     try {
       const existing = await readDailyNote(vaultPath, noteDate);
-      setVaultNoteContent(existing ?? buildDailyNoteMarkdown(state, noteDate));
+      setVaultNoteContent(existing ? stripMarkdownFrontmatter(existing) : buildDailyNoteMarkdown(state, noteDate));
       setVaultNotePath(`${vaultPath}/Daily/${noteDate}.md`);
       setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
       setMessage(existing ? `Loaded ${noteDate}.md` : `Created an unsaved draft for ${noteDate}.`);
     } catch (error) {
       setMessage(getErrorMessage(error, "Could not load the daily note."));
@@ -1404,6 +1542,7 @@ function App() {
       const notePath = await writeDailyNote(state.settings.vaultPath, vaultNoteDate, vaultNoteContent || notePreview);
       setVaultNotePath(notePath);
       setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
       setState((current) => ({
         ...current,
         exports: [
@@ -1424,9 +1563,84 @@ function App() {
     }
   }
 
+  async function loadReferenceNote(
+    vaultPath = state.settings.vaultPath,
+    semester = selectedReferenceSemester,
+    course = selectedReferenceCourse,
+    options: { silent?: boolean } = {},
+  ) {
+    if (!vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!semester || !course) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    const requestId = referenceLoadRequestRef.current + 1;
+    referenceLoadRequestRef.current = requestId;
+    setReferenceLoading(true);
+    try {
+      const existing = await readReferenceNote(vaultPath, semester.name, course.name);
+      if (referenceLoadRequestRef.current !== requestId) return;
+      setReferenceContent(existing ? stripMarkdownFrontmatter(existing) : buildReferenceNoteMarkdown(course));
+      setReferencePath(`${vaultPath}/References/${semester.name}/${course.name}.md`);
+      setReferenceDirty(false);
+      setReferenceEditing(false);
+      if (!options.silent) setMessage(existing ? `Loaded references for ${course.name}.` : `Created an unsaved references draft for ${course.name}.`);
+    } catch (error) {
+      if (referenceLoadRequestRef.current !== requestId) return;
+      setMessage(getErrorMessage(error, "Could not load course references."));
+    } finally {
+      if (referenceLoadRequestRef.current === requestId) setReferenceLoading(false);
+    }
+  }
+
+  async function handleSaveReferenceNote() {
+    if (!state.settings.vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!selectedReferenceSemester || !selectedReferenceCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    setReferenceLoading(true);
+    try {
+      const content = referenceContent || buildReferenceNoteMarkdown(selectedReferenceCourse);
+      const notePath = await writeReferenceNote(
+        state.settings.vaultPath,
+        selectedReferenceSemester.name,
+        selectedReferenceCourse.name,
+        content,
+      );
+      setReferenceContent(content);
+      setReferencePath(notePath);
+      setReferenceDirty(false);
+      setReferenceEditing(false);
+      setMessage(`Saved references to ${notePath}`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not save course references."));
+    } finally {
+      setReferenceLoading(false);
+    }
+  }
+
+  function handleEditReferenceNote() {
+    if (!selectedReferenceSemester || !selectedReferenceCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+    setReferenceContent((current) => current || buildReferenceNoteMarkdown(selectedReferenceCourse));
+    setReferenceEditing(true);
+  }
+
   function handleUseGeneratedNote() {
     setVaultNoteContent(notePreview);
     setVaultNoteDirty(true);
+    setVaultDailyEditing(true);
     setMessage("Generated markdown copied into the editor. Save it when you are ready.");
   }
 
@@ -3444,136 +3658,305 @@ function App() {
       ) : null}
 
       {state.activeTab === "vault" ? (
-        <section className="vault-grid">
-          <article className="panel-card vault-card vault-setup-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Obsidian</p>
-                <h2>Create or link your markdown vault</h2>
-              </div>
-              <button type="button" className="ghost-button" onClick={() => setVaultSetupOpen((current) => !current)}>
-                {vaultSetupOpen ? "Hide setup" : "Show setup"}
+        <section className="vault-shell">
+          <div className="vault-hero">
+            <div>
+              <h1>Vault</h1>
+              <p>Your Obsidian-compatible markdown knowledge base.</p>
+            </div>
+            <div className="vault-hero-actions">
+              {state.settings.vaultPath ? (
+                <span className="vault-status-pill"><span />{state.settings.vaultName || "Linked vault"}</span>
+              ) : null}
+              <button type="button" className="ghost-button" onClick={() => setMarkdownCheatsheetOpen(true)}>
+                Markdown
+              </button>
+              <button type="button" className="ghost-button vault-settings-button" onClick={() => setVaultSetupOpen((current) => !current)}>
+                {vaultSetupOpen ? "Close setup" : "Vault setup"}
               </button>
             </div>
+          </div>
 
-            {vaultSetupOpen ? (
-              <>
-                <div className="form-grid compact-grid">
-                  <label className="field">
-                    <span>Vault name</span>
-                    <input
-                      value={state.settings.vaultName}
-                      onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
-                      placeholder="StudyTrackerVault"
-                    />
-                  </label>
-
-                  <label className="field wide">
-                    <span>Current vault path</span>
-                    <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
-                  </label>
-                </div>
-
-                <div className="control-row left roomy-top">
-                  <button type="button" onClick={handleCreateVault}>
-                    Create new vault
-                  </button>
-                  <button type="button" className="ghost-button" onClick={handleLinkVault}>
-                    Link existing vault
-                  </button>
-                </div>
-
-                <p className="section-note">An Obsidian vault is just a folder of markdown files. Study Tracker creates or uses Daily, Weekly, Subjects, Exams, Summaries, Templates, and Inbox without locking you into the app.</p>
-              </>
-            ) : (
-              <p className="section-note">{state.settings.vaultPath ? `Linked vault: ${state.settings.vaultPath}` : "No vault linked yet. Open setup to create or link one."}</p>
-            )}
-          </article>
-
-          <article className="panel-card note-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Markdown</p>
-                <h2>Daily note editor</h2>
-              </div>
-              <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
-            </div>
-
-            <div className="form-grid compact-grid">
-              <label className="field">
-                <span>Note date</span>
-                <input
-                  type="date"
-                  value={vaultNoteDate}
-                  onChange={(event) => {
-                    setVaultNoteDate(event.target.value || localIsoDate());
-                    setVaultNotePath(null);
-                    setVaultNoteContent("");
-                    setVaultNoteDirty(false);
-                  }}
-                />
-              </label>
-              <label className="field wide">
-                <span>Note path</span>
-                <button type="button" className="path-button" onClick={handleLinkVault}>
-                  {vaultNotePath ?? (state.settings.vaultPath ? `${state.settings.vaultPath}/Daily/${vaultNoteDate}.md` : "No vault linked yet")}
-                </button>
-              </label>
-            </div>
-
-            <textarea
-              className="note-preview"
-              value={vaultNoteContent}
-              onChange={(event) => {
-                setVaultNoteContent(event.target.value);
-                setVaultNoteDirty(true);
-              }}
-              placeholder="Load a daily note from your vault or generate a draft from today's Study Tracker sessions."
-            />
-
-            <div className="control-row left roomy-top">
-              <button type="button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>
-                {vaultNoteLoading ? "Working..." : "Load note"}
-              </button>
-              <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>
-                Generate from sessions
-              </button>
-              <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading || !state.settings.vaultPath}>
-                Save note
-              </button>
-            </div>
-
-            <p className="section-note">Saving writes this editor to the markdown file. Timer sessions stay inside Study Tracker until you choose to generate or save a note.</p>
-
-            <div className="stack-list compact export-list">
-              {state.exports.length ? (
-                state.exports.map((item) => (
-                  <div key={item.id} className="session-row">
-                    <div>
-                      <strong>{item.noteDate}</strong>
-                      <p>{item.notePath}</p>
-                    </div>
-                    <small>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.exportedAt))}</small>
+          {markdownCheatsheetOpen ? (
+            <div className="markdown-cheatsheet-backdrop" onMouseDown={() => setMarkdownCheatsheetOpen(false)}>
+              <section className="markdown-cheatsheet-panel" onMouseDown={(event) => event.stopPropagation()} aria-label="Markdown cheatsheet">
+                <div className="markdown-cheatsheet-head">
+                  <div>
+                    <p className="eyebrow">Vault markdown</p>
+                    <h2>Cheatsheet</h2>
+                    <p>These are the markdown features Study Tracker currently previews.</p>
                   </div>
-                ))
-              ) : (
-                <p className="empty-copy">Exports will appear here once you write the first daily note.</p>
-              )}
-            </div>
-          </article>
+                  <button type="button" className="ghost-button small-button" onClick={() => setMarkdownCheatsheetOpen(false)} aria-label="Close markdown cheatsheet">
+                    X
+                  </button>
+                </div>
 
-          <article className="panel-card markdown-preview-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Preview</p>
-                <h2>Markdown preview</h2>
+                <div className="markdown-cheatsheet-grid">
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Headings</h3>
+                    <pre><code>{"# Title\n## Section\n### Subsection"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Emphasis</h3>
+                    <pre><code>{"**bold**\n*italic*\n`inline code`"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Lists</h3>
+                    <pre><code>{"- bullet item\n* another bullet\n\n1. first\n2. second"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Quotes</h3>
+                    <pre><code>{"> Important note or reminder"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Links</h3>
+                    <pre><code>{"[ETH Video](https://video.ethz.ch/...)\nhttps://video.ethz.ch/..."}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Code Blocks</h3>
+                    <pre><code>{"```\nconst topic = \"series\";\n```"}</code></pre>
+                  </div>
+                </div>
+
+                <div className="markdown-cheatsheet-note">
+                  <strong>Not supported in preview yet:</strong> tables, images, LaTeX/math rendering, nested lists, and interactive task checkboxes.
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {!state.settings.vaultPath ? (
+            <article className="panel-card vault-empty-card">
+              <p className="eyebrow">No vault linked</p>
+              <h2>Connect your markdown vault</h2>
+              <p className="section-note">Notes are saved as standard `.md` files you can open in Obsidian or any editor.</p>
+              <div className="control-row roomy-top">
+                <button type="button" onClick={handleLinkVault}>Link existing vault</button>
+                <button type="button" className="ghost-button" onClick={handleCreateVault}>Create new vault</button>
               </div>
-            </div>
+            </article>
+          ) : null}
 
-            <div className="markdown-preview">
-              {vaultNoteContent.trim() ? renderMarkdownPreview(vaultNoteContent) : <p className="empty-copy">Your formatted markdown preview will appear here as you type.</p>}
-            </div>
-          </article>
+          {vaultSetupOpen ? (
+            <article className="panel-card vault-settings-panel">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Obsidian vault</p>
+                  <h2>Vault configuration</h2>
+                </div>
+              </div>
+              <div className="form-grid compact-grid">
+                <label className="field">
+                  <span>Vault name</span>
+                  <input
+                    value={state.settings.vaultName}
+                    onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
+                    placeholder="StudyTrackerVault"
+                  />
+                </label>
+                <label className="field wide">
+                  <span>Current vault path</span>
+                  <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
+                </label>
+              </div>
+              <div className="vault-folder-strip" aria-label="Vault folders">
+                {["Inbox", "Daily", "Weekly", "Subjects", "Exams", "Summaries", "Templates", "References"].map((folder) => <span key={folder}>{folder}</span>)}
+              </div>
+              <div className="control-row left roomy-top">
+                <button type="button" onClick={handleCreateVault}>Create new vault</button>
+                <button type="button" className="ghost-button" onClick={handleLinkVault}>Link existing vault</button>
+              </div>
+            </article>
+          ) : null}
+
+          {state.settings.vaultPath ? (
+            <>
+              <nav className="vault-nav" aria-label="Vault spaces">
+                {vaultSpaces.map((space) => {
+                  const active = space.id === vaultSpace;
+                  return (
+                    <button
+                      key={space.id}
+                      type="button"
+                      className={`vault-nav-item ${active ? "active" : ""} ${space.soon ? "soon" : ""}`}
+                      onClick={() => {
+                        if (!space.soon) setVaultSpace(space.id as VaultSpace);
+                      }}
+                      disabled={space.soon}
+                    >
+                      {space.label}
+                      {space.soon ? <span>soon</span> : null}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {vaultSpace === "daily" ? (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Daily</span>
+                        <input
+                          type="date"
+                          value={vaultNoteDate}
+                          onChange={(event) => {
+                            setVaultNoteDate(event.target.value || localIsoDate());
+                            setVaultNotePath(null);
+                            setVaultNoteContent("");
+                            setVaultNoteDirty(false);
+                            setVaultDailyEditing(false);
+                          }}
+                        />
+                      </label>
+                      <span className="vault-path-chip">{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</span>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      <button type="button" className="ghost-button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>{vaultNoteLoading ? "Working..." : "Load"}</button>
+                      <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>Generate</button>
+                      {vaultDailyEditing ? (
+                        <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading}>Save</button>
+                      ) : (
+                        <button type="button" className="ghost-button" onClick={() => setVaultDailyEditing(true)}>Edit</button>
+                      )}
+                      <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
+                    </div>
+                  </div>
+
+                  {vaultDailyEditing ? (
+                    <div className="vault-split">
+                      <div className="vault-editor-pane">
+                        <div className="vault-pane-head"><span className="eyebrow">Editor</span></div>
+                        <textarea
+                          className="vault-markdown-editor"
+                          value={vaultNoteContent || notePreview}
+                          onChange={(event) => {
+                            setVaultNoteContent(event.target.value);
+                            setVaultNoteDirty(true);
+                          }}
+                          placeholder="Write today's markdown note."
+                        />
+                      </div>
+                      <div className="vault-preview-pane">
+                        <div className="vault-pane-head"><span className="eyebrow">Preview</span></div>
+                        <div className="markdown-preview vault-prose compact">{renderMarkdownPreview(dailyPreviewContent)}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="vault-document-wrap">
+                      <article className="panel-card vault-document">
+                        <div className="vault-document-meta">
+                          <span>Daily</span>
+                          <code>{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</code>
+                        </div>
+                        <div className="markdown-preview vault-prose">{renderMarkdownPreview(dailyPreviewContent)}</div>
+                      </article>
+
+                      <div className="vault-recent-list">
+                        <p className="eyebrow">Recent exports</p>
+                        {state.exports.length ? state.exports.slice(0, 4).map((item) => (
+                          <div key={item.id} className="vault-recent-row">
+                            <span>{item.noteDate}</span>
+                            <code>{item.notePath}</code>
+                          </div>
+                        )) : <p className="empty-copy">Exports will appear here once you save a daily note.</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main references-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Semester</span>
+                        <select
+                          value={referenceSemesterId}
+                          onChange={(event) => {
+                            if (referenceDirty) {
+                              setMessage("Save the current reference note before switching courses.");
+                              return;
+                            }
+                            setReferenceSemesterId(event.target.value);
+                            setReferenceCourseId("");
+                          }}
+                        >
+                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                        </select>
+                      </label>
+                      <div className="vault-course-chips">
+                        {referenceCourses.map((course) => (
+                          <button
+                            key={course.id}
+                            type="button"
+                            className={`vault-course-chip ${course.id === referenceCourseId ? "active" : ""}`}
+                            onClick={() => {
+                              if (referenceDirty) {
+                                setMessage("Save the current reference note before switching courses.");
+                                return;
+                              }
+                              setReferenceCourseId(course.id);
+                            }}
+                          >
+                            <span style={{ background: course.color }} />{course.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      {referenceEditing ? (
+                        <button type="button" className="ghost-button" onClick={handleSaveReferenceNote} disabled={referenceLoading || !selectedReferenceCourse}>{referenceLoading ? "Saving..." : "Save"}</button>
+                      ) : (
+                        <button type="button" className="ghost-button" onClick={handleEditReferenceNote} disabled={!selectedReferenceCourse}>Edit</button>
+                      )}
+                      <span className="design-chip">{referenceDirty ? "Unsaved" : "Saved"}</span>
+                    </div>
+                  </div>
+
+                  {selectedReferenceSemester && selectedReferenceCourse ? (
+                    referenceEditing ? (
+                      <div className="vault-split">
+                        <div className="vault-editor-pane">
+                          <div className="vault-pane-head"><span className="eyebrow">Markdown</span></div>
+                          <textarea
+                            className="vault-markdown-editor"
+                            value={referenceContent}
+                            onChange={(event) => {
+                              setReferenceContent(event.target.value);
+                              setReferenceDirty(true);
+                            }}
+                            placeholder="Add useful markdown links for this course."
+                          />
+                        </div>
+                        <div className="vault-preview-pane">
+                          <div className="vault-pane-head"><span className="eyebrow">Preview</span></div>
+                          <div className="markdown-preview vault-prose compact">{renderMarkdownPreview(referencePreview)}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="vault-document-wrap">
+                        <article className="panel-card vault-document">
+                          <div className="vault-document-meta">
+                            <button type="button" className="vault-document-meta-button" onClick={() => setReferencePathVisible((current) => !current)}>
+                              References
+                            </button>
+                            {referencePathVisible ? <code>{referencePath ?? `References/${selectedReferenceSemester.name}/${selectedReferenceCourse.name}.md`}</code> : null}
+                          </div>
+                          <div className="markdown-preview vault-prose">{renderMarkdownPreview(referencePreview)}</div>
+                        </article>
+                      </div>
+                    )
+                  ) : (
+                    <article className="panel-card vault-empty-card">
+                      <p className="eyebrow">No courses yet</p>
+                      <h2>References need courses</h2>
+                      <p className="section-note">Create at least one semester and course in Planner before adding course reference notes.</p>
+                    </article>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
         </section>
       ) : null}
     </div>

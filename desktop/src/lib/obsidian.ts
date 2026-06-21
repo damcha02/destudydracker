@@ -53,6 +53,23 @@ export async function writeDailyNote(vaultPath: string, noteDate: string, conten
   });
 }
 
+export async function readReferenceNote(vaultPath: string, semesterName: string, courseName: string) {
+  return invoke<string | null>("read_reference_note", {
+    vaultPath,
+    semesterName,
+    courseName,
+  });
+}
+
+export async function writeReferenceNote(vaultPath: string, semesterName: string, courseName: string, content: string) {
+  return invoke<string>("write_reference_note", {
+    vaultPath,
+    semesterName,
+    courseName,
+    content,
+  });
+}
+
 export async function exportDailyNote(vaultPath: string, noteDate: string, content: string) {
   return invoke<string>("export_daily_note", {
     vaultPath,
