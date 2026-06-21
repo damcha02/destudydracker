@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import "./App.css";
 import {
@@ -28,11 +29,183 @@ import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVau
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
+const bellSound = new Audio("/bell.mp3");
+bellSound.preload = "auto";
+let bellAudioContext: AudioContext | null = null;
+let bellAudioBuffer: AudioBuffer | null = null;
+let bellAudioPromise: Promise<AudioBuffer | null> | null = null;
+let bellAudioContextFailure: string | null = null;
+let bellAudioContextFailureStage: BellStage | null = null;
+let bellAudioFailure: Extract<BellResult, { ok: false }> | null = null;
+
+type BellMethod = "web-audio" | "html-audio" | "prepared";
+type BellStage =
+  | "audio-context-unavailable"
+  | "audio-context-create-failed"
+  | "fetch-failed"
+  | "decode-failed"
+  | "context-suspended"
+  | "web-audio-play-failed"
+  | "html-audio-play-failed"
+  | "html-audio-error";
+type BellResult = { ok: true; method: BellMethod } | { ok: false; stage: BellStage; method?: BellMethod; detail: string };
+type BellBufferResult = { ok: true; context: AudioContext; buffer: AudioBuffer } | Extract<BellResult, { ok: false }>;
+
+function bellErrorDetail(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  return "Unknown audio error";
+}
+
+function bellFailure(stage: BellStage, detail: string, method?: BellMethod): Extract<BellResult, { ok: false }> {
+  return { ok: false, stage, method, detail };
+}
+
+function getBellMediaError() {
+  const error = bellSound.error;
+  if (!error) return null;
+  const labels: Record<number, string> = {
+    [MediaError.MEDIA_ERR_ABORTED]: "aborted",
+    [MediaError.MEDIA_ERR_NETWORK]: "network",
+    [MediaError.MEDIA_ERR_DECODE]: "decode",
+    [MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]: "source-not-supported",
+  };
+  return `${labels[error.code] ?? "unknown"} (${error.code})${error.message ? `: ${error.message}` : ""}`;
+}
+
+function getBellContext() {
+  if (bellAudioContext) return bellAudioContext;
+  if (bellAudioContextFailure) return null;
+
+  const audioWindow = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
+  const BellAudioContext = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
+  if (!BellAudioContext) {
+    bellAudioContextFailure = "This WebView does not expose AudioContext or webkitAudioContext.";
+    bellAudioContextFailureStage = "audio-context-unavailable";
+    return null;
+  }
+
+  try {
+    bellAudioContext = new BellAudioContext();
+    return bellAudioContext;
+  } catch (error: unknown) {
+    bellAudioContextFailure = bellErrorDetail(error);
+    bellAudioContextFailureStage = "audio-context-create-failed";
+    console.warn("Bell audio context could not be created.", error);
+    return null;
+  }
+}
+
+async function loadBellBuffer(): Promise<BellBufferResult> {
+  const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+  if (bellAudioBuffer) return { ok: true, context, buffer: bellAudioBuffer };
+  if (bellAudioPromise) {
+    const buffer = await bellAudioPromise;
+    return buffer ? { ok: true, context, buffer } : bellFailure("decode-failed", "The previous MP3 decode attempt failed.", "web-audio");
+  }
+
+  bellAudioPromise = (async () => {
+    let audioData: ArrayBuffer;
+
+    try {
+      const response = await fetch("/bell.mp3");
+      if (!response.ok) throw new Error(`Could not load bell.mp3: ${response.status}`);
+      audioData = await response.arrayBuffer();
+    } catch (error: unknown) {
+      bellAudioFailure = bellFailure("fetch-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be fetched.", { result: bellAudioFailure, error });
+      bellAudioPromise = null;
+      return null;
+    }
+
+    try {
+      bellAudioBuffer = await context.decodeAudioData(audioData);
+      bellAudioFailure = null;
+      return bellAudioBuffer;
+    } catch (error: unknown) {
+      bellAudioFailure = bellFailure("decode-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be decoded.", { result: bellAudioFailure, error });
+      bellAudioPromise = null;
+      return null;
+    }
+  })();
+
+  const buffer = await bellAudioPromise;
+  if (!buffer) return bellAudioFailure ?? bellFailure("decode-failed", "The bell MP3 could not be fetched or decoded by the Web Audio backend.", "web-audio");
+  return { ok: true, context, buffer };
+}
+
+async function playBellSound(): Promise<BellResult> {
+  const webAudio = await loadBellBuffer();
+  if (webAudio.ok) {
+    try {
+      const { context, buffer } = webAudio;
+      if (context.state === "suspended") await context.resume();
+      if (context.state === "running") {
+        const source = context.createBufferSource();
+        source.buffer = buffer;
+        source.connect(context.destination);
+        source.start();
+        return { ok: true, method: "web-audio" };
+      }
+      console.warn("Bell Web Audio context is not running.", context.state);
+    } catch (error: unknown) {
+      console.warn("Bell sound failed through Web Audio.", error);
+      return bellFailure("web-audio-play-failed", bellErrorDetail(error), "web-audio");
+    }
+  } else {
+    console.warn("Bell Web Audio unavailable.", webAudio);
+  }
+
+  bellSound.currentTime = 0;
+  try {
+    await bellSound.play();
+    return { ok: true, method: "html-audio" };
+  } catch (error: unknown) {
+    const mediaError = getBellMediaError();
+    const result = bellFailure(
+      mediaError ? "html-audio-error" : "html-audio-play-failed",
+      mediaError ?? bellErrorDetail(error),
+      "html-audio",
+    );
+    console.warn("Bell sound failed to play.", { result, error });
+    return result;
+  }
+}
+
+async function prepareBellSound(): Promise<BellResult> {
+  bellSound.load();
+  const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+
+  try {
+    if (context.state === "suspended") await context.resume();
+    if (context.state === "suspended") return bellFailure("context-suspended", "AudioContext stayed suspended after resume().", "web-audio");
+    const buffer = await loadBellBuffer();
+    if (!buffer.ok) return buffer;
+    return { ok: true, method: "prepared" };
+  } catch (error: unknown) {
+    console.warn("Bell sound could not be prepared.", error);
+    return bellFailure("context-suspended", bellErrorDetail(error), "web-audio");
+  }
+}
+
 const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
   { label: "Deep Work 52/17", study: 52, breakMinutes: 17, mode: "focus" as const },
   { label: "Sprint 90/20", study: 90, breakMinutes: 20, mode: "focus" as const },
-  { label: "Exam 120", study: 120, breakMinutes: 0, mode: "exam" as const },
+  { label: "Exam", study: 120, breakMinutes: 0, mode: "exam" as const },
 ];
 
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
@@ -40,6 +213,12 @@ const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
+const SESSION_HISTORY_DAYS = 365;
+const SESSION_HISTORY_MAX = 3000;
+const CURRENT_APP_VERSION = "0.1.2";
+const UPDATE_CHECKS_ENABLED = false;
+const RELEASES_API_URL = "https://api.github.com/repos/damcha02/destudydracker/releases/latest";
+const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 
 type ThemePalette =
   | "default"
@@ -79,6 +258,13 @@ const vaultSpaces: Array<{ id: VaultSpace | "summaries" | "exams" | "templates" 
   { id: "templates", label: "Templates", soon: true },
   { id: "inbox", label: "Inbox", soon: true },
 ];
+
+type UpdateInfo = {
+  status: "idle" | "available" | "current" | "error";
+  latestVersion?: string;
+  releaseUrl?: string;
+  message: string;
+};
 
 type CalendarDay = {
   date: Date;
@@ -337,6 +523,25 @@ function formatUnitAmount(amount: number) {
   return `${Number.isInteger(amount) ? amount : amount.toFixed(2)} units`;
 }
 
+function normalizeVersion(version: string) {
+  return version.trim().replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
+}
+
+function compareVersions(current: string, latest: string) {
+  const currentParts = normalizeVersion(current);
+  const latestParts = normalizeVersion(latest);
+  const length = Math.max(currentParts.length, latestParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const currentPart = currentParts[index] ?? 0;
+    const latestPart = latestParts[index] ?? 0;
+    if (latestPart > currentPart) return 1;
+    if (latestPart < currentPart) return -1;
+  }
+
+  return 0;
+}
+
 function formatUnitsLeft(amount: number) {
   const safeAmount = Math.max(0, amount);
   if (Number.isInteger(safeAmount)) return safeAmount.toString();
@@ -575,8 +780,41 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
   };
 }
 
+function pruneSessionHistory(sessions: StudySession[], today = new Date()) {
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - SESSION_HISTORY_DAYS);
+  cutoff.setHours(0, 0, 0, 0);
+
+  return sessions
+    .filter((session) => new Date(session.endedAt) >= cutoff)
+    .slice(0, SESSION_HISTORY_MAX);
+}
+
+async function startWindowDrag() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().startDragging();
+}
+
+async function minimizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().minimize();
+}
+
+async function toggleMaximizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().toggleMaximize();
+}
+
+async function closeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().close();
+}
+
 function App() {
-  const [state, setState] = useState<AppState>(loadAppState);
+  const [state, setState] = useState<AppState>(() => {
+    const loaded = loadAppState();
+    return { ...loaded, sessions: pruneSessionHistory(loaded.sessions) };
+  });
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
@@ -618,7 +856,27 @@ function App() {
   const [expandedCourseIds, setExpandedCourseIds] = useState<string[]>([]);
   const [addingCourseSemesterId, setAddingCourseSemesterId] = useState<string | null>(null);
   const [addingTaskCourseId, setAddingTaskCourseId] = useState<string | null>(null);
-  const [addingExamSemesterId, setAddingExamSemesterId] = useState<string | null>(null);
+  const [addingExamCourseId, setAddingExamCourseId] = useState<string | null>(null);
+  const [editingSemesterId, setEditingSemesterId] = useState<string | null>(null);
+  const [semesterEditName, setSemesterEditName] = useState("");
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [courseEditDraft, setCourseEditDraft] = useState<CourseDraft>({
+    semesterId: "",
+    name: "",
+    targetGrade: "4.0",
+    color: "#8fb4ff",
+  });
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskEditDraft, setTaskEditDraft] = useState<TaskDraft>({
+    semesterId: "",
+    courseId: "",
+    title: "",
+    totalUnits: "10",
+    completedUnits: "0",
+    dueDate: "",
+    priority: "medium",
+    notes: "",
+  });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
@@ -645,6 +903,11 @@ function App() {
   const [referenceEditing, setReferenceEditing] = useState(false);
   const [referencePathVisible, setReferencePathVisible] = useState(false);
   const referenceLoadRequestRef = useRef(0);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
+    status: "idle",
+    message: UPDATE_CHECKS_ENABLED ? "Check whether a newer release is available on GitHub." : "Update checks are temporarily disabled.",
+  });
 
   useEffect(() => {
     saveAppState(state);
@@ -708,6 +971,12 @@ function App() {
   useEffect(() => {
     if (!state.timer.running) return undefined;
 
+    function ringBell() {
+      playBellSound().then((result) => {
+        if (!result.ok) console.warn("Bell sound could not play.", result);
+      });
+    }
+
     const interval = window.setInterval(() => {
       setState((current) => {
         const timer = current.timer;
@@ -723,9 +992,10 @@ function App() {
         if (timer.phase === "study") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
+            ringBell();
             return {
               ...current,
-              sessions: [session, ...current.sessions].slice(0, 120),
+              sessions: pruneSessionHistory([session, ...current.sessions]),
               timer: {
                 ...timer,
                 phase: "break",
@@ -737,22 +1007,25 @@ function App() {
             };
           }
 
+          ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
 
         if (timer.phase === "exam") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
+          ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
 
+        ringBell();
         return {
           ...current,
           timer: { ...defaultTimer, ...keepTimerContext(timer) },
@@ -1058,6 +1331,47 @@ function App() {
     closeMenuPanel();
   }
 
+  async function checkForUpdates() {
+    setUpdateChecking(true);
+    setUpdateInfo({ status: "idle", message: "Checking GitHub Releases..." });
+
+    try {
+      const response = await fetch(RELEASES_API_URL, {
+        headers: { Accept: "application/vnd.github+json" },
+      });
+
+      if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+      const release = (await response.json()) as { tag_name?: string; html_url?: string; name?: string };
+      const latestVersion = release.tag_name || release.name;
+      const releaseUrl = release.html_url || RELEASES_PAGE_URL;
+
+      if (!latestVersion) throw new Error("Latest release has no version tag.");
+
+      if (compareVersions(CURRENT_APP_VERSION, latestVersion) > 0) {
+        setUpdateInfo({
+          status: "available",
+          latestVersion,
+          releaseUrl,
+          message: `Version ${latestVersion} is available.`,
+        });
+      } else {
+        setUpdateInfo({
+          status: "current",
+          latestVersion,
+          releaseUrl,
+          message: `You are up to date. Latest release is ${latestVersion}.`,
+        });
+      }
+    } catch (error) {
+      setUpdateInfo({
+        status: "error",
+        message: getErrorMessage(error, "Could not check for updates. Check your internet connection."),
+      });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
   function deleteAllData() {
     const cleanState: AppState = {
       ...defaultState,
@@ -1079,7 +1393,10 @@ function App() {
     setExpandedCourseIds([]);
     setAddingCourseSemesterId(null);
     setAddingTaskCourseId(null);
-    setAddingExamSemesterId(null);
+    setAddingExamCourseId(null);
+    setEditingSemesterId(null);
+    setEditingCourseId(null);
+    setEditingTaskId(null);
     setSelectedCalendarDate(null);
     setPersonalNameDraft("");
     localStorage.removeItem("study-tracker-desktop-v2");
@@ -1142,6 +1459,28 @@ function App() {
     setMessage(`${course.name} added to ${semesterLookup.get(course.semesterId)?.name ?? "semester"}.`);
   }
 
+  function startEditingSemester(semester: Semester) {
+    setSemesterEditName(semester.name);
+    setEditingSemesterId(semester.id);
+    setAddingCourseSemesterId(null);
+  }
+
+  function updateSemester(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = semesterEditName.trim();
+    if (!editingSemesterId || !name) {
+      setMessage("Give the semester a name first.");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      semesters: current.semesters.map((semester) => (semester.id === editingSemesterId ? { ...semester, name } : semester)),
+    }));
+    setEditingSemesterId(null);
+    setMessage(`${name} updated.`);
+  }
+
   function addTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDraft.semesterId || !taskDraft.courseId || !taskDraft.title.trim()) {
@@ -1177,6 +1516,87 @@ function App() {
     setMessage(`${task.title} is now tracked.`);
   }
 
+  function startEditingCourse(course: Course) {
+    setCourseEditDraft({
+      semesterId: course.semesterId,
+      name: course.name,
+      targetGrade: course.targetGrade.toString(),
+      color: course.color,
+    });
+    setEditingCourseId(course.id);
+    setAddingCourseSemesterId(null);
+  }
+
+  function updateCourse(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingCourseId || !courseEditDraft.name.trim()) {
+      setMessage("Give the course a name first.");
+      return;
+    }
+
+    const name = courseEditDraft.name.trim();
+    setState((current) => ({
+      ...current,
+      courses: current.courses.map((course) =>
+        course.id === editingCourseId
+          ? {
+              ...course,
+              name,
+              targetGrade: Number(courseEditDraft.targetGrade) || 4,
+              color: courseEditDraft.color,
+            }
+          : course,
+      ),
+    }));
+    setEditingCourseId(null);
+    setMessage(`${name} updated.`);
+  }
+
+  function startEditingTask(task: Task) {
+    setTaskEditDraft({
+      semesterId: task.semesterId,
+      courseId: task.courseId,
+      title: task.title,
+      totalUnits: task.totalUnits.toString(),
+      completedUnits: task.completedUnits.toString(),
+      dueDate: task.dueDate ?? "",
+      priority: task.priority,
+      notes: task.notes,
+    });
+    setEditingTaskId(task.id);
+    setAddingTaskCourseId(null);
+  }
+
+  function updateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingTaskId || !taskEditDraft.semesterId || !taskEditDraft.courseId || !taskEditDraft.title.trim()) {
+      setMessage("A task needs a semester, course, and title.");
+      return;
+    }
+
+    const title = taskEditDraft.title.trim();
+    const totalUnits = Math.max(1, Number(taskEditDraft.totalUnits) || 1);
+    const completedUnits = clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === editingTaskId
+          ? {
+              ...task,
+              title,
+              totalUnits,
+              completedUnits,
+              dueDate: taskEditDraft.dueDate || null,
+              priority: taskEditDraft.priority,
+              notes: taskEditDraft.notes.trim(),
+            }
+          : task,
+      ),
+    }));
+    setEditingTaskId(null);
+    setMessage(`${title} updated.`);
+  }
+
   function confirmTaskDueDate(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -1202,7 +1622,7 @@ function App() {
 
     setState((current) => ({ ...current, exams: [exam, ...current.exams] }));
     setExamDraft((current) => ({ ...current, title: "", examDate: "", weight: "40", preparedness: "35" }));
-    setAddingExamSemesterId(null);
+    setAddingExamCourseId(null);
     setMessage(`${exam.title} added to the runway.`);
   }
 
@@ -1222,6 +1642,7 @@ function App() {
       calendarEntries: current.calendarEntries.filter((entry) => entry.taskId !== taskId),
       timer: current.timer.taskId === taskId ? { ...current.timer, taskId: null } : current.timer,
     }));
+    setEditingTaskId((current) => (current === taskId ? null : current));
   }
 
   function removeCourse(courseId: string) {
@@ -1241,6 +1662,12 @@ function App() {
     }));
     setExpandedCourseIds((current) => current.filter((item) => item !== courseId));
     setAddingTaskCourseId((current) => (current === courseId ? null : current));
+    setAddingExamCourseId((current) => (current === courseId ? null : current));
+    setEditingCourseId((current) => (current === courseId ? null : current));
+    setEditingTaskId((current) => {
+      const removedTaskIds = state.tasks.filter((task) => task.courseId === courseId).map((task) => task.id);
+      return current && removedTaskIds.includes(current) ? null : current;
+    });
   }
 
   function removeSemester(semesterId: string) {
@@ -1263,8 +1690,14 @@ function App() {
     setExpandedSemesterIds((current) => current.filter((item) => item !== semesterId));
     setExpandedCourseIds((current) => current.filter((item) => !courseIds.includes(item)));
     setAddingCourseSemesterId((current) => (current === semesterId ? null : current));
-    setAddingExamSemesterId((current) => (current === semesterId ? null : current));
     setAddingTaskCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setAddingExamCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setEditingSemesterId((current) => (current === semesterId ? null : current));
+    setEditingCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setEditingTaskId((current) => {
+      const removedTaskIds = state.tasks.filter((task) => task.semesterId === semesterId).map((task) => task.id);
+      return current && removedTaskIds.includes(current) ? null : current;
+    });
   }
 
   function removeExam(examId: string) {
@@ -1399,6 +1832,9 @@ function App() {
     const isExam = state.timer.mode === "exam";
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
+    void prepareBellSound().then((result) => {
+      if (!result.ok) console.warn("Bell sound could not be prepared.", result);
+    });
 
     setState((current) => ({
       ...current,
@@ -1415,6 +1851,12 @@ function App() {
   }
 
   function pauseTimer() {
+    if (!state.timer.running) {
+      void prepareBellSound().then((result) => {
+        if (!result.ok) console.warn("Bell sound could not be prepared.", result);
+      });
+    }
+
     setState((current) => {
       const timer = current.timer;
       if (timer.phase === "idle") return current;
@@ -1459,7 +1901,7 @@ function App() {
       const session = buildSessionFromTimer(timer, new Date().toISOString(), minutes);
       return {
         ...current,
-        sessions: [session, ...current.sessions].slice(0, 120),
+        sessions: pruneSessionHistory([session, ...current.sessions]),
         timer: { ...defaultTimer, ...keepTimerContext(timer) },
       };
     });
@@ -2478,7 +2920,25 @@ function App() {
 
           {activeMenuPanel === "settings" ? (
             <div className="settings-panel-body settings-danger-zone">
-              <p className="empty-copy compact-empty">More settings will appear here later.</p>
+              <div className={`settings-update-card ${updateInfo.status}`}>
+                <div>
+                  <strong>Updates</strong>
+                  <span>Current version: {CURRENT_APP_VERSION}</span>
+                  <p>{updateInfo.message}</p>
+                </div>
+                {UPDATE_CHECKS_ENABLED ? (
+                  <div className="update-actions">
+                    <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
+                      {updateChecking ? "Checking..." : "Check for updates"}
+                    </button>
+                    {updateInfo.status === "available" ? (
+                      <button type="button" onClick={() => window.open(updateInfo.releaseUrl ?? RELEASES_PAGE_URL, "_blank", "noopener,noreferrer")}>
+                        Open release page
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               <div className="delete-data-card">
                 <div>
                   <strong>Delete all data</strong>
@@ -2501,8 +2961,28 @@ function App() {
     );
   }
 
+  const showWindowTitlebar = isTauriApp();
+
   return (
-    <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
+    <>
+      {showWindowTitlebar ? (
+        <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>
+          <div className="window-titlebar-title">Study Tracker</div>
+          <div className="window-titlebar-controls" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => void minimizeWindow()} aria-label="Minimize window" title="Minimize">
+              <span aria-hidden="true">-</span>
+            </button>
+            <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label="Maximize or restore window" title="Maximize or restore">
+              <span aria-hidden="true">□</span>
+            </button>
+            <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
           <div className="brand-mark" aria-hidden="true">
@@ -2767,27 +3247,29 @@ function App() {
                           >
                             + Course
                           </button>
-                          <button
-                            type="button"
-                            className="ghost-button small-button"
-                            onClick={() => {
-                              const firstCourse = courses[0];
-                              if (!firstCourse) {
-                                setMessage("Add a course before adding an exam.");
-                                return;
-                              }
-                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
-                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: firstCourse.id }));
-                              setAddingExamSemesterId((current) => (current === semester.id ? null : semester.id));
-                            }}
-                          >
-                            + Exam
+                          <button type="button" className="ghost-button small-button" onClick={() => startEditingSemester(semester)}>
+                            Edit
                           </button>
                           <button type="button" className="mini-danger" onClick={() => removeSemester(semester.id)}>
                             Remove
                           </button>
                         </div>
                       </div>
+
+                      {editingSemesterId === semester.id ? (
+                        <form className="inline-form-card nested-form semester-edit-form" onSubmit={updateSemester}>
+                          <label className="field">
+                            <span>Semester name</span>
+                            <input value={semesterEditName} onChange={(event) => setSemesterEditName(event.target.value)} />
+                          </label>
+                          <div className="inline-form-actions">
+                            <button type="submit">Save semester</button>
+                            <button type="button" className="ghost-button" onClick={() => setEditingSemesterId(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
 
                       {semesterExpanded ? (
                         <div className="accordion-body">
@@ -2848,24 +3330,74 @@ function App() {
                                         </div>
                                       </button>
 
-                                      <div className="accordion-actions">
-                                        <button
-                                          type="button"
-                                          className="ghost-button small-button"
-                                          onClick={() => {
-                                            setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
-                                            setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
-                                            setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
-                                            setAddingTaskCourseId((current) => (current === course.id ? null : course.id));
-                                          }}
-                                        >
-                                          + Task
-                                        </button>
-                                        <button type="button" className="mini-danger" onClick={() => removeCourse(course.id)}>
-                                          Remove
-                                        </button>
+                                      <div className="accordion-actions course-actions">
+                                        <div className="course-action-row">
+                                          <button
+                                            type="button"
+                                            className="ghost-button small-button"
+                                            onClick={() => {
+                                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
+                                              setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
+                                              setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
+                                              setAddingTaskCourseId((current) => (current === course.id ? null : course.id));
+                                            }}
+                                          >
+                                            + Task
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="ghost-button small-button"
+                                            onClick={() => {
+                                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
+                                              setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
+                                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
+                                              setAddingExamCourseId((current) => (current === course.id ? null : course.id));
+                                            }}
+                                          >
+                                            + Exam
+                                          </button>
+                                        </div>
+                                        <div className="course-action-row">
+                                          <button type="button" className="ghost-button small-button" onClick={() => startEditingCourse(course)}>
+                                            Edit
+                                          </button>
+                                          <button type="button" className="mini-danger" onClick={() => removeCourse(course.id)}>
+                                            Remove
+                                          </button>
+                                        </div>
                                       </div>
                                     </div>
+
+                                    {editingCourseId === course.id ? (
+                                      <form className="inline-form-card nested-form course-edit-form" onSubmit={updateCourse}>
+                                        <div className="inline-form-grid inline-form-grid-course">
+                                          <label className="field">
+                                            <span>Course name</span>
+                                            <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} />
+                                          </label>
+                                          <label className="field">
+                                            <span>Target grade</span>
+                                            <select value={courseEditDraft.targetGrade} onChange={(event) => setCourseEditDraft((current) => ({ ...current, targetGrade: event.target.value }))}>
+                                              {swissGrades.map((grade) => (
+                                                <option key={grade} value={grade.toString()}>
+                                                  {formatSwissGrade(grade)}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          <label className="field">
+                                            <span>Color</span>
+                                            <input type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
+                                          </label>
+                                        </div>
+                                        <div className="inline-form-actions">
+                                          <button type="submit">Save course</button>
+                                          <button type="button" className="ghost-button" onClick={() => setEditingCourseId(null)}>
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </form>
+                                    ) : null}
 
                                     {courseExpanded ? (
                                       <div className="accordion-body nested-body">
@@ -2924,61 +3456,145 @@ function App() {
                                           </form>
                                         ) : null}
 
+                                        {addingExamCourseId === course.id ? (
+                                          <form className="inline-form-card nested-form" onSubmit={addExam}>
+                                            <div className="inline-form-grid inline-form-grid-exam course-exam-form-grid">
+                                              <label className="field">
+                                                <span>Exam title</span>
+                                                <input value={examDraft.title} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, title: event.target.value }))} placeholder="Midterm, final, oral..." />
+                                              </label>
+                                              <label className="field">
+                                                <span>Date</span>
+                                                <input type="date" value={examDraft.examDate} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, examDate: event.target.value }))} />
+                                              </label>
+                                              <label className="field">
+                                                <span>Weight %</span>
+                                                <input type="number" min="0" max="100" value={examDraft.weight} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, weight: event.target.value }))} />
+                                              </label>
+                                              <label className="field">
+                                                <span>Preparedness %</span>
+                                                <input type="number" min="0" max="100" value={examDraft.preparedness} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, preparedness: event.target.value }))} />
+                                              </label>
+                                            </div>
+                                            <div className="inline-form-actions">
+                                              <button type="submit">Add exam</button>
+                                              <button type="button" className="ghost-button" onClick={() => setAddingExamCourseId(null)}>
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </form>
+                                        ) : null}
+
                                         <div className="task-table">
                                           {courseTasks.length ? (
                                             courseTasks.map((task) => {
                                               const calc = calculateDailyWork(task);
                                               const progress = getTaskProgress(task);
                                               return (
-                                                <div key={task.id} className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`}>
-                                                  <div className="task-row-main">
-                                                    <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
-                                                      <strong>{task.title}</strong>
-                                                    </button>
-                                                    <p>
-                                                      {task.completedUnits}/{task.totalUnits} units • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
-                                                    </p>
-                                                  </div>
-                                                  <div className="task-row-progress">
-                                                    <div className="progress-pill-row">
-                                                      <span>{progress}%</span>
-                                                      <span>{calc.unitsPerDay.toFixed(1)} / day</span>
+                                                <div key={task.id}>
+                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`}>
+                                                    <div className="task-row-main">
+                                                      <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
+                                                        <strong>{task.title}</strong>
+                                                      </button>
+                                                      <p>
+                                                        {task.completedUnits}/{task.totalUnits} units • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
+                                                      </p>
                                                     </div>
-                                                    <div className="health-track tight wide">
-                                                      <div className="health-fill" style={{ width: `${progress}%`, background: course.color }} />
+                                                    <div className="task-row-progress">
+                                                      <div className="progress-pill-row">
+                                                        <span>{progress}%</span>
+                                                        <span>{calc.unitsPerDay.toFixed(1)} / day</span>
+                                                      </div>
+                                                      <div className="health-track tight wide">
+                                                        <div className="health-fill" style={{ width: `${progress}%`, background: course.color }} />
+                                                      </div>
+                                                    </div>
+                                                    <div className="task-row-actions">
+                                                      <button type="button" onClick={() => adjustTask(task.id, -1)}>
+                                                        -
+                                                      </button>
+                                                      <button type="button" onClick={() => adjustTask(task.id, 1)}>
+                                                        +
+                                                      </button>
+                                                      <button type="button" className="ghost-button small-button" onClick={() => startEditingTask(task)}>
+                                                        Edit
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="ghost-button small-button"
+                                                        onClick={() => {
+                                                          setSelectedTaskId(task.id);
+                                                          setState((current) => ({
+                                                            ...current,
+                                                            activeTab: "timer",
+                                                            timer: {
+                                                              ...current.timer,
+                                                              semesterId: task.semesterId,
+                                                              courseId: task.courseId,
+                                                              taskId: task.id,
+                                                              goal: current.timer.goal || task.title,
+                                                            },
+                                                          }));
+                                                        }}
+                                                      >
+                                                        Focus
+                                                      </button>
+                                                      <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>
+                                                        Remove
+                                                      </button>
                                                     </div>
                                                   </div>
-                                                  <div className="task-row-actions">
-                                                    <button type="button" onClick={() => adjustTask(task.id, -1)}>
-                                                      -
-                                                    </button>
-                                                    <button type="button" onClick={() => adjustTask(task.id, 1)}>
-                                                      +
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      className="ghost-button small-button"
-                                                      onClick={() => {
-                                                        setSelectedTaskId(task.id);
-                                                        setState((current) => ({
-                                                          ...current,
-                                                          activeTab: "timer",
-                                                          timer: {
-                                                            ...current.timer,
-                                                            semesterId: task.semesterId,
-                                                            courseId: task.courseId,
-                                                            taskId: task.id,
-                                                            goal: current.timer.goal || task.title,
-                                                          },
-                                                        }));
-                                                      }}
-                                                    >
-                                                      Focus
-                                                    </button>
-                                                    <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>
-                                                      Remove
-                                                    </button>
-                                                  </div>
+                                                  {editingTaskId === task.id ? (
+                                                    <form className="inline-form-card nested-form task-edit-form" onSubmit={updateTask}>
+                                                      <div className="inline-form-grid inline-form-grid-task">
+                                                        <label className="field task-title-field">
+                                                          <span>Task title</span>
+                                                          <input value={taskEditDraft.title} onChange={(event) => setTaskEditDraft((current) => ({ ...current, title: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Total units</span>
+                                                          <input type="number" min="1" value={taskEditDraft.totalUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Done</span>
+                                                          <input type="number" min="0" value={taskEditDraft.completedUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Priority</span>
+                                                          <select value={taskEditDraft.priority} onChange={(event) => setTaskEditDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
+                                                            <option value="high">High</option>
+                                                            <option value="medium">Medium</option>
+                                                            <option value="low">Low</option>
+                                                          </select>
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Due date (optional)</span>
+                                                          <input
+                                                            type="date"
+                                                            value={taskEditDraft.dueDate}
+                                                            onChange={(event) => setTaskEditDraft((current) => ({ ...current, dueDate: event.target.value }))}
+                                                            onKeyDown={confirmTaskDueDate}
+                                                          />
+                                                        </label>
+                                                        <label className="field task-notes-field">
+                                                          <span>Notes</span>
+                                                          <textarea value={taskEditDraft.notes} onChange={(event) => setTaskEditDraft((current) => ({ ...current, notes: event.target.value }))} />
+                                                        </label>
+                                                      </div>
+                                                      <div className="inline-form-actions">
+                                                        <button type="submit">Save task</button>
+                                                        <button type="button" className="ghost-button" onClick={() => setEditingTaskId(null)}>
+                                                          Cancel
+                                                        </button>
+                                                        {taskEditDraft.dueDate ? (
+                                                          <button type="button" className="ghost-button" onClick={() => setTaskEditDraft((current) => ({ ...current, dueDate: "" }))}>
+                                                            Clear due date
+                                                          </button>
+                                                        ) : null}
+                                                      </div>
+                                                    </form>
+                                                  ) : null}
                                                 </div>
                                               );
                                             })
@@ -3003,46 +3619,6 @@ function App() {
                                 <h3>Exams in this semester</h3>
                               </div>
                             </div>
-
-                            {addingExamSemesterId === semester.id ? (
-                              <form className="inline-form-card nested-form" onSubmit={addExam}>
-                                <div className="inline-form-grid inline-form-grid-exam">
-                                  <label className="field">
-                                    <span>Course</span>
-                                    <select value={examDraft.courseId} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: event.target.value }))}>
-                                      <option value="">Select course</option>
-                                      {courses.map((course) => (
-                                        <option key={course.id} value={course.id}>
-                                          {course.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="field">
-                                    <span>Exam title</span>
-                                    <input value={examDraft.title} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, title: event.target.value }))} placeholder="Midterm, final, oral..." />
-                                  </label>
-                                  <label className="field">
-                                    <span>Date</span>
-                                    <input type="date" value={examDraft.examDate} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, examDate: event.target.value }))} />
-                                  </label>
-                                  <label className="field">
-                                    <span>Weight %</span>
-                                    <input type="number" min="0" max="100" value={examDraft.weight} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, weight: event.target.value }))} />
-                                  </label>
-                                  <label className="field">
-                                    <span>Preparedness %</span>
-                                    <input type="number" min="0" max="100" value={examDraft.preparedness} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, preparedness: event.target.value }))} />
-                                  </label>
-                                </div>
-                                <div className="inline-form-actions">
-                                  <button type="submit">Add exam</button>
-                                  <button type="button" className="ghost-button" onClick={() => setAddingExamSemesterId(null)}>
-                                    Cancel
-                                  </button>
-                                </div>
-                              </form>
-                            ) : null}
 
                             <div className="stack-list compact">
                               {semesterExams.length ? (
@@ -3351,10 +3927,10 @@ function App() {
                 </label>
               </div>
 
-              {isCustomTimerPreset ? (
+              {isCustomTimerPreset || state.timer.mode === "exam" ? (
                 <div className="timer-custom-row">
                   <label className="field compact-field">
-                    <span>Focus minutes</span>
+                    <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
                     <input
                       type="number"
                       min="1"
@@ -3366,30 +3942,32 @@ function App() {
                           ...current,
                           timer: {
                             ...current.timer,
-                            studyMinutes: next,
-                            examMinutes: next,
+                            studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                            examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
                             remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
-                            presetLabel: "Custom",
+                            presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
                           },
                         }));
                       }}
                     />
                   </label>
-                  <label className="field compact-field">
-                    <span>Break minutes</span>
-                    <input
-                      type="number"
-                      min="0"
-                      disabled={state.timer.running || state.timer.mode === "exam"}
-                      value={state.timer.breakMinutes}
-                      onChange={(event) =>
-                        setState((current) => ({
-                          ...current,
-                          timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
-                        }))
-                      }
-                    />
-                  </label>
+                  {state.timer.mode !== "exam" ? (
+                    <label className="field compact-field">
+                      <span>Break minutes</span>
+                      <input
+                        type="number"
+                        min="0"
+                        disabled={state.timer.running}
+                        value={state.timer.breakMinutes}
+                        onChange={(event) =>
+                          setState((current) => ({
+                            ...current,
+                            timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -3539,7 +4117,7 @@ function App() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>Focus minutes</span>
+                    <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
                     <input
                       type="number"
                       min="1"
@@ -3550,10 +4128,10 @@ function App() {
                           ...current,
                           timer: {
                             ...current.timer,
-                            studyMinutes: next,
-                            examMinutes: next,
+                            studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                            examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
                             remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
-                            presetLabel: "Custom",
+                            presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
                           },
                         }));
                       }}
@@ -3959,7 +4537,8 @@ function App() {
           ) : null}
         </section>
       ) : null}
-    </div>
+      </div>
+    </>
   );
 }
 

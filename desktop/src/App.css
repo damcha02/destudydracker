@@ -1,7 +1,56 @@
+.window-titlebar {
+  height: 38px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 10px 0 14px;
+  background: color-mix(in oklch, var(--bg) 88%, black);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+
+.window-titlebar-title {
+  grid-column: 2;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.window-titlebar-controls {
+  grid-column: 3;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.window-titlebar-controls button {
+  width: 36px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  line-height: 1;
+}
+
+.window-titlebar-controls button:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.window-titlebar-controls .window-close-button:hover {
+  background: color-mix(in oklch, var(--danger) 78%, transparent);
+  color: white;
+}
+
 .shell {
   width: min(1720px, calc(100vw - 48px));
   margin: 0 auto;
-  padding: 28px 0 56px;
+  padding: 22px 0 56px;
 }
 
 .topbar {
@@ -575,6 +624,27 @@
   justify-content: flex-end;
 }
 
+.course-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.course-action-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.semester-edit-form,
+.course-edit-form {
+  margin-top: 16px;
+}
+
+.course-exam-form-grid {
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(120px, 1fr));
+}
+
 .support-toggle {
   margin-bottom: 0;
 }
@@ -751,6 +821,11 @@
   grid-template-columns: 1.3fr 0.8fr auto;
   gap: 18px;
   align-items: center;
+}
+
+.task-table > div {
+  display: grid;
+  gap: 12px;
 }
 
 .task-title-button {
@@ -1908,7 +1983,8 @@ button[type="submit"],
 }
 
 .theme-choice-card,
-.delete-data-card {
+.delete-data-card,
+.settings-update-card {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -1959,16 +2035,43 @@ button[type="submit"],
 }
 
 .theme-choice-card strong,
-.delete-data-card strong {
+.delete-data-card strong,
+.settings-update-card strong {
   display: block;
   color: var(--ink);
 }
 
 .theme-choice-card span,
-.delete-data-card span {
+.delete-data-card span,
+.settings-update-card span,
+.settings-update-card p {
   display: block;
   margin-top: 4px;
   color: var(--ink-4);
+}
+
+.settings-update-card {
+  align-items: flex-start;
+}
+
+.settings-update-card.available {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.settings-update-card.current {
+  border-color: color-mix(in oklch, var(--ok) 34%, var(--line-soft));
+}
+
+.settings-update-card.error {
+  border-color: color-mix(in oklch, var(--danger) 30%, var(--line-soft));
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .theme-mode-row {
@@ -3306,8 +3409,11 @@ input[type="color"] {
 }
 
 .calendar-day-card.today {
+  background: color-mix(in oklch, var(--surface-raised) 88%, var(--accent));
   border-color: var(--accent-line);
-  box-shadow: inset 0 0 0 1px var(--accent-soft);
+  box-shadow:
+    inset 0 0 0 2px var(--accent-line),
+    0 0 0 1px var(--accent-soft);
 }
 
 .calendar-day-card.selected {
