@@ -1984,7 +1984,8 @@ button[type="submit"],
 
 .theme-choice-card,
 .delete-data-card,
-.settings-update-card {
+.settings-update-card,
+.linux-update-command-card {
   display: flex;
   justify-content: space-between;
   gap: 16px;
@@ -2036,7 +2037,8 @@ button[type="submit"],
 
 .theme-choice-card strong,
 .delete-data-card strong,
-.settings-update-card strong {
+.settings-update-card strong,
+.linux-update-command-card strong {
   display: block;
   color: var(--ink);
 }
@@ -2044,7 +2046,8 @@ button[type="submit"],
 .theme-choice-card span,
 .delete-data-card span,
 .settings-update-card span,
-.settings-update-card p {
+.settings-update-card p,
+.linux-update-command-card span {
   display: block;
   margin-top: 4px;
   color: var(--ink-4);
@@ -2072,6 +2075,24 @@ button[type="submit"],
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.linux-update-command-card {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.linux-update-command {
+  width: 100%;
+  resize: vertical;
+  min-height: 44px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink);
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
 }
 
 .theme-mode-row {

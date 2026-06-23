@@ -3,7 +3,7 @@ import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, Re
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
@@ -277,6 +277,14 @@ type UpdateInfo = {
 type UpdateInstallSupport = {
   canAutoInstall: boolean;
   packageHint: string;
+  message: string;
+};
+
+type LinuxUpdateDownload = {
+  version: string;
+  packageType: string;
+  filePath: string;
+  installCommand: string;
   message: string;
 };
 
@@ -924,6 +932,8 @@ function App() {
   const pendingUpdateRef = useRef<Update | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
+  const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
+  const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
@@ -1512,6 +1522,57 @@ function App() {
       });
     } finally {
       setUpdateChecking(false);
+    }
+  }
+
+  async function downloadManualLinuxUpdate() {
+    if (!isTauriApp()) {
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    setLinuxPackageDownloading(true);
+    setLinuxUpdateDownload(null);
+    setUpdateInfo((current) => ({ ...current, status: "installing", message: "Downloading Linux package..." }));
+
+    try {
+      const download = await invoke<LinuxUpdateDownload>("download_linux_update_package");
+      setLinuxUpdateDownload(download);
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "available",
+        latestVersion: download.version,
+        message: `${download.message} The install command is shown below.`,
+      }));
+    } catch (error) {
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "error",
+        message: `${getErrorMessage(error, "Could not download the Linux package.")} You can still use the release page.`,
+      }));
+    } finally {
+      setLinuxPackageDownloading(false);
+    }
+  }
+
+  async function copyLinuxInstallCommand() {
+    if (!linuxUpdateDownload) return;
+    try {
+      await navigator.clipboard.writeText(linuxUpdateDownload.installCommand);
+      setMessage("Install command copied.");
+    } catch (error) {
+      console.warn("Could not copy install command.", error);
+      setMessage("Could not copy command. Select it manually instead.");
+    }
+  }
+
+  async function revealLinuxPackage() {
+    if (!linuxUpdateDownload) return;
+    try {
+      await revealItemInDir(linuxUpdateDownload.filePath);
+    } catch (error) {
+      console.warn("Could not open downloaded package location.", error);
+      setMessage("Could not open the downloads folder.");
     }
   }
 
@@ -3125,11 +3186,31 @@ function App() {
                       Install update
                     </button>
                   ) : null}
+                  {updateInfo.status === "available" && !updateInstallSupport.canAutoInstall && updateInstallSupport.packageHint === "manual-linux" ? (
+                    <button type="button" onClick={() => void downloadManualLinuxUpdate()} disabled={linuxPackageDownloading}>
+                      {linuxPackageDownloading ? "Downloading..." : "Download package"}
+                    </button>
+                  ) : null}
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
                     {updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
                 </div>
               </div>
+              {linuxUpdateDownload ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Install downloaded update</strong>
+                    <span>{linuxUpdateDownload.message}</span>
+                    <span>Saved to: {linuxUpdateDownload.filePath}</span>
+                  </div>
+                  <textarea className="linux-update-command" value={linuxUpdateDownload.installCommand} readOnly rows={linuxUpdateDownload.installCommand.includes("\n") ? 2 : 1} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copyLinuxInstallCommand()}>Copy command</button>
+                    <button type="button" className="ghost-button" onClick={() => void revealLinuxPackage()}>Open downloads folder</button>
+                    <button type="button" className="ghost-button" onClick={() => setLinuxUpdateDownload(null)}>Close</button>
+                  </div>
+                </div>
+              ) : null}
               <div className="delete-data-card">
                 <div>
                   <strong>Delete all data</strong>
