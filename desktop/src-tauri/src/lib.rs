@@ -226,11 +226,19 @@ fn get_update_install_support() -> UpdateInstallSupport {
             };
         }
 
+        if linux_distribution_family() == "source" {
+            return UpdateInstallSupport {
+                can_auto_install: false,
+                package_hint: "source-linux".into(),
+                message: "A new version is available. For Arch, Hyprland-heavy setups, and unsupported Linux distributions, update by pulling the repository and rebuilding from source.".into(),
+            };
+        }
+
         return UpdateInstallSupport {
-      can_auto_install: false,
-      package_hint: "manual-linux".into(),
-      message: "Automatic installation is disabled for Linux .deb, .rpm, and local builds. Download the new package from the release page instead.".into(),
-    };
+            can_auto_install: false,
+            package_hint: "manual-linux".into(),
+            message: "Automatic installation is disabled for Linux .deb and .rpm installs. Download the matching package, then run the install command shown by the app.".into(),
+        };
     }
 
     #[allow(unreachable_code)]
@@ -268,7 +276,7 @@ fn linux_distribution_family() -> String {
         return "rpm".into();
     }
 
-    "appimage".into()
+    "source".into()
 }
 
 fn file_name_from_url(url: &str) -> Result<String, String> {
@@ -298,10 +306,14 @@ async fn download_linux_update_package() -> Result<LinuxUpdateDownload, String> 
             .map_err(|error| format!("Could not parse update metadata: {error}"))?;
 
         let family = linux_distribution_family();
+        if family == "source" {
+            return Err("For Arch, Hyprland-heavy setups, and unsupported Linux distributions, update by running: git pull && npm install && npm run tauri:build".into());
+        }
+
         let platform_key = match family.as_str() {
             "deb" => "linux-x86_64-deb",
             "rpm" => "linux-x86_64-rpm",
-            _ => "linux-x86_64-appimage",
+            _ => "linux-x86_64-deb",
         };
 
         let platform = latest
@@ -344,14 +356,14 @@ async fn download_linux_update_package() -> Result<LinuxUpdateDownload, String> 
                     format!("sudo dnf install {quoted_path}")
                 }
             }
-            _ => format!("chmod +x {quoted_path}\n{quoted_path}"),
+            _ => format!("sudo apt install {quoted_path}"),
         };
 
         let message = match family.as_str() {
-      "deb" => "Downloaded the Debian/Ubuntu package. Run the command below to install it.",
-      "rpm" => "Downloaded the RPM package. Run the command below to install it.",
-      _ => "Downloaded the AppImage package. Run the commands below to make it executable and start it.",
-    };
+            "deb" => "Downloaded the Debian/Ubuntu package. Run the command below to install it.",
+            "rpm" => "Downloaded the RPM package. Run the command below to install it.",
+            _ => "Downloaded the Linux package. Run the command below to install it.",
+        };
 
         Ok(LinuxUpdateDownload {
             version: latest.version,

@@ -222,6 +222,7 @@ const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
+const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
 const DEFAULT_UPDATE_INSTALL_SUPPORT: UpdateInstallSupport = {
   canAutoInstall: false,
   packageHint: "unknown",
@@ -1563,6 +1564,16 @@ function App() {
     } catch (error) {
       console.warn("Could not copy install command.", error);
       setMessage("Could not copy command. Select it manually instead.");
+    }
+  }
+
+  async function copySourceLinuxUpdateCommand() {
+    try {
+      await navigator.clipboard.writeText(SOURCE_LINUX_UPDATE_COMMAND);
+      setMessage("Source update commands copied.");
+    } catch (error) {
+      console.warn("Could not copy source update commands.", error);
+      setMessage("Could not copy commands. Select them manually instead.");
     }
   }
 
@@ -3192,7 +3203,7 @@ function App() {
                     </button>
                   ) : null}
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
-                    {updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
+                    {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? "Open release page" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
                 </div>
               </div>
@@ -3208,6 +3219,20 @@ function App() {
                     <button type="button" onClick={() => void copyLinuxInstallCommand()}>Copy command</button>
                     <button type="button" className="ghost-button" onClick={() => void revealLinuxPackage()}>Open downloads folder</button>
                     <button type="button" className="ghost-button" onClick={() => setLinuxUpdateDownload(null)}>Close</button>
+                  </div>
+                </div>
+              ) : null}
+              {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Update from source</strong>
+                    <span>Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions.</span>
+                    <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
+                  </div>
+                  <textarea className="linux-update-command" value={SOURCE_LINUX_UPDATE_COMMAND} readOnly rows={6} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copySourceLinuxUpdateCommand()}>Copy commands</button>
+                    <button type="button" className="ghost-button" onClick={() => openExternalLink("https://github.com/damcha02/destudydracker")}>Open repository</button>
                   </div>
                 </div>
               ) : null}
