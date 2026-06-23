@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import type { Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -215,9 +219,6 @@ const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
-const CURRENT_APP_VERSION = "0.1.2";
-const UPDATE_CHECKS_ENABLED = false;
-const RELEASES_API_URL = "https://api.github.com/repos/damcha02/destudydracker/releases/latest";
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 
 type ThemePalette =
@@ -260,7 +261,7 @@ const vaultSpaces: Array<{ id: VaultSpace | "summaries" | "exams" | "templates" 
 ];
 
 type UpdateInfo = {
-  status: "idle" | "available" | "current" | "error";
+  status: "idle" | "available" | "current" | "installing" | "error";
   latestVersion?: string;
   releaseUrl?: string;
   message: string;
@@ -523,25 +524,6 @@ function formatUnitAmount(amount: number) {
   return `${Number.isInteger(amount) ? amount : amount.toFixed(2)} units`;
 }
 
-function normalizeVersion(version: string) {
-  return version.trim().replace(/^v/i, "").split(".").map((part) => Number.parseInt(part, 10) || 0);
-}
-
-function compareVersions(current: string, latest: string) {
-  const currentParts = normalizeVersion(current);
-  const latestParts = normalizeVersion(latest);
-  const length = Math.max(currentParts.length, latestParts.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const currentPart = currentParts[index] ?? 0;
-    const latestPart = latestParts[index] ?? 0;
-    if (latestPart > currentPart) return 1;
-    if (latestPart < currentPart) return -1;
-  }
-
-  return 0;
-}
-
 function formatUnitsLeft(amount: number) {
   const safeAmount = Math.max(0, amount);
   if (Number.isInteger(safeAmount)) return safeAmount.toString();
@@ -587,6 +569,20 @@ function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
   if (typeof error === "string") return error;
   return fallback;
+}
+
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
 function buildReferenceNoteMarkdown(course: Course) {
@@ -903,15 +899,32 @@ function App() {
   const [referenceEditing, setReferenceEditing] = useState(false);
   const [referencePathVisible, setReferencePathVisible] = useState(false);
   const referenceLoadRequestRef = useRef(0);
+  const pendingUpdateRef = useRef<Update | null>(null);
+  const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
-    message: UPDATE_CHECKS_ENABLED ? "Check whether a newer release is available on GitHub." : "Update checks are temporarily disabled.",
+    releaseUrl: RELEASES_PAGE_URL,
+    message: "Check whether a newer release is available.",
   });
 
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useEffect(() => {
+    if (!isTauriApp()) {
+      setCurrentAppVersion("browser preview");
+      return;
+    }
+
+    void getVersion()
+      .then(setCurrentAppVersion)
+      .catch((error: unknown) => {
+        console.warn("Could not read app version.", error);
+        setCurrentAppVersion("unknown");
+      });
+  }, []);
 
   useEffect(() => {
     setState((current) => carryOverCalendarEntries(current, calendarToday));
@@ -1332,40 +1345,107 @@ function App() {
   }
 
   async function checkForUpdates() {
+    if (!isTauriApp()) {
+      setUpdateInfo({
+        status: "idle",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "Automatic updates are only available in the installed desktop app.",
+      });
+      return;
+    }
+
     setUpdateChecking(true);
-    setUpdateInfo({ status: "idle", message: "Checking GitHub Releases..." });
+    pendingUpdateRef.current = null;
+    setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
 
     try {
-      const response = await fetch(RELEASES_API_URL, {
-        headers: { Accept: "application/vnd.github+json" },
-      });
+      const update = await check({ timeout: 30000 });
 
-      if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
-      const release = (await response.json()) as { tag_name?: string; html_url?: string; name?: string };
-      const latestVersion = release.tag_name || release.name;
-      const releaseUrl = release.html_url || RELEASES_PAGE_URL;
-
-      if (!latestVersion) throw new Error("Latest release has no version tag.");
-
-      if (compareVersions(CURRENT_APP_VERSION, latestVersion) > 0) {
+      if (update) {
+        pendingUpdateRef.current = update;
         setUpdateInfo({
           status: "available",
-          latestVersion,
-          releaseUrl,
-          message: `Version ${latestVersion} is available.`,
+          latestVersion: update.version,
+          releaseUrl: RELEASES_PAGE_URL,
+          message: `Version ${update.version} is available. AppImage, Windows, and macOS installs can update automatically. Linux .deb/.rpm users can use the release page fallback.`,
         });
       } else {
         setUpdateInfo({
           status: "current",
-          latestVersion,
-          releaseUrl,
-          message: `You are up to date. Latest release is ${latestVersion}.`,
+          releaseUrl: RELEASES_PAGE_URL,
+          message: "You are up to date.",
         });
       }
     } catch (error) {
       setUpdateInfo({
         status: "error",
-        message: getErrorMessage(error, "Could not check for updates. Check your internet connection."),
+        releaseUrl: RELEASES_PAGE_URL,
+        message: `${getErrorMessage(error, "Could not check for updates. Check your internet connection.")} You can still download installers from the release page.`,
+      });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  async function installPendingUpdate() {
+    if (!isTauriApp()) {
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    const update = pendingUpdateRef.current;
+    if (!update) {
+      setUpdateInfo({
+        status: "error",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "No checked update is ready to install. Check for updates again or open the release page.",
+      });
+      return;
+    }
+
+    let downloadedBytes = 0;
+    let totalBytes: number | undefined;
+    setUpdateChecking(true);
+    setUpdateInfo({
+      status: "installing",
+      latestVersion: update.version,
+      releaseUrl: RELEASES_PAGE_URL,
+      message: `Downloading version ${update.version}...`,
+    });
+
+    try {
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          downloadedBytes = 0;
+          totalBytes = event.data.contentLength;
+          setUpdateInfo((current) => ({ ...current, message: totalBytes ? `Downloading update: 0 / ${formatFileSize(totalBytes)}` : "Downloading update..." }));
+        }
+        if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          setUpdateInfo((current) => ({
+            ...current,
+            message: totalBytes ? `Downloading update: ${formatFileSize(downloadedBytes)} / ${formatFileSize(totalBytes)}` : `Downloading update: ${formatFileSize(downloadedBytes)}`,
+          }));
+        }
+        if (event.event === "Finished") {
+          setUpdateInfo((current) => ({ ...current, message: "Installing update..." }));
+        }
+      });
+
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "current",
+        latestVersion: update.version,
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "Update installed. Restarting Study Tracker...",
+      });
+      await relaunch();
+    } catch (error) {
+      setUpdateInfo({
+        status: "error",
+        latestVersion: update.version,
+        releaseUrl: RELEASES_PAGE_URL,
+        message: `${getErrorMessage(error, "Could not install the update.")} If you installed with .deb or .rpm, download the new installer from the release page.`,
       });
     } finally {
       setUpdateChecking(false);
@@ -2923,21 +3003,22 @@ function App() {
               <div className={`settings-update-card ${updateInfo.status}`}>
                 <div>
                   <strong>Updates</strong>
-                  <span>Current version: {CURRENT_APP_VERSION}</span>
+                  <span>Current version: {currentAppVersion}</span>
                   <p>{updateInfo.message}</p>
                 </div>
-                {UPDATE_CHECKS_ENABLED ? (
-                  <div className="update-actions">
-                    <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
-                      {updateChecking ? "Checking..." : "Check for updates"}
+                <div className="update-actions">
+                  <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
+                    {updateChecking && updateInfo.status !== "installing" ? "Checking..." : "Check for updates"}
+                  </button>
+                  {updateInfo.status === "available" ? (
+                    <button type="button" onClick={() => void installPendingUpdate()} disabled={updateChecking}>
+                      Install update
                     </button>
-                    {updateInfo.status === "available" ? (
-                      <button type="button" onClick={() => window.open(updateInfo.releaseUrl ?? RELEASES_PAGE_URL, "_blank", "noopener,noreferrer")}>
-                        Open release page
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
+                  ) : null}
+                  <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
+                    Open release page
+                  </button>
+                </div>
               </div>
               <div className="delete-data-card">
                 <div>

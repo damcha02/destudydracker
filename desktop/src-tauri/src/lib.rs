@@ -124,6 +124,8 @@ fn export_daily_note(vault_path: String, note_date: String, content: String) -> 
 pub fn run() {
   tauri::Builder::default()
     .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
+    .plugin(tauri_plugin_process::init())
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
     .invoke_handler(tauri::generate_handler![create_obsidian_vault, link_obsidian_vault, read_daily_note, write_daily_note, read_reference_note, write_reference_note, export_daily_note])
