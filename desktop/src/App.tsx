@@ -32,7 +32,7 @@ import {
 } from "./lib/metrics";
 import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerMode, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -4036,15 +4036,21 @@ function App() {
                   className={`timer-preset-card ${isCustomTimerPreset ? "active" : ""}`}
                   disabled={state.timer.running}
                   onClick={() =>
-                    setState((current) => {
-                      const mode: TimerMode = current.timer.mode === "exam" ? "exam" : "focus";
-                      const studyMinutes = mode === "focus" && current.timer.studyMinutes <= 0 ? defaultTimer.studyMinutes : current.timer.studyMinutes;
-                      const timer = { ...current.timer, presetLabel: "Custom", mode, studyMinutes, phase: "idle" as const, startedAt: null, endsAt: null };
-                      return {
-                        ...current,
-                        timer: { ...timer, remainingSeconds: getIdleTimerSeconds(timer) },
-                      };
-                    })
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        presetLabel: "Custom",
+                        mode: "focus",
+                        studyMinutes: defaultTimer.studyMinutes,
+                        breakMinutes: defaultTimer.breakMinutes,
+                        phase: "idle",
+                        running: false,
+                        startedAt: null,
+                        endsAt: null,
+                        remainingSeconds: defaultTimer.studyMinutes * 60,
+                      },
+                    }))
                   }
                 >
                   <strong>Custom</strong>
