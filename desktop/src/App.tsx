@@ -211,6 +211,7 @@ const focusPresets = [
   { label: "Deep Work 52/17", study: 52, breakMinutes: 17, mode: "focus" as const },
   { label: "Sprint 90/20", study: 90, breakMinutes: 20, mode: "focus" as const },
   { label: "Exam", study: 120, breakMinutes: 0, mode: "exam" as const },
+  { label: "∞ Endless", study: 0, breakMinutes: 0, mode: "endless" as const },
 ];
 
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
@@ -552,7 +553,11 @@ function getTimeGreeting(date = new Date()) {
 }
 
 function getTimerMinutes(timer: TimerState) {
-  if (!timer.startedAt || (timer.phase !== "study" && timer.phase !== "exam")) return 0;
+  if (!timer.startedAt || (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch")) return 0;
+
+  if (timer.phase === "stopwatch") {
+    return Math.max(1, Math.round(timer.remainingSeconds / 60));
+  }
 
   const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
   const elapsed = clamp(configuredSeconds - timer.remainingSeconds, 0, configuredSeconds);
@@ -1022,8 +1027,17 @@ function App() {
     const interval = window.setInterval(() => {
       setState((current) => {
         const timer = current.timer;
-        if (!timer.running || !timer.endsAt) return current;
+        if (!timer.running) return current;
+        if (!timer.endsAt && timer.phase !== "stopwatch") return current;
 
+        if (timer.phase === "stopwatch") {
+          if (!timer.startedAt) return current;
+          const elapsed = Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
+          if (elapsed === timer.remainingSeconds) return current;
+          return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+        }
+
+        if (!timer.endsAt) return current;
         const diff = Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000);
         if (diff > 0) {
           if (diff === timer.remainingSeconds) return current;
@@ -1248,10 +1262,14 @@ function App() {
   const timerTask = state.timer.taskId ? taskLookup.get(state.timer.taskId) : null;
   const hasKnownTimerPreset = focusPresets.some((preset) => preset.label === state.timer.presetLabel);
   const isCustomTimerPreset = !hasKnownTimerPreset || state.timer.presetLabel === "Custom";
-  const timerConfiguredSeconds = state.timer.phase === "break"
+  const timerConfiguredSeconds = state.timer.phase === "stopwatch"
+    ? 1
+    : state.timer.phase === "break"
     ? Math.max(1, state.timer.breakMinutes * 60)
     : Math.max(1, (state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes) * 60);
-  const timerProgress = clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
+  const timerProgress = state.timer.phase === "stopwatch"
+    ? 100
+    : clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
 
   const calendarDays = useMemo(
     () => (calendarView === "month" ? buildMonthDays(calendarCursorDate) : buildWeekDays(calendarCursorDate)),
@@ -1932,7 +1950,7 @@ function App() {
     setExpandedCourseIds((current) => toggleId(current, courseId));
   }
 
-  function applyPreset(label: string, study: number, breakMinutes: number, mode: "focus" | "exam") {
+  function applyPreset(label: string, study: number, breakMinutes: number, mode: "focus" | "exam" | "endless") {
     setState((current) => ({
       ...current,
       timer: {
@@ -1942,19 +1960,36 @@ function App() {
         breakMinutes,
         examMinutes: study,
         presetLabel: label,
-        phase: current.timer.running ? current.timer.phase : "idle",
-        remainingSeconds: current.timer.running ? current.timer.remainingSeconds : study * 60,
+        phase: current.timer.running ? current.timer.phase : (mode === "endless" ? "stopwatch" : "idle"),
+        remainingSeconds: current.timer.running ? current.timer.remainingSeconds : 0,
       },
     }));
   }
 
   function startTimer() {
+    const isEndless = state.timer.mode === "endless";
     const isExam = state.timer.mode === "exam";
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
     void prepareBellSound().then((result) => {
       if (!result.ok) console.warn("Bell sound could not be prepared.", result);
     });
+
+    if (isEndless) {
+      setState((current) => ({
+        ...current,
+        activeTab: "timer",
+        timer: {
+          ...current.timer,
+          running: true,
+          phase: "stopwatch",
+          startedAt,
+          endsAt: null,
+          remainingSeconds: 0,
+        },
+      }));
+      return;
+    }
 
     setState((current) => ({
       ...current,
@@ -1981,6 +2016,21 @@ function App() {
       const timer = current.timer;
       if (timer.phase === "idle") return current;
 
+      if (timer.phase === "stopwatch") {
+        if (timer.running) {
+          return { ...current, timer: { ...timer, running: false } };
+        }
+        const elapsed = timer.remainingSeconds;
+        return {
+          ...current,
+          timer: {
+            ...timer,
+            running: true,
+            startedAt: new Date(Date.now() - elapsed * 1000).toISOString(),
+          },
+        };
+      }
+
       if (timer.running && timer.endsAt) {
         const diff = Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000));
         return { ...current, timer: { ...timer, running: false, endsAt: null, remainingSeconds: diff } };
@@ -2003,22 +2053,24 @@ function App() {
       timer: {
         ...defaultTimer,
         ...keepTimerContext(current.timer),
-        remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
+        remainingSeconds: current.timer.mode === "endless" ? 0 : current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
+        phase: current.timer.mode === "endless" ? "stopwatch" : "idle",
       },
     }));
   }
 
   function completeSessionManually() {
-    if (state.timer.phase !== "study" && state.timer.phase !== "exam") {
+    if (state.timer.phase !== "study" && state.timer.phase !== "exam" && state.timer.phase !== "stopwatch") {
       setMessage("There is no active study block to save.");
       return;
     }
 
     setState((current) => {
       const timer = current.timer;
-      if (timer.phase !== "study" && timer.phase !== "exam") return current;
+      if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return current;
       const minutes = getTimerMinutes(timer);
       const session = buildSessionFromTimer(timer, new Date().toISOString(), minutes);
+      playBellSound();
       return {
         ...current,
         sessions: pruneSessionHistory([session, ...current.sessions]),
@@ -3958,7 +4010,7 @@ function App() {
                     onClick={() => applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode)}
                   >
                     <strong>{preset.label.replace(" 25/5", "").replace(" 52/17", "").replace(" 90/20", "")}</strong>
-                    <span>{preset.mode === "exam" ? `${preset.study} min` : `${preset.study} / ${preset.breakMinutes}`}</span>
+                    <span>{preset.mode === "endless" ? "∞" : preset.mode === "exam" ? `${preset.study} min` : `${preset.study} / ${preset.breakMinutes}`}</span>
                   </button>
                 ))}
                 <button
@@ -4094,7 +4146,7 @@ function App() {
 
               <div className="timer-face spacious-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg` } as CSSProperties}>
                 <div className="timer-phase-row">
-                  <span className="timer-phase-pill">{state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
+                  <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
                   <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
@@ -4106,10 +4158,10 @@ function App() {
                 <button
                   type="button"
                   className="timer-primary-action"
-                  onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}
+                  onClick={state.timer.phase === "stopwatch" && state.timer.running ? completeSessionManually : state.timer.phase === "idle" ? startTimer : pauseTimer}
                 >
-                  <span>▷</span>
-                  {state.timer.phase === "idle" ? "Start" : state.timer.running ? "Pause" : "Resume"}
+                  <span>{state.timer.phase === "stopwatch" && state.timer.running ? "■" : "▷"}</span>
+                  {state.timer.phase === "stopwatch" ? (state.timer.running ? "Stop" : "Resume") : state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "Start tracking" : "Start") : state.timer.running ? "Pause" : "Resume"}
                 </button>
                 <button type="button" className="timer-save-action" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
                   ▣ Save
@@ -4119,7 +4171,7 @@ function App() {
                 </button>
               </div>
 
-              {state.timer.mode !== "exam" ? (
+              {state.timer.mode !== "exam" && state.timer.mode !== "endless" ? (
                 <button
                   type="button"
                   className="timer-break-switch"
