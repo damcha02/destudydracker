@@ -288,7 +288,7 @@
         <!-- Linux -->
         <div class="os-panel" data-os="linux">
           <h3 class="serif">Linux</h3>
-          <p class="lead">Available as <code>.deb</code> and <code>.rpm</code> for common package families. Arch and unsupported distributions should build from source for now.</p>
+          <p class="lead">Available as <code>.deb</code> and <code>.rpm</code> for common package families. Arch, Hyprland-heavy setups, and unsupported distributions should build from source for now.</p>
           <div class="distro-picker" aria-label="Choose your Linux distribution">
             <button class="distro-option on" type="button" data-distro="debian" aria-pressed="true">Ubuntu / Debian</button>
             <button class="distro-option" type="button" data-distro="fedora" aria-pressed="false">Fedora / openSUSE</button>
@@ -312,12 +312,12 @@
             <li><span class="st">For Ubuntu/Debian or Fedora/openSUSE, download the recommended Linux file from the latest GitHub release.</span></li>
             <li><span class="st"><strong>.deb:</strong> install with <code>sudo apt install ./Study.Tracker_*_amd64.deb</code>.</span></li>
             <li><span class="st"><strong>.rpm:</strong> install with <code>sudo dnf install ./Study.Tracker-*.x86_64.rpm</code>.</span></li>
-            <li><span class="st"><strong>Arch / other:</strong> clone the repository, then run <code>cd desktop</code>, <code>npm install</code>, and <code>npm run tauri:build</code>. Start it with <code>./src-tauri/target/release/app</code>.</span></li>
-            <li><span class="st">To update a source build later, run <code>git pull</code>, <code>npm install</code>, and <code>npm run tauri:build</code> again.</span></li>
+            <li><span class="st"><strong>Arch / other:</strong> build from source with <code>git clone https://github.com/damcha02/destudydracker.git</code>, <code>cd destudydracker/desktop</code>, <code>npm install</code>, and <code>npm run tauri:build</code>. Start it with <code>./src-tauri/target/release/app</code>.</span></li>
+            <li><span class="st">To update a source build later, run <code>git pull</code>, <code>npm install</code>, and <code>npm run tauri:build</code>, then start the app again.</span></li>
           </ol>
           <div class="note">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-            <p><strong>Tip:</strong> if you are not on ARM, avoid files named <code>aarch64</code> or <code>arm64</code>. Choose <code>amd64</code>, <code>x86_64</code>, or <code>x64</code> for normal Intel/AMD PCs. AppImage builds may fail on some Wayland/Hyprland systems, so source builds are recommended there.</p>
+            <p><strong>Tip:</strong> if you are not on ARM, avoid files named <code>aarch64</code> or <code>arm64</code>. Choose <code>amd64</code>, <code>x86_64</code>, or <code>x64</code> for normal Intel/AMD PCs. AppImage builds are provided as a fallback, but source builds are recommended on Arch, Hyprland, and unsupported distributions.</p>
           </div>
         </div>
       </div>
