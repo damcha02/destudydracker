@@ -32,7 +32,7 @@ import {
 } from "./lib/metrics";
 import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerMode, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -562,6 +562,11 @@ function getTimerMinutes(timer: TimerState) {
   const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
   const elapsed = clamp(configuredSeconds - timer.remainingSeconds, 0, configuredSeconds);
   return Math.max(1, Math.round(elapsed / 60));
+}
+
+function getIdleTimerSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
+  if (timer.mode === "endless") return 0;
+  return (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60;
 }
 
 function keepTimerContext(timer: TimerState) {
@@ -1960,8 +1965,10 @@ function App() {
         breakMinutes,
         examMinutes: study,
         presetLabel: label,
-        phase: current.timer.running ? current.timer.phase : (mode === "endless" ? "stopwatch" : "idle"),
-        remainingSeconds: current.timer.running ? current.timer.remainingSeconds : 0,
+        phase: current.timer.running ? current.timer.phase : "idle",
+        remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds({ mode, studyMinutes: study, examMinutes: study }),
+        startedAt: current.timer.running ? current.timer.startedAt : null,
+        endsAt: current.timer.running ? current.timer.endsAt : null,
       },
     }));
   }
@@ -2053,8 +2060,11 @@ function App() {
       timer: {
         ...defaultTimer,
         ...keepTimerContext(current.timer),
-        remainingSeconds: current.timer.mode === "endless" ? 0 : current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
-        phase: current.timer.mode === "endless" ? "stopwatch" : "idle",
+        running: false,
+        startedAt: null,
+        endsAt: null,
+        remainingSeconds: getIdleTimerSeconds(current.timer),
+        phase: "idle",
       },
     }));
   }
@@ -2074,7 +2084,15 @@ function App() {
       return {
         ...current,
         sessions: pruneSessionHistory([session, ...current.sessions]),
-        timer: { ...defaultTimer, ...keepTimerContext(timer) },
+        timer: {
+          ...defaultTimer,
+          ...keepTimerContext(timer),
+          running: false,
+          startedAt: null,
+          endsAt: null,
+          phase: "idle",
+          remainingSeconds: getIdleTimerSeconds(timer),
+        },
       };
     });
     setMessage("Session saved.");
@@ -4018,15 +4036,15 @@ function App() {
                   className={`timer-preset-card ${isCustomTimerPreset ? "active" : ""}`}
                   disabled={state.timer.running}
                   onClick={() =>
-                    setState((current) => ({
-                      ...current,
-                      timer: {
-                        ...current.timer,
-                        presetLabel: "Custom",
-                        mode: current.timer.mode === "exam" ? "exam" : "focus",
-                        remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
-                      },
-                    }))
+                    setState((current) => {
+                      const mode: TimerMode = current.timer.mode === "exam" ? "exam" : "focus";
+                      const studyMinutes = mode === "focus" && current.timer.studyMinutes <= 0 ? defaultTimer.studyMinutes : current.timer.studyMinutes;
+                      const timer = { ...current.timer, presetLabel: "Custom", mode, studyMinutes, phase: "idle" as const, startedAt: null, endsAt: null };
+                      return {
+                        ...current,
+                        timer: { ...timer, remainingSeconds: getIdleTimerSeconds(timer) },
+                      };
+                    })
                   }
                 >
                   <strong>Custom</strong>
@@ -4111,16 +4129,21 @@ function App() {
                       disabled={state.timer.running}
                       onChange={(event) => {
                         const next = Number(event.target.value) || 1;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
+                        setState((current) => {
+                          const timer = {
                             ...current.timer,
                             studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
                             examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
-                            remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
                             presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
-                          },
-                        }));
+                          };
+                          return {
+                            ...current,
+                            timer: {
+                              ...timer,
+                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                            },
+                          };
+                        });
                       }}
                     />
                   </label>
@@ -4297,16 +4320,21 @@ function App() {
                       value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
                       onChange={(event) => {
                         const next = Number(event.target.value) || 1;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
+                        setState((current) => {
+                          const timer = {
                             ...current.timer,
                             studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
                             examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
-                            remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
                             presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
-                          },
-                        }));
+                          };
+                          return {
+                            ...current,
+                            timer: {
+                              ...timer,
+                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                            },
+                          };
+                        });
                       }}
                     />
                   </label>
