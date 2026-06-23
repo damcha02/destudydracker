@@ -1,6 +1,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInstallSupport {
+  can_auto_install: bool,
+  package_hint: String,
+  message: String,
+}
+
 fn sanitize_segment(value: &str) -> String {
   value
     .chars()
@@ -120,6 +128,42 @@ fn export_daily_note(vault_path: String, note_date: String, content: String) -> 
   Ok(note_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn get_update_install_support() -> UpdateInstallSupport {
+  #[cfg(any(target_os = "windows", target_os = "macos"))]
+  {
+    return UpdateInstallSupport {
+      can_auto_install: true,
+      package_hint: "native".into(),
+      message: "Automatic updates are supported for this install.".into(),
+    };
+  }
+
+  #[cfg(target_os = "linux")]
+  {
+    if std::env::var_os("APPIMAGE").is_some() {
+      return UpdateInstallSupport {
+        can_auto_install: true,
+        package_hint: "appimage".into(),
+        message: "Automatic updates are supported for this AppImage install.".into(),
+      };
+    }
+
+    return UpdateInstallSupport {
+      can_auto_install: false,
+      package_hint: "manual-linux".into(),
+      message: "Automatic installation is disabled for Linux .deb, .rpm, and local builds. Download the new package from the release page instead.".into(),
+    };
+  }
+
+  #[allow(unreachable_code)]
+  UpdateInstallSupport {
+    can_auto_install: false,
+    package_hint: "unsupported".into(),
+    message: "Automatic installation is not supported on this platform.".into(),
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
@@ -128,7 +172,7 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
-    .invoke_handler(tauri::generate_handler![create_obsidian_vault, link_obsidian_vault, read_daily_note, write_daily_note, read_reference_note, write_reference_note, export_daily_note])
+    .invoke_handler(tauri::generate_handler![create_obsidian_vault, link_obsidian_vault, read_daily_note, write_daily_note, read_reference_note, write_reference_note, export_daily_note, get_update_install_support])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

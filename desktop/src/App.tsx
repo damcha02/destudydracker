@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -220,6 +221,11 @@ const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
+const DEFAULT_UPDATE_INSTALL_SUPPORT: UpdateInstallSupport = {
+  canAutoInstall: false,
+  packageHint: "unknown",
+  message: "Checking which update method this install supports...",
+};
 
 type ThemePalette =
   | "default"
@@ -264,6 +270,12 @@ type UpdateInfo = {
   status: "idle" | "available" | "current" | "installing" | "error";
   latestVersion?: string;
   releaseUrl?: string;
+  message: string;
+};
+
+type UpdateInstallSupport = {
+  canAutoInstall: boolean;
+  packageHint: string;
   message: string;
 };
 
@@ -901,6 +913,7 @@ function App() {
   const referenceLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
+  const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
@@ -915,6 +928,11 @@ function App() {
   useEffect(() => {
     if (!isTauriApp()) {
       setCurrentAppVersion("browser preview");
+      setUpdateInstallSupport({
+        canAutoInstall: false,
+        packageHint: "browser",
+        message: "Automatic updates are only available in the installed desktop app.",
+      });
       return;
     }
 
@@ -923,6 +941,17 @@ function App() {
       .catch((error: unknown) => {
         console.warn("Could not read app version.", error);
         setCurrentAppVersion("unknown");
+      });
+
+    void invoke<UpdateInstallSupport>("get_update_install_support")
+      .then(setUpdateInstallSupport)
+      .catch((error: unknown) => {
+        console.warn("Could not detect update install support.", error);
+        setUpdateInstallSupport({
+          canAutoInstall: false,
+          packageHint: "unknown",
+          message: "Could not detect whether this install supports automatic updates. Use the release page instead.",
+        });
       });
   }, []);
 
@@ -1367,7 +1396,7 @@ function App() {
           status: "available",
           latestVersion: update.version,
           releaseUrl: RELEASES_PAGE_URL,
-          message: `Version ${update.version} is available. AppImage, Windows, and macOS installs can update automatically. Linux .deb/.rpm users can use the release page fallback.`,
+          message: updateInstallSupport.canAutoInstall ? `Version ${update.version} is available and can be installed automatically.` : `Version ${update.version} is available. ${updateInstallSupport.message}`,
         });
       } else {
         setUpdateInfo({
@@ -1389,6 +1418,17 @@ function App() {
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    if (!updateInstallSupport.canAutoInstall) {
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "available",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: updateInstallSupport.message,
+      }));
       openExternalLink(RELEASES_PAGE_URL);
       return;
     }
@@ -3010,13 +3050,13 @@ function App() {
                   <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
                     {updateChecking && updateInfo.status !== "installing" ? "Checking..." : "Check for updates"}
                   </button>
-                  {updateInfo.status === "available" ? (
+                  {updateInfo.status === "available" && updateInstallSupport.canAutoInstall ? (
                     <button type="button" onClick={() => void installPendingUpdate()} disabled={updateChecking}>
                       Install update
                     </button>
                   ) : null}
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
-                    Open release page
+                    {updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
                 </div>
               </div>
