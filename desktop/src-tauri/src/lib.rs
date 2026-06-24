@@ -34,6 +34,16 @@ struct LinuxUpdateDownload {
     message: String,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SummaryFile {
+    name: String,
+    path: String,
+    extension: String,
+    kind: String,
+    size_bytes: u64,
+}
+
 fn sanitize_segment(value: &str) -> String {
     value
         .chars()
@@ -56,21 +66,11 @@ fn create_obsidian_vault(base_path: String, vault_name: String) -> Result<String
     let vault_path = PathBuf::from(base_path).join(vault_name);
     fs::create_dir_all(&vault_path).map_err(|error| error.to_string())?;
 
-    for directory in [
-        ".obsidian",
-        "Inbox",
-        "Daily",
-        "References",
-        "Weekly",
-        "Subjects",
-        "Exams",
-        "Summaries",
-        "Templates",
-    ] {
+    for directory in [".obsidian", "Daily", "References", "Summaries"] {
         fs::create_dir_all(vault_path.join(directory)).map_err(|error| error.to_string())?;
     }
 
-    let readme = "# Study Tracker Vault\n\nThis vault was created by Study Tracker.\n\nUse Daily for automatic note exports, References for course links, and Subjects/Exams for long-form revision notes.\n";
+    let readme = "# Study Tracker Vault\n\nThis vault was created by Study Tracker.\n\nUse Daily for session notes, References for course links, and Summaries for PDFs, formula sheets, and cheatsheet images.\n";
     fs::write(vault_path.join("README.md"), readme).map_err(|error| error.to_string())?;
 
     Ok(vault_path.to_string_lossy().to_string())
@@ -100,6 +100,66 @@ fn reference_note_path(
         .join(format!("{}.md", course_name)))
 }
 
+fn summaries_dir_path(
+    vault_path: &str,
+    semester_name: &str,
+    course_name: &str,
+) -> Result<PathBuf, String> {
+    let semester_name = sanitize_segment(semester_name);
+    let course_name = sanitize_segment(course_name);
+
+    if semester_name.is_empty() || course_name.is_empty() {
+        return Err("Semester and course are required.".into());
+    }
+
+    Ok(Path::new(vault_path)
+        .join("Summaries")
+        .join(semester_name)
+        .join(course_name))
+}
+
+fn supported_summary_extension(path: &Path) -> Option<String> {
+    let extension = path.extension()?.to_string_lossy().to_lowercase();
+    match extension.as_str() {
+        "pdf" | "png" | "jpg" | "jpeg" | "webp" => Some(extension),
+        _ => None,
+    }
+}
+
+fn summary_file_kind(extension: &str) -> String {
+    if extension == "pdf" {
+        "pdf".into()
+    } else {
+        "image".into()
+    }
+}
+
+fn unique_summary_destination(directory: &Path, file_name: &str) -> PathBuf {
+    let original = Path::new(file_name);
+    let stem = original
+        .file_stem()
+        .map(|value| sanitize_segment(&value.to_string_lossy()))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "summary".into());
+    let extension = original
+        .extension()
+        .map(|value| value.to_string_lossy().to_string())
+        .filter(|value| !value.is_empty());
+
+    let mut candidate = directory.join(file_name);
+    let mut index = 2;
+    while candidate.exists() {
+        let next_name = match &extension {
+            Some(extension) => format!("{}-{}.{}", stem, index, extension),
+            None => format!("{}-{}", stem, index),
+        };
+        candidate = directory.join(next_name);
+        index += 1;
+    }
+
+    candidate
+}
+
 #[tauri::command]
 fn link_obsidian_vault(vault_path: String) -> Result<String, String> {
     let root = PathBuf::from(&vault_path);
@@ -110,17 +170,7 @@ fn link_obsidian_vault(vault_path: String) -> Result<String, String> {
         return Err("Selected path is not a folder.".into());
     }
 
-    for directory in [
-        ".obsidian",
-        "Inbox",
-        "Daily",
-        "References",
-        "Weekly",
-        "Subjects",
-        "Exams",
-        "Summaries",
-        "Templates",
-    ] {
+    for directory in [".obsidian", "Daily", "References", "Summaries"] {
         fs::create_dir_all(root.join(directory)).map_err(|error| error.to_string())?;
     }
 
@@ -186,6 +236,78 @@ fn write_reference_note(
     fs::write(&note_path, content).map_err(|error| error.to_string())?;
 
     Ok(note_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn list_summary_files(
+    vault_path: String,
+    semester_name: String,
+    course_name: String,
+) -> Result<Vec<SummaryFile>, String> {
+    let summaries_dir = summaries_dir_path(&vault_path, &semester_name, &course_name)?;
+    if !summaries_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = Vec::new();
+    for entry in fs::read_dir(&summaries_dir).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(extension) = supported_summary_extension(&path) else {
+            continue;
+        };
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| "summary".into());
+
+        files.push(SummaryFile {
+            name,
+            path: path.to_string_lossy().to_string(),
+            kind: summary_file_kind(&extension),
+            extension,
+            size_bytes: metadata.len(),
+        });
+    }
+
+    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(files)
+}
+
+#[tauri::command]
+fn import_summary_files(
+    vault_path: String,
+    semester_name: String,
+    course_name: String,
+    file_paths: Vec<String>,
+) -> Result<Vec<SummaryFile>, String> {
+    let summaries_dir = summaries_dir_path(&vault_path, &semester_name, &course_name)?;
+    fs::create_dir_all(&summaries_dir).map_err(|error| error.to_string())?;
+
+    for source in file_paths {
+        let source_path = PathBuf::from(&source);
+        if !source_path.is_file() {
+            return Err(format!("{} is not a file.", source));
+        }
+        if supported_summary_extension(&source_path).is_none() {
+            return Err("Only PDF, PNG, JPG, JPEG, and WEBP files can be added to summaries.".into());
+        }
+
+        let file_name = source_path
+            .file_name()
+            .map(|value| sanitize_segment(&value.to_string_lossy()))
+            .filter(|value| !value.is_empty())
+            .ok_or("Could not read the selected file name.")?;
+        let destination = unique_summary_destination(&summaries_dir, &file_name);
+        fs::copy(&source_path, &destination).map_err(|error| error.to_string())?;
+    }
+
+    list_summary_files(vault_path, semester_name, course_name)
 }
 
 #[tauri::command]
@@ -394,6 +516,8 @@ pub fn run() {
             write_daily_note,
             read_reference_note,
             write_reference_note,
+            list_summary_files,
+            import_summary_files,
             export_daily_note,
             get_update_install_support,
             download_linux_update_package
