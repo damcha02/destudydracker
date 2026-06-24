@@ -10,6 +10,7 @@ const LATEST_UPDATE_JSON_URL: &str =
 struct UpdateInstallSupport {
     can_auto_install: bool,
     package_hint: String,
+    runtime_channel: String,
     message: String,
 }
 
@@ -329,11 +330,31 @@ fn export_daily_note(
 
 #[tauri::command]
 fn get_update_install_support() -> UpdateInstallSupport {
+    let runtime_channel = runtime_channel();
+    if runtime_channel == "development" {
+        return UpdateInstallSupport {
+            can_auto_install: false,
+            package_hint: "development".into(),
+            runtime_channel,
+            message: "Updates are disabled in development builds. Update with: git pull, npm install, then npm run tauri:dev.".into(),
+        };
+    }
+
+    if runtime_channel != "official-release" {
+        return UpdateInstallSupport {
+            can_auto_install: false,
+            package_hint: "source-build".into(),
+            runtime_channel,
+            message: "Updates are disabled for source builds. Update by pulling the repository and rebuilding from source.".into(),
+        };
+    }
+
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         return UpdateInstallSupport {
             can_auto_install: true,
             package_hint: "native".into(),
+            runtime_channel,
             message: "Automatic updates are supported for this install.".into(),
         };
     }
@@ -344,6 +365,7 @@ fn get_update_install_support() -> UpdateInstallSupport {
             return UpdateInstallSupport {
                 can_auto_install: true,
                 package_hint: "appimage".into(),
+                runtime_channel,
                 message: "Automatic updates are supported for this AppImage install.".into(),
             };
         }
@@ -352,6 +374,7 @@ fn get_update_install_support() -> UpdateInstallSupport {
             return UpdateInstallSupport {
                 can_auto_install: false,
                 package_hint: "source-linux".into(),
+                runtime_channel,
                 message: "A new version is available. For Arch, Hyprland-heavy setups, and unsupported Linux distributions, update by pulling the repository and rebuilding from source.".into(),
             };
         }
@@ -359,6 +382,7 @@ fn get_update_install_support() -> UpdateInstallSupport {
         return UpdateInstallSupport {
             can_auto_install: false,
             package_hint: "manual-linux".into(),
+            runtime_channel,
             message: "Automatic installation is disabled for Linux .deb and .rpm installs. Download the matching package, then run the install command shown by the app.".into(),
         };
     }
@@ -367,8 +391,21 @@ fn get_update_install_support() -> UpdateInstallSupport {
     UpdateInstallSupport {
         can_auto_install: false,
         package_hint: "unsupported".into(),
+        runtime_channel,
         message: "Automatic installation is not supported on this platform.".into(),
     }
+}
+
+fn runtime_channel() -> String {
+    if cfg!(debug_assertions) {
+        return "development".into();
+    }
+
+    if option_env!("STUDY_TRACKER_OFFICIAL_RELEASE") == Some("1") {
+        return "official-release".into();
+    }
+
+    "source-build".into()
 }
 
 fn shell_quote(value: &str) -> String {

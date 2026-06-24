@@ -224,9 +224,11 @@ const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
+const DEV_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:dev";
 const DEFAULT_UPDATE_INSTALL_SUPPORT: UpdateInstallSupport = {
   canAutoInstall: false,
   packageHint: "unknown",
+  runtimeChannel: "unknown",
   message: "Checking which update method this install supports...",
 };
 
@@ -276,6 +278,7 @@ type UpdateInfo = {
 type UpdateInstallSupport = {
   canAutoInstall: boolean;
   packageHint: string;
+  runtimeChannel: string;
   message: string;
 };
 
@@ -956,6 +959,7 @@ function App() {
       setUpdateInstallSupport({
         canAutoInstall: false,
         packageHint: "browser",
+        runtimeChannel: "browser",
         message: "Automatic updates are only available in the installed desktop app.",
       });
       return;
@@ -975,6 +979,7 @@ function App() {
         setUpdateInstallSupport({
           canAutoInstall: false,
           packageHint: "unknown",
+          runtimeChannel: "unknown",
           message: "Could not detect whether this install supports automatic updates. Use the release page instead.",
         });
       });
@@ -1462,6 +1467,26 @@ function App() {
       return;
     }
 
+    if (updateInstallSupport.packageHint === "development") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "idle",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
+    if (updateInstallSupport.packageHint === "source-build") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "available",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
     setUpdateChecking(true);
     pendingUpdateRef.current = null;
     setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
@@ -1501,7 +1526,7 @@ function App() {
       return;
     }
 
-    if (!updateInstallSupport.canAutoInstall) {
+    if (updateInstallSupport.runtimeChannel !== "official-release" || !updateInstallSupport.canAutoInstall) {
       setUpdateInfo((current) => ({
         ...current,
         status: "available",
@@ -1618,6 +1643,16 @@ function App() {
       setMessage("Source update commands copied.");
     } catch (error) {
       console.warn("Could not copy source update commands.", error);
+      setMessage("Could not copy commands. Select them manually instead.");
+    }
+  }
+
+  async function copyDevUpdateCommand() {
+    try {
+      await navigator.clipboard.writeText(DEV_UPDATE_COMMAND);
+      setMessage("Development update commands copied.");
+    } catch (error) {
+      console.warn("Could not copy development update commands.", error);
       setMessage("Could not copy commands. Select them manually instead.");
     }
   }
@@ -3317,7 +3352,7 @@ function App() {
                     </button>
                   ) : null}
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
-                    {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? "Open release page" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
+                    {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? "Open repository" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
                 </div>
               </div>
@@ -3336,11 +3371,25 @@ function App() {
                   </div>
                 </div>
               ) : null}
-              {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? (
+              {updateInstallSupport.packageHint === "development" ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Development build updates disabled</strong>
+                    <span>This prevents a dev app from installing a release app and switching localStorage locations.</span>
+                    <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
+                  </div>
+                  <textarea className="linux-update-command" value={DEV_UPDATE_COMMAND} readOnly rows={5} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copyDevUpdateCommand()}>Copy commands</button>
+                    <button type="button" className="ghost-button" onClick={() => openExternalLink("https://github.com/damcha02/destudydracker")}>Open repository</button>
+                  </div>
+                </div>
+              ) : null}
+              {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? (
                 <div className="linux-update-command-card">
                   <div>
                     <strong>Update from source</strong>
-                    <span>Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions.</span>
+                    <span>{updateInstallSupport.packageHint === "source-build" ? "This source build cannot install release updates automatically." : "Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions."}</span>
                     <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
                   </div>
                   <textarea className="linux-update-command" value={SOURCE_LINUX_UPDATE_COMMAND} readOnly rows={6} />
