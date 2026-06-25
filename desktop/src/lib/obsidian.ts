@@ -25,6 +25,22 @@ export async function pickExistingVaultDirectory() {
   return typeof selected === "string" ? selected : null;
 }
 
+export async function pickSummaryFiles() {
+  const selected = await open({
+    multiple: true,
+    title: "Choose summary or cheatsheet files",
+    filters: [
+      {
+        name: "Summaries and cheatsheets",
+        extensions: ["pdf", "png", "jpg", "jpeg", "webp"],
+      },
+    ],
+  });
+
+  if (Array.isArray(selected)) return selected;
+  return typeof selected === "string" ? [selected] : [];
+}
+
 export async function createVault(basePath: string, vaultName: string) {
   return invoke<string>("create_obsidian_vault", {
     basePath,
@@ -67,6 +83,31 @@ export async function writeReferenceNote(vaultPath: string, semesterName: string
     semesterName,
     courseName,
     content,
+  });
+}
+
+export type SummaryFile = {
+  name: string;
+  path: string;
+  extension: string;
+  kind: "pdf" | "image";
+  sizeBytes: number;
+};
+
+export async function listSummaryFiles(vaultPath: string, semesterName: string, courseName: string) {
+  return invoke<SummaryFile[]>("list_summary_files", {
+    vaultPath,
+    semesterName,
+    courseName,
+  });
+}
+
+export async function importSummaryFiles(vaultPath: string, semesterName: string, courseName: string, filePaths: string[]) {
+  return invoke<SummaryFile[]>("import_summary_files", {
+    vaultPath,
+    semesterName,
+    courseName,
+    filePaths,
   });
 }
 

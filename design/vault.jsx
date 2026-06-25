@@ -3,15 +3,12 @@
    Calm, literary, scalable space-based layout
    ============================================================ */
 
-const VAULT_FOLDERS = ['Inbox', 'Daily', 'Weekly', 'Subjects', 'Exams', 'Summaries', 'Templates', 'References'];
+const VAULT_FOLDERS = ['Daily', 'References', 'Summaries'];
 
 const VAULT_SPACES = [
   { id: 'daily', label: 'Daily', icon: 'cal' },
   { id: 'references', label: 'References', icon: 'book' },
-  { id: 'summaries', label: 'Summaries', icon: 'layers', soon: true },
-  { id: 'exams', label: 'Exams', icon: 'target', soon: true },
-  { id: 'templates', label: 'Templates', icon: 'grid', soon: true },
-  { id: 'inbox', label: 'Inbox', icon: 'file', soon: true },
+  { id: 'summaries', label: 'Summaries', icon: 'layers' },
 ];
 
 /* ---- Sample reference markdown for demo ---- */
@@ -150,15 +147,15 @@ function SpaceNav({ active, onChange }) {
       {VAULT_SPACES.map(sp => {
         const on = sp.id === active;
         return (
-          <button key={sp.id} onClick={() => !sp.soon && onChange(sp.id)} style={{
+          <button key={sp.id} onClick={() => onChange(sp.id)} style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
             padding: '9px 14px 8px', fontSize: 12.5,
             fontWeight: on ? 600 : 500, fontFamily: 'var(--font-sans)',
-            color: on ? 'var(--accent)' : sp.soon ? 'var(--ink-4)' : 'var(--ink-3)',
+            color: on ? 'var(--accent)' : 'var(--ink-3)',
             background: 'none', border: 'none',
             borderBottom: '2px solid', borderColor: on ? 'var(--accent)' : 'transparent',
-            cursor: sp.soon ? 'default' : 'pointer',
-            opacity: sp.soon ? 0.5 : 1, transition: 'color .15s',
+            cursor: 'pointer',
+            opacity: 1, transition: 'color .15s',
             marginBottom: -1, whiteSpace: 'nowrap', flexShrink: 0,
           }}>
             <Icon name={sp.icon} size={14} stroke={on ? 2 : 1.5} />
@@ -206,7 +203,7 @@ function VaultSettings({ data }) {
         <div style={{ marginTop: 14, padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--warn-soft)', border: '1px solid', borderColor: 'color-mix(in oklch, var(--warn) 25%, transparent)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <Icon name="info" size={14} style={{ color: 'var(--warn)', flexShrink: 0, marginTop: 1 }} />
           <span style={{ fontSize: 11.5, color: 'var(--ink-2)', lineHeight: 1.5 }}>
-            <strong>Coming soon.</strong> AI-generated summaries from your study sessions will appear here in a future update.
+            Summaries are stored as course-based PDFs and image cheatsheets inside the vault.
           </span>
         </div>
       </Card>
@@ -450,20 +447,14 @@ function ReferencesSpace({ data }) {
 }
 
 /* ============================================================
-   "Coming soon" placeholder for future spaces
+   Summaries Space
    ============================================================ */
-function ComingSoonSpace({ space }) {
-  const hints = {
-    summaries: 'AI-generated summaries from your study sessions',
-    exams: 'Exam prep notes and practice question banks',
-    templates: 'Reusable note templates for lectures, labs, and reviews',
-    inbox: 'Quick capture and unsorted notes',
-  };
+function SummariesSpace() {
   return (
-    <Card style={{ maxWidth: 400, margin: '40px auto' }}>
-      <Empty icon={VAULT_SPACES.find(s => s.id === space)?.icon || 'sparkle'}
-        title={`${VAULT_SPACES.find(s => s.id === space)?.label || space} — coming soon`}
-        sub={hints[space] || 'This space is planned for a future update.'} />
+    <Card style={{ maxWidth: 520, margin: '40px auto' }}>
+      <Empty icon="layers"
+        title="Summaries and cheatsheets"
+        sub="Add PDFs, formula sheets, scanned notes, and cheatsheet images by course. The desktop app stores them in Summaries/{semester}/{course}." />
     </Card>
   );
 }
@@ -515,7 +506,7 @@ function VaultAI({ data, dispatch }) {
           <SpaceNav active={space} onChange={setSpace} />
           {space === 'daily' && <DailyNoteSpace data={data} />}
           {space === 'references' && <ReferencesSpace data={data} />}
-          {!['daily', 'references'].includes(space) && <ComingSoonSpace space={space} />}
+          {space === 'summaries' && <SummariesSpace />}
         </>
       )}
     </div>

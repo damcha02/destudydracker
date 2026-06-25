@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -30,7 +30,8 @@ import {
   getUpcomingExams,
   getWeeklyActivity,
 } from "./lib/metrics";
-import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
+import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
+import type { SummaryFile } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
@@ -223,9 +224,11 @@ const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
+const DEV_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:dev";
 const DEFAULT_UPDATE_INSTALL_SUPPORT: UpdateInstallSupport = {
   canAutoInstall: false,
   packageHint: "unknown",
+  runtimeChannel: "unknown",
   message: "Checking which update method this install supports...",
 };
 
@@ -257,15 +260,12 @@ type DashboardWidgetLayout = {
 
 type CalendarView = "month" | "week";
 type MenuPanel = "theme" | "personal" | "settings" | null;
-type VaultSpace = "daily" | "references";
+type VaultSpace = "daily" | "references" | "summaries";
 
-const vaultSpaces: Array<{ id: VaultSpace | "summaries" | "exams" | "templates" | "inbox"; label: string; soon?: boolean }> = [
+const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
   { id: "daily", label: "Daily" },
   { id: "references", label: "References" },
-  { id: "summaries", label: "Summaries", soon: true },
-  { id: "exams", label: "Exams", soon: true },
-  { id: "templates", label: "Templates", soon: true },
-  { id: "inbox", label: "Inbox", soon: true },
+  { id: "summaries", label: "Summaries" },
 ];
 
 type UpdateInfo = {
@@ -278,6 +278,7 @@ type UpdateInfo = {
 type UpdateInstallSupport = {
   canAutoInstall: boolean;
   packageHint: string;
+  runtimeChannel: string;
   message: string;
 };
 
@@ -930,6 +931,12 @@ function App() {
   const [referenceEditing, setReferenceEditing] = useState(false);
   const [referencePathVisible, setReferencePathVisible] = useState(false);
   const referenceLoadRequestRef = useRef(0);
+  const [summarySemesterId, setSummarySemesterId] = useState("");
+  const [summaryCourseId, setSummaryCourseId] = useState("");
+  const [summaryFiles, setSummaryFiles] = useState<SummaryFile[]>([]);
+  const [selectedSummaryPath, setSelectedSummaryPath] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const summaryLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
@@ -952,6 +959,7 @@ function App() {
       setUpdateInstallSupport({
         canAutoInstall: false,
         packageHint: "browser",
+        runtimeChannel: "browser",
         message: "Automatic updates are only available in the installed desktop app.",
       });
       return;
@@ -971,6 +979,7 @@ function App() {
         setUpdateInstallSupport({
           canAutoInstall: false,
           packageHint: "unknown",
+          runtimeChannel: "unknown",
           message: "Could not detect whether this install supports automatic updates. Use the release page instead.",
         });
       });
@@ -1154,8 +1163,16 @@ function App() {
     () => referenceSemesterId ? getSemesterCourses(state, referenceSemesterId) : [],
     [referenceSemesterId, state],
   );
+  const summaryCourses = useMemo(
+    () => summarySemesterId ? getSemesterCourses(state, summarySemesterId) : [],
+    [summarySemesterId, state],
+  );
   const selectedReferenceSemester = referenceSemesterId ? semesterLookup.get(referenceSemesterId) ?? null : null;
   const selectedReferenceCourse = referenceCourseId ? courseLookup.get(referenceCourseId) ?? null : null;
+  const selectedSummarySemester = summarySemesterId ? semesterLookup.get(summarySemesterId) ?? null : null;
+  const selectedSummaryCourse = summaryCourseId ? courseLookup.get(summaryCourseId) ?? null : null;
+  const selectedSummaryFile = summaryFiles.find((file) => file.path === selectedSummaryPath) ?? summaryFiles[0] ?? null;
+  const selectedSummaryUrl = selectedSummaryFile ? convertFileSrc(selectedSummaryFile.path) : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
 
   useEffect(() => {
@@ -1193,6 +1210,39 @@ function App() {
     if (vaultSpace !== "references" || !state.settings.vaultPath || !selectedReferenceSemester || !selectedReferenceCourse) return;
     void loadReferenceNote(state.settings.vaultPath, selectedReferenceSemester, selectedReferenceCourse, { silent: true });
   }, [selectedReferenceCourse, selectedReferenceSemester, state.settings.vaultPath, vaultSpace]);
+
+  useEffect(() => {
+    const firstSemester = state.semesters[0]?.id ?? "";
+    if (!summarySemesterId && firstSemester) {
+      setSummarySemesterId(firstSemester);
+      return;
+    }
+    if (summarySemesterId && !state.semesters.some((semester) => semester.id === summarySemesterId)) {
+      setSummarySemesterId(firstSemester);
+      setSummaryCourseId("");
+    }
+  }, [state.semesters, summarySemesterId]);
+
+  useEffect(() => {
+    const firstCourse = summaryCourses[0]?.id ?? "";
+    if (!summaryCourseId && firstCourse) {
+      setSummaryCourseId(firstCourse);
+      return;
+    }
+    if (summaryCourseId && !summaryCourses.some((course) => course.id === summaryCourseId)) {
+      setSummaryCourseId(firstCourse);
+    }
+  }, [summaryCourseId, summaryCourses]);
+
+  useEffect(() => {
+    setSummaryFiles([]);
+    setSelectedSummaryPath(null);
+  }, [summarySemesterId, summaryCourseId]);
+
+  useEffect(() => {
+    if (vaultSpace !== "summaries" || !state.settings.vaultPath || !selectedSummarySemester || !selectedSummaryCourse) return;
+    void loadSummaryFileList(state.settings.vaultPath, selectedSummarySemester, selectedSummaryCourse, { silent: true });
+  }, [selectedSummaryCourse, selectedSummarySemester, state.settings.vaultPath, vaultSpace]);
   const selectedTask = useMemo(
     () => state.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, state.tasks],
@@ -1417,6 +1467,26 @@ function App() {
       return;
     }
 
+    if (updateInstallSupport.packageHint === "development") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "idle",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
+    if (updateInstallSupport.packageHint === "source-build") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "available",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
     setUpdateChecking(true);
     pendingUpdateRef.current = null;
     setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
@@ -1456,7 +1526,7 @@ function App() {
       return;
     }
 
-    if (!updateInstallSupport.canAutoInstall) {
+    if (updateInstallSupport.runtimeChannel !== "official-release" || !updateInstallSupport.canAutoInstall) {
       setUpdateInfo((current) => ({
         ...current,
         status: "available",
@@ -1573,6 +1643,16 @@ function App() {
       setMessage("Source update commands copied.");
     } catch (error) {
       console.warn("Could not copy source update commands.", error);
+      setMessage("Could not copy commands. Select them manually instead.");
+    }
+  }
+
+  async function copyDevUpdateCommand() {
+    try {
+      await navigator.clipboard.writeText(DEV_UPDATE_COMMAND);
+      setMessage("Development update commands copied.");
+    } catch (error) {
+      console.warn("Could not copy development update commands.", error);
       setMessage("Could not copy commands. Select them manually instead.");
     }
   }
@@ -2341,11 +2421,80 @@ function App() {
     setReferenceEditing(true);
   }
 
+  async function loadSummaryFileList(
+    vaultPath = state.settings.vaultPath,
+    semester = selectedSummarySemester,
+    course = selectedSummaryCourse,
+    options: { silent?: boolean } = {},
+  ) {
+    if (!vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!semester || !course) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    const requestId = summaryLoadRequestRef.current + 1;
+    summaryLoadRequestRef.current = requestId;
+    setSummaryLoading(true);
+    try {
+      const files = await listSummaryFiles(vaultPath, semester.name, course.name);
+      if (summaryLoadRequestRef.current !== requestId) return;
+      setSummaryFiles(files);
+      setSelectedSummaryPath((current) => (current && files.some((file) => file.path === current) ? current : files[0]?.path ?? null));
+      if (!options.silent) setMessage(files.length ? `Loaded ${files.length} summary file${files.length === 1 ? "" : "s"}.` : `No summaries found for ${course.name}.`);
+    } catch (error) {
+      if (summaryLoadRequestRef.current !== requestId) return;
+      setMessage(getErrorMessage(error, "Could not load summaries."));
+    } finally {
+      if (summaryLoadRequestRef.current === requestId) setSummaryLoading(false);
+    }
+  }
+
+  async function handleAddSummaryFiles() {
+    if (!state.settings.vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!selectedSummarySemester || !selectedSummaryCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+    if (!isTauriApp()) {
+      setMessage("Adding summary files works inside the desktop build.");
+      return;
+    }
+
+    const selected = await pickSummaryFiles();
+    if (!selected.length) return;
+
+    setSummaryLoading(true);
+    try {
+      const files = await importSummaryFiles(
+        state.settings.vaultPath,
+        selectedSummarySemester.name,
+        selectedSummaryCourse.name,
+        selected,
+      );
+      setSummaryFiles(files);
+      const imported = new Set(selected.map((path) => path.split(/[\\/]/).pop()));
+      const firstImported = files.find((file) => imported.has(file.name));
+      setSelectedSummaryPath(firstImported?.path ?? files[0]?.path ?? null);
+      setMessage(`Added ${selected.length} file${selected.length === 1 ? "" : "s"} to Summaries.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not add summary files."));
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
   function handleUseGeneratedNote() {
     setVaultNoteContent(notePreview);
     setVaultNoteDirty(true);
     setVaultDailyEditing(true);
-    setMessage("Generated markdown copied into the editor. Save it when you are ready.");
+    setMessage("Session draft copied into the editor. Save it when you are ready.");
   }
 
   function healthClass(score: number) {
@@ -3203,7 +3352,7 @@ function App() {
                     </button>
                   ) : null}
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
-                    {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? "Open release page" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
+                    {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? "Open repository" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
                 </div>
               </div>
@@ -3222,11 +3371,25 @@ function App() {
                   </div>
                 </div>
               ) : null}
-              {updateInfo.status === "available" && updateInstallSupport.packageHint === "source-linux" ? (
+              {updateInstallSupport.packageHint === "development" ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Development build updates disabled</strong>
+                    <span>This prevents a dev app from installing a release app and switching localStorage locations.</span>
+                    <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
+                  </div>
+                  <textarea className="linux-update-command" value={DEV_UPDATE_COMMAND} readOnly rows={5} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copyDevUpdateCommand()}>Copy commands</button>
+                    <button type="button" className="ghost-button" onClick={() => openExternalLink("https://github.com/damcha02/destudydracker")}>Open repository</button>
+                  </div>
+                </div>
+              ) : null}
+              {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? (
                 <div className="linux-update-command-card">
                   <div>
                     <strong>Update from source</strong>
-                    <span>Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions.</span>
+                    <span>{updateInstallSupport.packageHint === "source-build" ? "This source build cannot install release updates automatically." : "Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions."}</span>
                     <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
                   </div>
                   <textarea className="linux-update-command" value={SOURCE_LINUX_UPDATE_COMMAND} readOnly rows={6} />
@@ -4651,7 +4814,7 @@ function App() {
                 </label>
               </div>
               <div className="vault-folder-strip" aria-label="Vault folders">
-                {["Inbox", "Daily", "Weekly", "Subjects", "Exams", "Summaries", "Templates", "References"].map((folder) => <span key={folder}>{folder}</span>)}
+                {["Daily", "References", "Summaries"].map((folder) => <span key={folder}>{folder}</span>)}
               </div>
               <div className="control-row left roomy-top">
                 <button type="button" onClick={handleCreateVault}>Create new vault</button>
@@ -4669,14 +4832,10 @@ function App() {
                     <button
                       key={space.id}
                       type="button"
-                      className={`vault-nav-item ${active ? "active" : ""} ${space.soon ? "soon" : ""}`}
-                      onClick={() => {
-                        if (!space.soon) setVaultSpace(space.id as VaultSpace);
-                      }}
-                      disabled={space.soon}
+                      className={`vault-nav-item ${active ? "active" : ""}`}
+                      onClick={() => setVaultSpace(space.id)}
                     >
                       {space.label}
-                      {space.soon ? <span>soon</span> : null}
                     </button>
                   );
                 })}
@@ -4704,7 +4863,7 @@ function App() {
                     </div>
                     <div className="vault-toolbar-actions">
                       <button type="button" className="ghost-button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>{vaultNoteLoading ? "Working..." : "Load"}</button>
-                      <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>Generate</button>
+                      <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>Use session draft</button>
                       {vaultDailyEditing ? (
                         <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading}>Save</button>
                       ) : (
@@ -4755,7 +4914,7 @@ function App() {
                     </div>
                   )}
                 </div>
-              ) : (
+              ) : vaultSpace === "references" ? (
                 <div className="vault-space-panel">
                   <div className="vault-toolbar">
                     <div className="vault-toolbar-main references-toolbar-main">
@@ -4842,6 +5001,105 @@ function App() {
                       <p className="eyebrow">No courses yet</p>
                       <h2>References need courses</h2>
                       <p className="section-note">Create at least one semester and course in Planner before adding course reference notes.</p>
+                    </article>
+                  )}
+                </div>
+              ) : (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main references-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Semester</span>
+                        <select
+                          value={summarySemesterId}
+                          onChange={(event) => {
+                            setSummarySemesterId(event.target.value);
+                            setSummaryCourseId("");
+                          }}
+                        >
+                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                        </select>
+                      </label>
+                      <div className="vault-course-chips">
+                        {summaryCourses.map((course) => (
+                          <button
+                            key={course.id}
+                            type="button"
+                            className={`vault-course-chip ${course.id === summaryCourseId ? "active" : ""}`}
+                            onClick={() => setSummaryCourseId(course.id)}
+                          >
+                            <span style={{ background: course.color }} />{course.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      <button type="button" className="ghost-button" onClick={() => loadSummaryFileList()} disabled={summaryLoading || !selectedSummaryCourse}>{summaryLoading ? "Loading..." : "Refresh"}</button>
+                      <button type="button" onClick={handleAddSummaryFiles} disabled={summaryLoading || !selectedSummaryCourse}>Add files</button>
+                    </div>
+                  </div>
+
+                  {selectedSummarySemester && selectedSummaryCourse ? (
+                    <div className="summaries-layout">
+                      <aside className="panel-card summary-file-list">
+                        <div className="summary-file-list-head">
+                          <div>
+                            <p className="eyebrow">Summaries</p>
+                            <h2>{selectedSummaryCourse.name}</h2>
+                          </div>
+                          <span>{summaryFiles.length}</span>
+                        </div>
+                        {summaryFiles.length ? (
+                          <div className="summary-file-links">
+                            {summaryFiles.map((file) => (
+                              <button
+                                key={file.path}
+                                type="button"
+                                className={`summary-file-link ${file.path === selectedSummaryFile?.path ? "active" : ""}`}
+                                onClick={() => setSelectedSummaryPath(file.path)}
+                              >
+                                <span>{file.name}</span>
+                                <small>{file.kind.toUpperCase()} • {formatFileSize(file.sizeBytes)}</small>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="empty-copy">No summaries yet. Add PDFs, formula sheets, or cheatsheet images for this course.</p>
+                        )}
+                      </aside>
+
+                      <section className="panel-card summary-viewer-card">
+                        {selectedSummaryFile && selectedSummaryUrl ? (
+                          <>
+                            <div className="summary-viewer-head">
+                              <div>
+                                <p className="eyebrow">Viewer</p>
+                                <h2>{selectedSummaryFile.name}</h2>
+                              </div>
+                              <button type="button" className="ghost-button small-button" onClick={() => revealItemInDir(selectedSummaryFile.path)}>Show file</button>
+                            </div>
+                            {selectedSummaryFile.kind === "pdf" ? (
+                              <iframe className="summary-pdf-viewer" src={selectedSummaryUrl} title={selectedSummaryFile.name} />
+                            ) : (
+                              <div className="summary-image-viewer">
+                                <img src={selectedSummaryUrl} alt={selectedSummaryFile.name} />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="summary-viewer-empty">
+                            <p className="eyebrow">Viewer</p>
+                            <h2>Select a summary</h2>
+                            <p className="section-note">Choose a file from the list, or add PDFs/images to this course.</p>
+                          </div>
+                        )}
+                      </section>
+                    </div>
+                  ) : (
+                    <article className="panel-card vault-empty-card">
+                      <p className="eyebrow">No courses yet</p>
+                      <h2>Summaries need courses</h2>
+                      <p className="section-note">Create at least one semester and course in Planner before adding summary files.</p>
                     </article>
                   )}
                 </div>
