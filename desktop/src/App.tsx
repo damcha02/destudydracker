@@ -3571,7 +3571,7 @@ function App() {
           ["planner", "Planner"],
           ["timer", "Timer"],
           ["vault", "Vault"],
-          ["break", "Study break"],
+          ["break", "Break Room"],
         ] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -5148,7 +5148,7 @@ function App() {
             <div className="section-head">
               <div>
                 <p className="eyebrow">Recharge</p>
-                <h2>Study Break</h2>
+                <h2>Break Room</h2>
               </div>
               <span className="section-note">{studyBreakUnlocked} of 5 breaks available</span>
             </div>
