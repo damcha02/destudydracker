@@ -23,15 +23,20 @@ The app runs locally on your machine, stores your study data offline, and can ex
 
 ## Download
 
-You do not need to build the app yourself. Download the latest installer from the GitHub releases page:
+Most users do not need to build the app themselves. Download the latest installer from the GitHub releases page:
 
 [Download Study Tracker](https://github.com/damcha02/destudydracker/releases/latest)
 
 Choose the file that matches your operating system:
 
-- Windows: `.msi` or `.exe` installer.
-- macOS: `.dmg` disk image.
-- Linux: AppImage or `.deb` package.
+- Windows: use the `.exe` installer for normal installs. Use `.msi` mainly for managed or admin deployments.
+- macOS: use the `.dmg` disk image. Choose `aarch64` for Apple Silicon Macs.
+- Linux:
+  - Ubuntu, Debian, Linux Mint, Pop!_OS, Zorin: `.deb`.
+  - Fedora, RHEL, openSUSE: `.rpm`.
+  - Arch, Manjaro, EndeavourOS, NixOS, Void, Gentoo, or unknown Linux distributions: build from source for now. The AppImage is available, but may not work reliably on some Wayland/Hyprland setups.
+
+For normal Intel/AMD computers, choose files named `amd64`, `x86_64`, or `x64`. Avoid `aarch64` or `arm64` unless you are using an ARM device.
 
 Because Study Tracker is a new unsigned app, Windows or macOS may show a one-time security warning. The landing page includes platform-specific install notes.
 
@@ -56,6 +61,21 @@ Create a production desktop build:
 
 ```bash
 npm run tauri:build
+```
+
+Run the production binary:
+
+```bash
+./src-tauri/target/release/app
+```
+
+Update a source-built install:
+
+```bash
+git pull
+npm install
+npm run tauri:build
+./src-tauri/target/release/app
 ```
 
 On Linux, Tauri requires WebKitGTK and related packages. For Ubuntu/Debian-based systems, the release workflow installs:

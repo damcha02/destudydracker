@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check } from "@tauri-apps/plugin-updater";
+import type { Update } from "@tauri-apps/plugin-updater";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -23,7 +30,8 @@ import {
   getUpcomingExams,
   getWeeklyActivity,
 } from "./lib/metrics";
-import { createVault, isTauriApp, linkVault, pickExistingVaultDirectory, pickVaultParentDirectory, readDailyNote, writeDailyNote } from "./lib/obsidian";
+import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
+import type { SummaryFile } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
@@ -32,77 +40,170 @@ bellSound.preload = "auto";
 let bellAudioContext: AudioContext | null = null;
 let bellAudioBuffer: AudioBuffer | null = null;
 let bellAudioPromise: Promise<AudioBuffer | null> | null = null;
+let bellAudioContextFailure: string | null = null;
+let bellAudioContextFailureStage: BellStage | null = null;
+let bellAudioFailure: Extract<BellResult, { ok: false }> | null = null;
+
+type BellMethod = "web-audio" | "html-audio" | "prepared";
+type BellStage =
+  | "audio-context-unavailable"
+  | "audio-context-create-failed"
+  | "fetch-failed"
+  | "decode-failed"
+  | "context-suspended"
+  | "web-audio-play-failed"
+  | "html-audio-play-failed"
+  | "html-audio-error";
+type BellResult = { ok: true; method: BellMethod } | { ok: false; stage: BellStage; method?: BellMethod; detail: string };
+type BellBufferResult = { ok: true; context: AudioContext; buffer: AudioBuffer } | Extract<BellResult, { ok: false }>;
+
+function bellErrorDetail(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`;
+  if (typeof error === "string") return error;
+  return "Unknown audio error";
+}
+
+function bellFailure(stage: BellStage, detail: string, method?: BellMethod): Extract<BellResult, { ok: false }> {
+  return { ok: false, stage, method, detail };
+}
+
+function getBellMediaError() {
+  const error = bellSound.error;
+  if (!error) return null;
+  const labels: Record<number, string> = {
+    [MediaError.MEDIA_ERR_ABORTED]: "aborted",
+    [MediaError.MEDIA_ERR_NETWORK]: "network",
+    [MediaError.MEDIA_ERR_DECODE]: "decode",
+    [MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED]: "source-not-supported",
+  };
+  return `${labels[error.code] ?? "unknown"} (${error.code})${error.message ? `: ${error.message}` : ""}`;
+}
 
 function getBellContext() {
   if (bellAudioContext) return bellAudioContext;
+  if (bellAudioContextFailure) return null;
 
   const audioWindow = window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext };
   const BellAudioContext = audioWindow.AudioContext ?? audioWindow.webkitAudioContext;
-  if (!BellAudioContext) return null;
+  if (!BellAudioContext) {
+    bellAudioContextFailure = "This WebView does not expose AudioContext or webkitAudioContext.";
+    bellAudioContextFailureStage = "audio-context-unavailable";
+    return null;
+  }
 
-  bellAudioContext = new BellAudioContext();
-  return bellAudioContext;
+  try {
+    bellAudioContext = new BellAudioContext();
+    return bellAudioContext;
+  } catch (error: unknown) {
+    bellAudioContextFailure = bellErrorDetail(error);
+    bellAudioContextFailureStage = "audio-context-create-failed";
+    console.warn("Bell audio context could not be created.", error);
+    return null;
+  }
 }
 
-async function loadBellBuffer() {
-  if (bellAudioBuffer) return bellAudioBuffer;
-  if (bellAudioPromise) return bellAudioPromise;
+async function loadBellBuffer(): Promise<BellBufferResult> {
+  const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+  if (bellAudioBuffer) return { ok: true, context, buffer: bellAudioBuffer };
+  if (bellAudioPromise) {
+    const buffer = await bellAudioPromise;
+    return buffer ? { ok: true, context, buffer } : bellFailure("decode-failed", "The previous MP3 decode attempt failed.", "web-audio");
+  }
 
   bellAudioPromise = (async () => {
-    const context = getBellContext();
-    if (!context) return null;
+    let audioData: ArrayBuffer;
 
     try {
       const response = await fetch("/bell.mp3");
       if (!response.ok) throw new Error(`Could not load bell.mp3: ${response.status}`);
-      bellAudioBuffer = await context.decodeAudioData(await response.arrayBuffer());
+      audioData = await response.arrayBuffer();
+    } catch (error: unknown) {
+      bellAudioFailure = bellFailure("fetch-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be fetched.", { result: bellAudioFailure, error });
+      bellAudioPromise = null;
+      return null;
+    }
+
+    try {
+      bellAudioBuffer = await context.decodeAudioData(audioData);
+      bellAudioFailure = null;
       return bellAudioBuffer;
     } catch (error: unknown) {
-      console.warn("Bell sound could not be decoded.", error);
+      bellAudioFailure = bellFailure("decode-failed", bellErrorDetail(error), "web-audio");
+      console.warn("Bell sound could not be decoded.", { result: bellAudioFailure, error });
       bellAudioPromise = null;
       return null;
     }
   })();
 
-  return bellAudioPromise;
+  const buffer = await bellAudioPromise;
+  if (!buffer) return bellAudioFailure ?? bellFailure("decode-failed", "The bell MP3 could not be fetched or decoded by the Web Audio backend.", "web-audio");
+  return { ok: true, context, buffer };
 }
 
-async function playBellSound() {
-  const context = getBellContext();
-  const buffer = await loadBellBuffer();
-  if (context && buffer) {
+async function playBellSound(): Promise<BellResult> {
+  const webAudio = await loadBellBuffer();
+  if (webAudio.ok) {
     try {
+      const { context, buffer } = webAudio;
       if (context.state === "suspended") await context.resume();
       if (context.state === "running") {
         const source = context.createBufferSource();
         source.buffer = buffer;
         source.connect(context.destination);
         source.start();
-        return true;
+        return { ok: true, method: "web-audio" };
       }
+      console.warn("Bell Web Audio context is not running.", context.state);
     } catch (error: unknown) {
       console.warn("Bell sound failed through Web Audio.", error);
+      return bellFailure("web-audio-play-failed", bellErrorDetail(error), "web-audio");
     }
+  } else {
+    console.warn("Bell Web Audio unavailable.", webAudio);
   }
 
   bellSound.currentTime = 0;
   try {
     await bellSound.play();
-    return true;
+    return { ok: true, method: "html-audio" };
   } catch (error: unknown) {
-    console.warn("Bell sound failed to play.", error);
-    return false;
+    const mediaError = getBellMediaError();
+    const result = bellFailure(
+      mediaError ? "html-audio-error" : "html-audio-play-failed",
+      mediaError ?? bellErrorDetail(error),
+      "html-audio",
+    );
+    console.warn("Bell sound failed to play.", { result, error });
+    return result;
   }
 }
 
-async function prepareBellSound() {
+async function prepareBellSound(): Promise<BellResult> {
   bellSound.load();
   const context = getBellContext();
+  if (!context) {
+    return bellFailure(
+      bellAudioContextFailureStage ?? "audio-context-unavailable",
+      bellAudioContextFailure ?? "This WebView does not expose a usable AudioContext.",
+    );
+  }
+
   try {
-    if (context?.state === "suspended") await context.resume();
-    await loadBellBuffer();
+    if (context.state === "suspended") await context.resume();
+    if (context.state === "suspended") return bellFailure("context-suspended", "AudioContext stayed suspended after resume().", "web-audio");
+    const buffer = await loadBellBuffer();
+    if (!buffer.ok) return buffer;
+    return { ok: true, method: "prepared" };
   } catch (error: unknown) {
     console.warn("Bell sound could not be prepared.", error);
+    return bellFailure("context-suspended", bellErrorDetail(error), "web-audio");
   }
 }
 
@@ -110,7 +211,7 @@ const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
   { label: "Deep Work 52/17", study: 52, breakMinutes: 17, mode: "focus" as const },
   { label: "Sprint 90/20", study: 90, breakMinutes: 20, mode: "focus" as const },
-  { label: "Exam 120", study: 120, breakMinutes: 0, mode: "exam" as const },
+  { label: "Exam", study: 120, breakMinutes: 0, mode: "exam" as const },
   { label: "∞ Endless", study: 0, breakMinutes: 0, mode: "endless" as const },
 ];
 
@@ -127,6 +228,17 @@ const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
+const SESSION_HISTORY_DAYS = 365;
+const SESSION_HISTORY_MAX = 3000;
+const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
+const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
+const DEV_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:dev";
+const DEFAULT_UPDATE_INSTALL_SUPPORT: UpdateInstallSupport = {
+  canAutoInstall: false,
+  packageHint: "unknown",
+  runtimeChannel: "unknown",
+  message: "Checking which update method this install supports...",
+};
 
 type ThemePalette =
   | "default"
@@ -156,6 +268,35 @@ type DashboardWidgetLayout = {
 
 type CalendarView = "month" | "week";
 type MenuPanel = "theme" | "personal" | "settings" | null;
+type VaultSpace = "daily" | "references" | "summaries";
+
+const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
+  { id: "daily", label: "Daily" },
+  { id: "references", label: "References" },
+  { id: "summaries", label: "Summaries" },
+];
+
+type UpdateInfo = {
+  status: "idle" | "available" | "current" | "installing" | "error";
+  latestVersion?: string;
+  releaseUrl?: string;
+  message: string;
+};
+
+type UpdateInstallSupport = {
+  canAutoInstall: boolean;
+  packageHint: string;
+  runtimeChannel: string;
+  message: string;
+};
+
+type LinuxUpdateDownload = {
+  version: string;
+  packageType: string;
+  filePath: string;
+  installCommand: string;
+  message: string;
+};
 
 type CalendarDay = {
   date: Date;
@@ -441,6 +582,11 @@ function getTimerMinutes(timer: TimerState) {
   return Math.max(1, Math.round(elapsed / 60));
 }
 
+function getIdleTimerSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
+  if (timer.mode === "endless") return 0;
+  return (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60;
+}
+
 function keepTimerContext(timer: TimerState) {
   return {
     studyMinutes: timer.studyMinutes,
@@ -465,8 +611,82 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function buildReferenceNoteMarkdown(course: Course) {
+  return `# ${course.name} References
+
+> Useful links, docs, recordings, exercises, and exam prep for ${course.name}.
+
+## Official Links
+- [Course page](https://example.com)
+- [Moodle / LMS](https://example.com)
+
+## Lecture Resources
+- [Lecture recordings](https://example.com)
+- [Slides folder](https://example.com)
+
+## Exercises
+- [Exercise sheets](https://example.com)
+- [Solutions](https://example.com)
+
+## Exam Prep
+- [Past exams](https://example.com)
+- [Formula sheet](https://example.com)
+`;
+}
+
+function stripMarkdownFrontmatter(markdown: string) {
+  return markdown.replace(/^---\n[\s\S]*?\n---\n+/, "");
+}
+
+function isExternalWebUrl(url: string) {
+  return /^https?:\/\//i.test(url.trim());
+}
+
+function openExternalLink(url: string) {
+  const target = url.trim();
+  if (!isExternalWebUrl(target)) return;
+
+  if (isTauriApp()) {
+    void openUrl(target);
+    return;
+  }
+
+  window.open(target, "_blank", "noreferrer");
+}
+
+function renderExternalLink(label: ReactNode, url: string, key: string) {
+  return (
+    <a
+      key={key}
+      href={url}
+      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        openExternalLink(url);
+      }}
+      target="_blank"
+      rel="noreferrer"
+    >
+      {label}
+    </a>
+  );
+}
+
 function renderInlineMarkdown(text: string, keyPrefix: string) {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g).filter(Boolean);
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s<)]+)/g).filter(Boolean);
   return parts.map((part, index) => {
     const key = `${keyPrefix}-${index}`;
     if (part.startsWith("`") && part.endsWith("`")) return <code key={key}>{part.slice(1, -1)}</code>;
@@ -475,12 +695,10 @@ function renderInlineMarkdown(text: string, keyPrefix: string) {
 
     const link = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (link) {
-      return (
-        <a key={key} href={link[2]} target="_blank" rel="noreferrer">
-          {link[1]}
-        </a>
-      );
+      return renderExternalLink(link[1], link[2], key);
     }
+
+    if (isExternalWebUrl(part)) return renderExternalLink(part, part, key);
 
     return part;
   });
@@ -598,8 +816,41 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
   };
 }
 
+function pruneSessionHistory(sessions: StudySession[], today = new Date()) {
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() - SESSION_HISTORY_DAYS);
+  cutoff.setHours(0, 0, 0, 0);
+
+  return sessions
+    .filter((session) => new Date(session.endedAt) >= cutoff)
+    .slice(0, SESSION_HISTORY_MAX);
+}
+
+async function startWindowDrag() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().startDragging();
+}
+
+async function minimizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().minimize();
+}
+
+async function toggleMaximizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().toggleMaximize();
+}
+
+async function closeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().close();
+}
+
 function App() {
-  const [state, setState] = useState<AppState>(loadAppState);
+  const [state, setState] = useState<AppState>(() => {
+    const loaded = loadAppState();
+    return { ...loaded, sessions: pruneSessionHistory(loaded.sessions) };
+  });
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
@@ -641,11 +892,31 @@ function App() {
   const [expandedCourseIds, setExpandedCourseIds] = useState<string[]>([]);
   const [addingCourseSemesterId, setAddingCourseSemesterId] = useState<string | null>(null);
   const [addingTaskCourseId, setAddingTaskCourseId] = useState<string | null>(null);
-  const [addingExamSemesterId, setAddingExamSemesterId] = useState<string | null>(null);
+  const [addingExamCourseId, setAddingExamCourseId] = useState<string | null>(null);
+  const [editingSemesterId, setEditingSemesterId] = useState<string | null>(null);
+  const [semesterEditName, setSemesterEditName] = useState("");
+  const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
+  const [courseEditDraft, setCourseEditDraft] = useState<CourseDraft>({
+    semesterId: "",
+    name: "",
+    targetGrade: "4.0",
+    color: "#8fb4ff",
+  });
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [taskEditDraft, setTaskEditDraft] = useState<TaskDraft>({
+    semesterId: "",
+    courseId: "",
+    title: "",
+    totalUnits: "10",
+    completedUnits: "0",
+    dueDate: "",
+    priority: "medium",
+    notes: "",
+  });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
   const [examFullscreen, setExamFullscreen] = useState(false);
-  const [calendarView, setCalendarView] = useState<CalendarView>("month");
+  const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
@@ -657,10 +928,71 @@ function App() {
   const [vaultNoteDirty, setVaultNoteDirty] = useState(false);
   const [vaultNoteLoading, setVaultNoteLoading] = useState(false);
   const [vaultSetupOpen, setVaultSetupOpen] = useState(() => !state.settings.vaultPath);
+  const [vaultDailyEditing, setVaultDailyEditing] = useState(false);
+  const [markdownCheatsheetOpen, setMarkdownCheatsheetOpen] = useState(false);
+  const [vaultSpace, setVaultSpace] = useState<VaultSpace>("daily");
+  const [referenceSemesterId, setReferenceSemesterId] = useState("");
+  const [referenceCourseId, setReferenceCourseId] = useState("");
+  const [referenceContent, setReferenceContent] = useState("");
+  const [referencePath, setReferencePath] = useState<string | null>(null);
+  const [referenceDirty, setReferenceDirty] = useState(false);
+  const [referenceLoading, setReferenceLoading] = useState(false);
+  const [referenceEditing, setReferenceEditing] = useState(false);
+  const [referencePathVisible, setReferencePathVisible] = useState(false);
+  const referenceLoadRequestRef = useRef(0);
+  const [summarySemesterId, setSummarySemesterId] = useState("");
+  const [summaryCourseId, setSummaryCourseId] = useState("");
+  const [summaryFiles, setSummaryFiles] = useState<SummaryFile[]>([]);
+  const [selectedSummaryPath, setSelectedSummaryPath] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const summaryLoadRequestRef = useRef(0);
+  const pendingUpdateRef = useRef<Update | null>(null);
+  const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
+  const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
+  const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
+  const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
+    status: "idle",
+    releaseUrl: RELEASES_PAGE_URL,
+    message: "Check whether a newer release is available.",
+  });
 
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useEffect(() => {
+    if (!isTauriApp()) {
+      setCurrentAppVersion("browser preview");
+      setUpdateInstallSupport({
+        canAutoInstall: false,
+        packageHint: "browser",
+        runtimeChannel: "browser",
+        message: "Automatic updates are only available in the installed desktop app.",
+      });
+      return;
+    }
+
+    void getVersion()
+      .then(setCurrentAppVersion)
+      .catch((error: unknown) => {
+        console.warn("Could not read app version.", error);
+        setCurrentAppVersion("unknown");
+      });
+
+    void invoke<UpdateInstallSupport>("get_update_install_support")
+      .then(setUpdateInstallSupport)
+      .catch((error: unknown) => {
+        console.warn("Could not detect update install support.", error);
+        setUpdateInstallSupport({
+          canAutoInstall: false,
+          packageHint: "unknown",
+          runtimeChannel: "unknown",
+          message: "Could not detect whether this install supports automatic updates. Use the release page instead.",
+        });
+      });
+  }, []);
 
   useEffect(() => {
     setState((current) => carryOverCalendarEntries(current, calendarToday));
@@ -708,11 +1040,21 @@ function App() {
   }, [message]);
 
   useEffect(() => {
+    if (!markdownCheatsheetOpen) return undefined;
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setMarkdownCheatsheetOpen(false);
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [markdownCheatsheetOpen]);
+
+  useEffect(() => {
     if (!state.timer.running) return undefined;
 
     function ringBell() {
-      playBellSound().then((played) => {
-        if (!played) setMessage("Bell sound could not play. Check the app/system audio output.");
+      playBellSound().then((result) => {
+        if (!result.ok) console.warn("Bell sound could not play.", result);
       });
     }
 
@@ -729,7 +1071,10 @@ function App() {
           return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
         }
 
-        const diff = Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000);
+        const endsAt = timer.endsAt;
+        if (!endsAt) return current;
+
+        const diff = Math.ceil((new Date(endsAt).getTime() - Date.now()) / 1000);
         if (diff > 0) {
           if (diff === timer.remainingSeconds) return current;
           return { ...current, timer: { ...timer, remainingSeconds: diff } };
@@ -742,7 +1087,7 @@ function App() {
             ringBell();
             return {
               ...current,
-              sessions: [session, ...current.sessions].slice(0, 120),
+              sessions: pruneSessionHistory([session, ...current.sessions]),
               timer: {
                 ...timer,
                 phase: "break",
@@ -757,7 +1102,7 @@ function App() {
           ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -767,7 +1112,7 @@ function App() {
           ringBell();
           return {
             ...current,
-            sessions: [session, ...current.sessions].slice(0, 120),
+            sessions: pruneSessionHistory([session, ...current.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -831,7 +1176,90 @@ function App() {
     () => new Map(state.courses.map((course) => [course.id, course])),
     [state.courses],
   );
+  const referenceCourses = useMemo(
+    () => referenceSemesterId ? getSemesterCourses(state, referenceSemesterId) : [],
+    [referenceSemesterId, state],
+  );
+  const summaryCourses = useMemo(
+    () => summarySemesterId ? getSemesterCourses(state, summarySemesterId) : [],
+    [summarySemesterId, state],
+  );
+  const selectedReferenceSemester = referenceSemesterId ? semesterLookup.get(referenceSemesterId) ?? null : null;
+  const selectedReferenceCourse = referenceCourseId ? courseLookup.get(referenceCourseId) ?? null : null;
+  const selectedSummarySemester = summarySemesterId ? semesterLookup.get(summarySemesterId) ?? null : null;
+  const selectedSummaryCourse = summaryCourseId ? courseLookup.get(summaryCourseId) ?? null : null;
+  const selectedSummaryFile = summaryFiles.find((file) => file.path === selectedSummaryPath) ?? summaryFiles[0] ?? null;
+  const selectedSummaryUrl = selectedSummaryFile ? convertFileSrc(selectedSummaryFile.path) : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
+
+  useEffect(() => {
+    const firstSemester = state.semesters[0]?.id ?? "";
+    if (!referenceSemesterId && firstSemester) {
+      setReferenceSemesterId(firstSemester);
+      return;
+    }
+    if (referenceSemesterId && !state.semesters.some((semester) => semester.id === referenceSemesterId)) {
+      setReferenceSemesterId(firstSemester);
+      setReferenceCourseId("");
+    }
+  }, [referenceSemesterId, state.semesters]);
+
+  useEffect(() => {
+    const firstCourse = referenceCourses[0]?.id ?? "";
+    if (!referenceCourseId && firstCourse) {
+      setReferenceCourseId(firstCourse);
+      return;
+    }
+    if (referenceCourseId && !referenceCourses.some((course) => course.id === referenceCourseId)) {
+      setReferenceCourseId(firstCourse);
+    }
+  }, [referenceCourseId, referenceCourses]);
+
+  useEffect(() => {
+    setReferenceContent("");
+    setReferencePath(null);
+    setReferenceDirty(false);
+    setReferenceEditing(false);
+    setReferencePathVisible(false);
+  }, [referenceSemesterId, referenceCourseId]);
+
+  useEffect(() => {
+    if (vaultSpace !== "references" || !state.settings.vaultPath || !selectedReferenceSemester || !selectedReferenceCourse) return;
+    void loadReferenceNote(state.settings.vaultPath, selectedReferenceSemester, selectedReferenceCourse, { silent: true });
+  }, [selectedReferenceCourse, selectedReferenceSemester, state.settings.vaultPath, vaultSpace]);
+
+  useEffect(() => {
+    const firstSemester = state.semesters[0]?.id ?? "";
+    if (!summarySemesterId && firstSemester) {
+      setSummarySemesterId(firstSemester);
+      return;
+    }
+    if (summarySemesterId && !state.semesters.some((semester) => semester.id === summarySemesterId)) {
+      setSummarySemesterId(firstSemester);
+      setSummaryCourseId("");
+    }
+  }, [state.semesters, summarySemesterId]);
+
+  useEffect(() => {
+    const firstCourse = summaryCourses[0]?.id ?? "";
+    if (!summaryCourseId && firstCourse) {
+      setSummaryCourseId(firstCourse);
+      return;
+    }
+    if (summaryCourseId && !summaryCourses.some((course) => course.id === summaryCourseId)) {
+      setSummaryCourseId(firstCourse);
+    }
+  }, [summaryCourseId, summaryCourses]);
+
+  useEffect(() => {
+    setSummaryFiles([]);
+    setSelectedSummaryPath(null);
+  }, [summarySemesterId, summaryCourseId]);
+
+  useEffect(() => {
+    if (vaultSpace !== "summaries" || !state.settings.vaultPath || !selectedSummarySemester || !selectedSummaryCourse) return;
+    void loadSummaryFileList(state.settings.vaultPath, selectedSummarySemester, selectedSummaryCourse, { silent: true });
+  }, [selectedSummaryCourse, selectedSummarySemester, state.settings.vaultPath, vaultSpace]);
   const selectedTask = useMemo(
     () => state.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, state.tasks],
@@ -888,6 +1316,10 @@ function App() {
   const upcomingExams = useMemo(() => getUpcomingExams(state), [state]);
   const overallHealth = useMemo(() => getOverallHealth(state), [state]);
   const notePreview = useMemo(() => buildDailyNoteMarkdown(state, vaultNoteDate), [state, vaultNoteDate]);
+  const dailyPreviewContent = stripMarkdownFrontmatter(vaultNoteContent || notePreview);
+  const referencePreview = selectedReferenceSemester && selectedReferenceCourse
+    ? stripMarkdownFrontmatter(referenceContent || buildReferenceNoteMarkdown(selectedReferenceCourse))
+    : "";
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
@@ -1043,6 +1475,216 @@ function App() {
     closeMenuPanel();
   }
 
+  async function checkForUpdates() {
+    if (!isTauriApp()) {
+      setUpdateInfo({
+        status: "idle",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "Automatic updates are only available in the installed desktop app.",
+      });
+      return;
+    }
+
+    if (updateInstallSupport.packageHint === "development") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "idle",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
+    if (updateInstallSupport.packageHint === "source-build") {
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "available",
+        releaseUrl: "https://github.com/damcha02/destudydracker",
+        message: updateInstallSupport.message,
+      });
+      return;
+    }
+
+    setUpdateChecking(true);
+    pendingUpdateRef.current = null;
+    setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
+
+    try {
+      const update = await check({ timeout: 30000 });
+
+      if (update) {
+        pendingUpdateRef.current = update;
+        setUpdateInfo({
+          status: "available",
+          latestVersion: update.version,
+          releaseUrl: RELEASES_PAGE_URL,
+          message: updateInstallSupport.canAutoInstall ? `Version ${update.version} is available and can be installed automatically.` : `Version ${update.version} is available. ${updateInstallSupport.message}`,
+        });
+      } else {
+        setUpdateInfo({
+          status: "current",
+          releaseUrl: RELEASES_PAGE_URL,
+          message: "You are up to date.",
+        });
+      }
+    } catch (error) {
+      setUpdateInfo({
+        status: "error",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: `${getErrorMessage(error, "Could not check for updates. Check your internet connection.")} You can still download installers from the release page.`,
+      });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  async function installPendingUpdate() {
+    if (!isTauriApp()) {
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    if (updateInstallSupport.runtimeChannel !== "official-release" || !updateInstallSupport.canAutoInstall) {
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "available",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: updateInstallSupport.message,
+      }));
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    const update = pendingUpdateRef.current;
+    if (!update) {
+      setUpdateInfo({
+        status: "error",
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "No checked update is ready to install. Check for updates again or open the release page.",
+      });
+      return;
+    }
+
+    let downloadedBytes = 0;
+    let totalBytes: number | undefined;
+    setUpdateChecking(true);
+    setUpdateInfo({
+      status: "installing",
+      latestVersion: update.version,
+      releaseUrl: RELEASES_PAGE_URL,
+      message: `Downloading version ${update.version}...`,
+    });
+
+    try {
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          downloadedBytes = 0;
+          totalBytes = event.data.contentLength;
+          setUpdateInfo((current) => ({ ...current, message: totalBytes ? `Downloading update: 0 / ${formatFileSize(totalBytes)}` : "Downloading update..." }));
+        }
+        if (event.event === "Progress") {
+          downloadedBytes += event.data.chunkLength;
+          setUpdateInfo((current) => ({
+            ...current,
+            message: totalBytes ? `Downloading update: ${formatFileSize(downloadedBytes)} / ${formatFileSize(totalBytes)}` : `Downloading update: ${formatFileSize(downloadedBytes)}`,
+          }));
+        }
+        if (event.event === "Finished") {
+          setUpdateInfo((current) => ({ ...current, message: "Installing update..." }));
+        }
+      });
+
+      pendingUpdateRef.current = null;
+      setUpdateInfo({
+        status: "current",
+        latestVersion: update.version,
+        releaseUrl: RELEASES_PAGE_URL,
+        message: "Update installed. Restarting Study Tracker...",
+      });
+      await relaunch();
+    } catch (error) {
+      setUpdateInfo({
+        status: "error",
+        latestVersion: update.version,
+        releaseUrl: RELEASES_PAGE_URL,
+        message: `${getErrorMessage(error, "Could not install the update.")} If you installed with .deb or .rpm, download the new installer from the release page.`,
+      });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  async function downloadManualLinuxUpdate() {
+    if (!isTauriApp()) {
+      openExternalLink(RELEASES_PAGE_URL);
+      return;
+    }
+
+    setLinuxPackageDownloading(true);
+    setLinuxUpdateDownload(null);
+    setUpdateInfo((current) => ({ ...current, status: "installing", message: "Downloading Linux package..." }));
+
+    try {
+      const download = await invoke<LinuxUpdateDownload>("download_linux_update_package");
+      setLinuxUpdateDownload(download);
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "available",
+        latestVersion: download.version,
+        message: `${download.message} The install command is shown below.`,
+      }));
+    } catch (error) {
+      setUpdateInfo((current) => ({
+        ...current,
+        status: "error",
+        message: `${getErrorMessage(error, "Could not download the Linux package.")} You can still use the release page.`,
+      }));
+    } finally {
+      setLinuxPackageDownloading(false);
+    }
+  }
+
+  async function copyLinuxInstallCommand() {
+    if (!linuxUpdateDownload) return;
+    try {
+      await navigator.clipboard.writeText(linuxUpdateDownload.installCommand);
+      setMessage("Install command copied.");
+    } catch (error) {
+      console.warn("Could not copy install command.", error);
+      setMessage("Could not copy command. Select it manually instead.");
+    }
+  }
+
+  async function copySourceLinuxUpdateCommand() {
+    try {
+      await navigator.clipboard.writeText(SOURCE_LINUX_UPDATE_COMMAND);
+      setMessage("Source update commands copied.");
+    } catch (error) {
+      console.warn("Could not copy source update commands.", error);
+      setMessage("Could not copy commands. Select them manually instead.");
+    }
+  }
+
+  async function copyDevUpdateCommand() {
+    try {
+      await navigator.clipboard.writeText(DEV_UPDATE_COMMAND);
+      setMessage("Development update commands copied.");
+    } catch (error) {
+      console.warn("Could not copy development update commands.", error);
+      setMessage("Could not copy commands. Select them manually instead.");
+    }
+  }
+
+  async function revealLinuxPackage() {
+    if (!linuxUpdateDownload) return;
+    try {
+      await revealItemInDir(linuxUpdateDownload.filePath);
+    } catch (error) {
+      console.warn("Could not open downloaded package location.", error);
+      setMessage("Could not open the downloads folder.");
+    }
+  }
+
   function deleteAllData() {
     const cleanState: AppState = {
       ...defaultState,
@@ -1064,7 +1706,10 @@ function App() {
     setExpandedCourseIds([]);
     setAddingCourseSemesterId(null);
     setAddingTaskCourseId(null);
-    setAddingExamSemesterId(null);
+    setAddingExamCourseId(null);
+    setEditingSemesterId(null);
+    setEditingCourseId(null);
+    setEditingTaskId(null);
     setSelectedCalendarDate(null);
     setPersonalNameDraft("");
     localStorage.removeItem("study-tracker-desktop-v2");
@@ -1127,6 +1772,28 @@ function App() {
     setMessage(`${course.name} added to ${semesterLookup.get(course.semesterId)?.name ?? "semester"}.`);
   }
 
+  function startEditingSemester(semester: Semester) {
+    setSemesterEditName(semester.name);
+    setEditingSemesterId(semester.id);
+    setAddingCourseSemesterId(null);
+  }
+
+  function updateSemester(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = semesterEditName.trim();
+    if (!editingSemesterId || !name) {
+      setMessage("Give the semester a name first.");
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      semesters: current.semesters.map((semester) => (semester.id === editingSemesterId ? { ...semester, name } : semester)),
+    }));
+    setEditingSemesterId(null);
+    setMessage(`${name} updated.`);
+  }
+
   function addTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!taskDraft.semesterId || !taskDraft.courseId || !taskDraft.title.trim()) {
@@ -1162,6 +1829,87 @@ function App() {
     setMessage(`${task.title} is now tracked.`);
   }
 
+  function startEditingCourse(course: Course) {
+    setCourseEditDraft({
+      semesterId: course.semesterId,
+      name: course.name,
+      targetGrade: course.targetGrade.toString(),
+      color: course.color,
+    });
+    setEditingCourseId(course.id);
+    setAddingCourseSemesterId(null);
+  }
+
+  function updateCourse(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingCourseId || !courseEditDraft.name.trim()) {
+      setMessage("Give the course a name first.");
+      return;
+    }
+
+    const name = courseEditDraft.name.trim();
+    setState((current) => ({
+      ...current,
+      courses: current.courses.map((course) =>
+        course.id === editingCourseId
+          ? {
+              ...course,
+              name,
+              targetGrade: Number(courseEditDraft.targetGrade) || 4,
+              color: courseEditDraft.color,
+            }
+          : course,
+      ),
+    }));
+    setEditingCourseId(null);
+    setMessage(`${name} updated.`);
+  }
+
+  function startEditingTask(task: Task) {
+    setTaskEditDraft({
+      semesterId: task.semesterId,
+      courseId: task.courseId,
+      title: task.title,
+      totalUnits: task.totalUnits.toString(),
+      completedUnits: task.completedUnits.toString(),
+      dueDate: task.dueDate ?? "",
+      priority: task.priority,
+      notes: task.notes,
+    });
+    setEditingTaskId(task.id);
+    setAddingTaskCourseId(null);
+  }
+
+  function updateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingTaskId || !taskEditDraft.semesterId || !taskEditDraft.courseId || !taskEditDraft.title.trim()) {
+      setMessage("A task needs a semester, course, and title.");
+      return;
+    }
+
+    const title = taskEditDraft.title.trim();
+    const totalUnits = Math.max(1, Number(taskEditDraft.totalUnits) || 1);
+    const completedUnits = clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
+    setState((current) => ({
+      ...current,
+      tasks: current.tasks.map((task) =>
+        task.id === editingTaskId
+          ? {
+              ...task,
+              title,
+              totalUnits,
+              completedUnits,
+              dueDate: taskEditDraft.dueDate || null,
+              priority: taskEditDraft.priority,
+              notes: taskEditDraft.notes.trim(),
+            }
+          : task,
+      ),
+    }));
+    setEditingTaskId(null);
+    setMessage(`${title} updated.`);
+  }
+
   function confirmTaskDueDate(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter") return;
     event.preventDefault();
@@ -1187,7 +1935,7 @@ function App() {
 
     setState((current) => ({ ...current, exams: [exam, ...current.exams] }));
     setExamDraft((current) => ({ ...current, title: "", examDate: "", weight: "40", preparedness: "35" }));
-    setAddingExamSemesterId(null);
+    setAddingExamCourseId(null);
     setMessage(`${exam.title} added to the runway.`);
   }
 
@@ -1207,6 +1955,7 @@ function App() {
       calendarEntries: current.calendarEntries.filter((entry) => entry.taskId !== taskId),
       timer: current.timer.taskId === taskId ? { ...current.timer, taskId: null } : current.timer,
     }));
+    setEditingTaskId((current) => (current === taskId ? null : current));
   }
 
   function removeCourse(courseId: string) {
@@ -1226,6 +1975,12 @@ function App() {
     }));
     setExpandedCourseIds((current) => current.filter((item) => item !== courseId));
     setAddingTaskCourseId((current) => (current === courseId ? null : current));
+    setAddingExamCourseId((current) => (current === courseId ? null : current));
+    setEditingCourseId((current) => (current === courseId ? null : current));
+    setEditingTaskId((current) => {
+      const removedTaskIds = state.tasks.filter((task) => task.courseId === courseId).map((task) => task.id);
+      return current && removedTaskIds.includes(current) ? null : current;
+    });
   }
 
   function removeSemester(semesterId: string) {
@@ -1248,8 +2003,14 @@ function App() {
     setExpandedSemesterIds((current) => current.filter((item) => item !== semesterId));
     setExpandedCourseIds((current) => current.filter((item) => !courseIds.includes(item)));
     setAddingCourseSemesterId((current) => (current === semesterId ? null : current));
-    setAddingExamSemesterId((current) => (current === semesterId ? null : current));
     setAddingTaskCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setAddingExamCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setEditingSemesterId((current) => (current === semesterId ? null : current));
+    setEditingCourseId((current) => (current && courseIds.includes(current) ? null : current));
+    setEditingTaskId((current) => {
+      const removedTaskIds = state.tasks.filter((task) => task.semesterId === semesterId).map((task) => task.id);
+      return current && removedTaskIds.includes(current) ? null : current;
+    });
   }
 
   function removeExam(examId: string) {
@@ -1370,12 +2131,20 @@ function App() {
       timer: {
         ...current.timer,
         mode,
-        studyMinutes: study,
+        studyMinutes: mode === "exam" ? current.timer.studyMinutes : study,
         breakMinutes,
-        examMinutes: study,
+        examMinutes: mode === "exam" ? study : current.timer.examMinutes,
         presetLabel: label,
-        phase: current.timer.running ? current.timer.phase : (mode === "endless" ? "stopwatch" : "idle"),
-        remainingSeconds: current.timer.running ? current.timer.remainingSeconds : 0,
+        phase: current.timer.running ? current.timer.phase : "idle",
+        remainingSeconds: current.timer.running
+          ? current.timer.remainingSeconds
+          : getIdleTimerSeconds({
+              mode,
+              studyMinutes: mode === "exam" ? current.timer.studyMinutes : study,
+              examMinutes: mode === "exam" ? study : current.timer.examMinutes,
+            }),
+        startedAt: current.timer.running ? current.timer.startedAt : null,
+        endsAt: current.timer.running ? current.timer.endsAt : null,
       },
     }));
   }
@@ -1385,7 +2154,9 @@ function App() {
     const isExam = state.timer.mode === "exam";
     const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
-    void prepareBellSound();
+    void prepareBellSound().then((result) => {
+      if (!result.ok) console.warn("Bell sound could not be prepared.", result);
+    });
 
     if (isEndless) {
       setState((current) => ({
@@ -1420,7 +2191,11 @@ function App() {
   }
 
   function pauseTimer() {
-    if (!state.timer.running) void prepareBellSound();
+    if (!state.timer.running) {
+      void prepareBellSound().then((result) => {
+        if (!result.ok) console.warn("Bell sound could not be prepared.", result);
+      });
+    }
 
     setState((current) => {
       const timer = current.timer;
@@ -1463,8 +2238,11 @@ function App() {
       timer: {
         ...defaultTimer,
         ...keepTimerContext(current.timer),
-        remainingSeconds: current.timer.mode === "endless" ? 0 : current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
-        phase: current.timer.mode === "endless" ? "stopwatch" : "idle",
+        running: false,
+        startedAt: null,
+        endsAt: null,
+        remainingSeconds: getIdleTimerSeconds(current.timer),
+        phase: "idle",
       },
     }));
   }
@@ -1483,8 +2261,16 @@ function App() {
       playBellSound();
       return {
         ...current,
-        sessions: [session, ...current.sessions].slice(0, 120),
-        timer: { ...defaultTimer, ...keepTimerContext(timer) },
+        sessions: pruneSessionHistory([session, ...current.sessions]),
+        timer: {
+          ...defaultTimer,
+          ...keepTimerContext(timer),
+          running: false,
+          startedAt: null,
+          endsAt: null,
+          phase: "idle",
+          remainingSeconds: getIdleTimerSeconds(timer),
+        },
       };
     });
     setMessage("Session saved.");
@@ -1543,9 +2329,10 @@ function App() {
     setVaultNoteLoading(true);
     try {
       const existing = await readDailyNote(vaultPath, noteDate);
-      setVaultNoteContent(existing ?? buildDailyNoteMarkdown(state, noteDate));
+      setVaultNoteContent(existing ? stripMarkdownFrontmatter(existing) : buildDailyNoteMarkdown(state, noteDate));
       setVaultNotePath(`${vaultPath}/Daily/${noteDate}.md`);
       setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
       setMessage(existing ? `Loaded ${noteDate}.md` : `Created an unsaved draft for ${noteDate}.`);
     } catch (error) {
       setMessage(getErrorMessage(error, "Could not load the daily note."));
@@ -1565,6 +2352,7 @@ function App() {
       const notePath = await writeDailyNote(state.settings.vaultPath, vaultNoteDate, vaultNoteContent || notePreview);
       setVaultNotePath(notePath);
       setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
       setState((current) => ({
         ...current,
         exports: [
@@ -1585,10 +2373,154 @@ function App() {
     }
   }
 
+  async function loadReferenceNote(
+    vaultPath = state.settings.vaultPath,
+    semester = selectedReferenceSemester,
+    course = selectedReferenceCourse,
+    options: { silent?: boolean } = {},
+  ) {
+    if (!vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!semester || !course) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    const requestId = referenceLoadRequestRef.current + 1;
+    referenceLoadRequestRef.current = requestId;
+    setReferenceLoading(true);
+    try {
+      const existing = await readReferenceNote(vaultPath, semester.name, course.name);
+      if (referenceLoadRequestRef.current !== requestId) return;
+      setReferenceContent(existing ? stripMarkdownFrontmatter(existing) : buildReferenceNoteMarkdown(course));
+      setReferencePath(`${vaultPath}/References/${semester.name}/${course.name}.md`);
+      setReferenceDirty(false);
+      setReferenceEditing(false);
+      if (!options.silent) setMessage(existing ? `Loaded references for ${course.name}.` : `Created an unsaved references draft for ${course.name}.`);
+    } catch (error) {
+      if (referenceLoadRequestRef.current !== requestId) return;
+      setMessage(getErrorMessage(error, "Could not load course references."));
+    } finally {
+      if (referenceLoadRequestRef.current === requestId) setReferenceLoading(false);
+    }
+  }
+
+  async function handleSaveReferenceNote() {
+    if (!state.settings.vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!selectedReferenceSemester || !selectedReferenceCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    setReferenceLoading(true);
+    try {
+      const content = referenceContent || buildReferenceNoteMarkdown(selectedReferenceCourse);
+      const notePath = await writeReferenceNote(
+        state.settings.vaultPath,
+        selectedReferenceSemester.name,
+        selectedReferenceCourse.name,
+        content,
+      );
+      setReferenceContent(content);
+      setReferencePath(notePath);
+      setReferenceDirty(false);
+      setReferenceEditing(false);
+      setMessage(`Saved references to ${notePath}`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not save course references."));
+    } finally {
+      setReferenceLoading(false);
+    }
+  }
+
+  function handleEditReferenceNote() {
+    if (!selectedReferenceSemester || !selectedReferenceCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+    setReferenceContent((current) => current || buildReferenceNoteMarkdown(selectedReferenceCourse));
+    setReferenceEditing(true);
+  }
+
+  async function loadSummaryFileList(
+    vaultPath = state.settings.vaultPath,
+    semester = selectedSummarySemester,
+    course = selectedSummaryCourse,
+    options: { silent?: boolean } = {},
+  ) {
+    if (!vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!semester || !course) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+
+    const requestId = summaryLoadRequestRef.current + 1;
+    summaryLoadRequestRef.current = requestId;
+    setSummaryLoading(true);
+    try {
+      const files = await listSummaryFiles(vaultPath, semester.name, course.name);
+      if (summaryLoadRequestRef.current !== requestId) return;
+      setSummaryFiles(files);
+      setSelectedSummaryPath((current) => (current && files.some((file) => file.path === current) ? current : files[0]?.path ?? null));
+      if (!options.silent) setMessage(files.length ? `Loaded ${files.length} summary file${files.length === 1 ? "" : "s"}.` : `No summaries found for ${course.name}.`);
+    } catch (error) {
+      if (summaryLoadRequestRef.current !== requestId) return;
+      setMessage(getErrorMessage(error, "Could not load summaries."));
+    } finally {
+      if (summaryLoadRequestRef.current === requestId) setSummaryLoading(false);
+    }
+  }
+
+  async function handleAddSummaryFiles() {
+    if (!state.settings.vaultPath) {
+      setMessage("Create or link an Obsidian vault first.");
+      return;
+    }
+    if (!selectedSummarySemester || !selectedSummaryCourse) {
+      setMessage("Choose a semester and course first.");
+      return;
+    }
+    if (!isTauriApp()) {
+      setMessage("Adding summary files works inside the desktop build.");
+      return;
+    }
+
+    const selected = await pickSummaryFiles();
+    if (!selected.length) return;
+
+    setSummaryLoading(true);
+    try {
+      const files = await importSummaryFiles(
+        state.settings.vaultPath,
+        selectedSummarySemester.name,
+        selectedSummaryCourse.name,
+        selected,
+      );
+      setSummaryFiles(files);
+      const imported = new Set(selected.map((path) => path.split(/[\\/]/).pop()));
+      const firstImported = files.find((file) => imported.has(file.name));
+      setSelectedSummaryPath(firstImported?.path ?? files[0]?.path ?? null);
+      setMessage(`Added ${selected.length} file${selected.length === 1 ? "" : "s"} to Summaries.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not add summary files."));
+    } finally {
+      setSummaryLoading(false);
+    }
+  }
+
   function handleUseGeneratedNote() {
     setVaultNoteContent(notePreview);
     setVaultNoteDirty(true);
-    setMessage("Generated markdown copied into the editor. Save it when you are ready.");
+    setVaultDailyEditing(true);
+    setMessage("Session draft copied into the editor. Save it when you are ready.");
   }
 
   function healthClass(score: number) {
@@ -2425,7 +3357,74 @@ function App() {
 
           {activeMenuPanel === "settings" ? (
             <div className="settings-panel-body settings-danger-zone">
-              <p className="empty-copy compact-empty">More settings will appear here later.</p>
+              <div className={`settings-update-card ${updateInfo.status}`}>
+                <div>
+                  <strong>Updates</strong>
+                  <span>Current version: {currentAppVersion}</span>
+                  <p>{updateInfo.message}</p>
+                </div>
+                <div className="update-actions">
+                  <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
+                    {updateChecking && updateInfo.status !== "installing" ? "Checking..." : "Check for updates"}
+                  </button>
+                  {updateInfo.status === "available" && updateInstallSupport.canAutoInstall ? (
+                    <button type="button" onClick={() => void installPendingUpdate()} disabled={updateChecking}>
+                      Install update
+                    </button>
+                  ) : null}
+                  {updateInfo.status === "available" && !updateInstallSupport.canAutoInstall && updateInstallSupport.packageHint === "manual-linux" ? (
+                    <button type="button" onClick={() => void downloadManualLinuxUpdate()} disabled={linuxPackageDownloading}>
+                      {linuxPackageDownloading ? "Downloading..." : "Download package"}
+                    </button>
+                  ) : null}
+                  <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
+                    {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? "Open repository" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
+                  </button>
+                </div>
+              </div>
+              {linuxUpdateDownload ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Install downloaded update</strong>
+                    <span>{linuxUpdateDownload.message}</span>
+                    <span>Saved to: {linuxUpdateDownload.filePath}</span>
+                  </div>
+                  <textarea className="linux-update-command" value={linuxUpdateDownload.installCommand} readOnly rows={linuxUpdateDownload.installCommand.includes("\n") ? 2 : 1} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copyLinuxInstallCommand()}>Copy command</button>
+                    <button type="button" className="ghost-button" onClick={() => void revealLinuxPackage()}>Open downloads folder</button>
+                    <button type="button" className="ghost-button" onClick={() => setLinuxUpdateDownload(null)}>Close</button>
+                  </div>
+                </div>
+              ) : null}
+              {updateInstallSupport.packageHint === "development" ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Development build updates disabled</strong>
+                    <span>This prevents a dev app from installing a release app and switching localStorage locations.</span>
+                    <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
+                  </div>
+                  <textarea className="linux-update-command" value={DEV_UPDATE_COMMAND} readOnly rows={5} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copyDevUpdateCommand()}>Copy commands</button>
+                    <button type="button" className="ghost-button" onClick={() => openExternalLink("https://github.com/damcha02/destudydracker")}>Open repository</button>
+                  </div>
+                </div>
+              ) : null}
+              {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Update from source</strong>
+                    <span>{updateInstallSupport.packageHint === "source-build" ? "This source build cannot install release updates automatically." : "Recommended for Arch, Hyprland-heavy setups, and unsupported Linux distributions."}</span>
+                    <span>Replace <code>/path/to/destudydracker</code> with your local repository path.</span>
+                  </div>
+                  <textarea className="linux-update-command" value={SOURCE_LINUX_UPDATE_COMMAND} readOnly rows={6} />
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void copySourceLinuxUpdateCommand()}>Copy commands</button>
+                    <button type="button" className="ghost-button" onClick={() => openExternalLink("https://github.com/damcha02/destudydracker")}>Open repository</button>
+                  </div>
+                </div>
+              ) : null}
               <div className="delete-data-card">
                 <div>
                   <strong>Delete all data</strong>
@@ -2448,8 +3447,28 @@ function App() {
     );
   }
 
+  const showWindowTitlebar = isTauriApp();
+
   return (
-    <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
+    <>
+      {showWindowTitlebar ? (
+        <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>
+          <div className="window-titlebar-title">Study Tracker</div>
+          <div className="window-titlebar-controls" onMouseDown={(event) => event.stopPropagation()}>
+            <button type="button" onClick={() => void minimizeWindow()} aria-label="Minimize window" title="Minimize">
+              <span aria-hidden="true">-</span>
+            </button>
+            <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label="Maximize or restore window" title="Maximize or restore">
+              <span aria-hidden="true">□</span>
+            </button>
+            <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
+              <span aria-hidden="true">×</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
           <div className="brand-mark" aria-hidden="true">
@@ -2716,27 +3735,29 @@ function App() {
                           >
                             + Course
                           </button>
-                          <button
-                            type="button"
-                            className="ghost-button small-button"
-                            onClick={() => {
-                              const firstCourse = courses[0];
-                              if (!firstCourse) {
-                                setMessage("Add a course before adding an exam.");
-                                return;
-                              }
-                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
-                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: firstCourse.id }));
-                              setAddingExamSemesterId((current) => (current === semester.id ? null : semester.id));
-                            }}
-                          >
-                            + Exam
+                          <button type="button" className="ghost-button small-button" onClick={() => startEditingSemester(semester)}>
+                            Edit
                           </button>
                           <button type="button" className="mini-danger" onClick={() => removeSemester(semester.id)}>
                             Remove
                           </button>
                         </div>
                       </div>
+
+                      {editingSemesterId === semester.id ? (
+                        <form className="inline-form-card nested-form semester-edit-form" onSubmit={updateSemester}>
+                          <label className="field">
+                            <span>Semester name</span>
+                            <input value={semesterEditName} onChange={(event) => setSemesterEditName(event.target.value)} />
+                          </label>
+                          <div className="inline-form-actions">
+                            <button type="submit">Save semester</button>
+                            <button type="button" className="ghost-button" onClick={() => setEditingSemesterId(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : null}
 
                       {semesterExpanded ? (
                         <div className="accordion-body">
@@ -2797,24 +3818,74 @@ function App() {
                                         </div>
                                       </button>
 
-                                      <div className="accordion-actions">
-                                        <button
-                                          type="button"
-                                          className="ghost-button small-button"
-                                          onClick={() => {
-                                            setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
-                                            setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
-                                            setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
-                                            setAddingTaskCourseId((current) => (current === course.id ? null : course.id));
-                                          }}
-                                        >
-                                          + Task
-                                        </button>
-                                        <button type="button" className="mini-danger" onClick={() => removeCourse(course.id)}>
-                                          Remove
-                                        </button>
+                                      <div className="accordion-actions course-actions">
+                                        <div className="course-action-row">
+                                          <button
+                                            type="button"
+                                            className="ghost-button small-button"
+                                            onClick={() => {
+                                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
+                                              setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
+                                              setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
+                                              setAddingTaskCourseId((current) => (current === course.id ? null : course.id));
+                                            }}
+                                          >
+                                            + Task
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="ghost-button small-button"
+                                            onClick={() => {
+                                              setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
+                                              setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
+                                              setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id }));
+                                              setAddingExamCourseId((current) => (current === course.id ? null : course.id));
+                                            }}
+                                          >
+                                            + Exam
+                                          </button>
+                                        </div>
+                                        <div className="course-action-row">
+                                          <button type="button" className="ghost-button small-button" onClick={() => startEditingCourse(course)}>
+                                            Edit
+                                          </button>
+                                          <button type="button" className="mini-danger" onClick={() => removeCourse(course.id)}>
+                                            Remove
+                                          </button>
+                                        </div>
                                       </div>
                                     </div>
+
+                                    {editingCourseId === course.id ? (
+                                      <form className="inline-form-card nested-form course-edit-form" onSubmit={updateCourse}>
+                                        <div className="inline-form-grid inline-form-grid-course">
+                                          <label className="field">
+                                            <span>Course name</span>
+                                            <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} />
+                                          </label>
+                                          <label className="field">
+                                            <span>Target grade</span>
+                                            <select value={courseEditDraft.targetGrade} onChange={(event) => setCourseEditDraft((current) => ({ ...current, targetGrade: event.target.value }))}>
+                                              {swissGrades.map((grade) => (
+                                                <option key={grade} value={grade.toString()}>
+                                                  {formatSwissGrade(grade)}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                          <label className="field">
+                                            <span>Color</span>
+                                            <input type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
+                                          </label>
+                                        </div>
+                                        <div className="inline-form-actions">
+                                          <button type="submit">Save course</button>
+                                          <button type="button" className="ghost-button" onClick={() => setEditingCourseId(null)}>
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      </form>
+                                    ) : null}
 
                                     {courseExpanded ? (
                                       <div className="accordion-body nested-body">
@@ -2873,61 +3944,145 @@ function App() {
                                           </form>
                                         ) : null}
 
+                                        {addingExamCourseId === course.id ? (
+                                          <form className="inline-form-card nested-form" onSubmit={addExam}>
+                                            <div className="inline-form-grid inline-form-grid-exam course-exam-form-grid">
+                                              <label className="field">
+                                                <span>Exam title</span>
+                                                <input value={examDraft.title} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, title: event.target.value }))} placeholder="Midterm, final, oral..." />
+                                              </label>
+                                              <label className="field">
+                                                <span>Date</span>
+                                                <input type="date" value={examDraft.examDate} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, examDate: event.target.value }))} />
+                                              </label>
+                                              <label className="field">
+                                                <span>Weight %</span>
+                                                <input type="number" min="0" max="100" value={examDraft.weight} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, weight: event.target.value }))} />
+                                              </label>
+                                              <label className="field">
+                                                <span>Preparedness %</span>
+                                                <input type="number" min="0" max="100" value={examDraft.preparedness} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, preparedness: event.target.value }))} />
+                                              </label>
+                                            </div>
+                                            <div className="inline-form-actions">
+                                              <button type="submit">Add exam</button>
+                                              <button type="button" className="ghost-button" onClick={() => setAddingExamCourseId(null)}>
+                                                Cancel
+                                              </button>
+                                            </div>
+                                          </form>
+                                        ) : null}
+
                                         <div className="task-table">
                                           {courseTasks.length ? (
                                             courseTasks.map((task) => {
                                               const calc = calculateDailyWork(task);
                                               const progress = getTaskProgress(task);
                                               return (
-                                                <div key={task.id} className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`}>
-                                                  <div className="task-row-main">
-                                                    <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
-                                                      <strong>{task.title}</strong>
-                                                    </button>
-                                                    <p>
-                                                      {task.completedUnits}/{task.totalUnits} units • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
-                                                    </p>
-                                                  </div>
-                                                  <div className="task-row-progress">
-                                                    <div className="progress-pill-row">
-                                                      <span>{progress}%</span>
-                                                      <span>{calc.unitsPerDay.toFixed(1)} / day</span>
+                                                <div key={task.id}>
+                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`}>
+                                                    <div className="task-row-main">
+                                                      <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
+                                                        <strong>{task.title}</strong>
+                                                      </button>
+                                                      <p>
+                                                        {task.completedUnits}/{task.totalUnits} units • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
+                                                      </p>
                                                     </div>
-                                                    <div className="health-track tight wide">
-                                                      <div className="health-fill" style={{ width: `${progress}%`, background: course.color }} />
+                                                    <div className="task-row-progress">
+                                                      <div className="progress-pill-row">
+                                                        <span>{progress}%</span>
+                                                        <span>{calc.unitsPerDay.toFixed(1)} / day</span>
+                                                      </div>
+                                                      <div className="health-track tight wide">
+                                                        <div className="health-fill" style={{ width: `${progress}%`, background: course.color }} />
+                                                      </div>
+                                                    </div>
+                                                    <div className="task-row-actions">
+                                                      <button type="button" onClick={() => adjustTask(task.id, -1)}>
+                                                        -
+                                                      </button>
+                                                      <button type="button" onClick={() => adjustTask(task.id, 1)}>
+                                                        +
+                                                      </button>
+                                                      <button type="button" className="ghost-button small-button" onClick={() => startEditingTask(task)}>
+                                                        Edit
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        className="ghost-button small-button"
+                                                        onClick={() => {
+                                                          setSelectedTaskId(task.id);
+                                                          setState((current) => ({
+                                                            ...current,
+                                                            activeTab: "timer",
+                                                            timer: {
+                                                              ...current.timer,
+                                                              semesterId: task.semesterId,
+                                                              courseId: task.courseId,
+                                                              taskId: task.id,
+                                                              goal: current.timer.goal || task.title,
+                                                            },
+                                                          }));
+                                                        }}
+                                                      >
+                                                        Focus
+                                                      </button>
+                                                      <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>
+                                                        Remove
+                                                      </button>
                                                     </div>
                                                   </div>
-                                                  <div className="task-row-actions">
-                                                    <button type="button" onClick={() => adjustTask(task.id, -1)}>
-                                                      -
-                                                    </button>
-                                                    <button type="button" onClick={() => adjustTask(task.id, 1)}>
-                                                      +
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      className="ghost-button small-button"
-                                                      onClick={() => {
-                                                        setSelectedTaskId(task.id);
-                                                        setState((current) => ({
-                                                          ...current,
-                                                          activeTab: "timer",
-                                                          timer: {
-                                                            ...current.timer,
-                                                            semesterId: task.semesterId,
-                                                            courseId: task.courseId,
-                                                            taskId: task.id,
-                                                            goal: current.timer.goal || task.title,
-                                                          },
-                                                        }));
-                                                      }}
-                                                    >
-                                                      Focus
-                                                    </button>
-                                                    <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>
-                                                      Remove
-                                                    </button>
-                                                  </div>
+                                                  {editingTaskId === task.id ? (
+                                                    <form className="inline-form-card nested-form task-edit-form" onSubmit={updateTask}>
+                                                      <div className="inline-form-grid inline-form-grid-task">
+                                                        <label className="field task-title-field">
+                                                          <span>Task title</span>
+                                                          <input value={taskEditDraft.title} onChange={(event) => setTaskEditDraft((current) => ({ ...current, title: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Total units</span>
+                                                          <input type="number" min="1" value={taskEditDraft.totalUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Done</span>
+                                                          <input type="number" min="0" value={taskEditDraft.completedUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Priority</span>
+                                                          <select value={taskEditDraft.priority} onChange={(event) => setTaskEditDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
+                                                            <option value="high">High</option>
+                                                            <option value="medium">Medium</option>
+                                                            <option value="low">Low</option>
+                                                          </select>
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Due date (optional)</span>
+                                                          <input
+                                                            type="date"
+                                                            value={taskEditDraft.dueDate}
+                                                            onChange={(event) => setTaskEditDraft((current) => ({ ...current, dueDate: event.target.value }))}
+                                                            onKeyDown={confirmTaskDueDate}
+                                                          />
+                                                        </label>
+                                                        <label className="field task-notes-field">
+                                                          <span>Notes</span>
+                                                          <textarea value={taskEditDraft.notes} onChange={(event) => setTaskEditDraft((current) => ({ ...current, notes: event.target.value }))} />
+                                                        </label>
+                                                      </div>
+                                                      <div className="inline-form-actions">
+                                                        <button type="submit">Save task</button>
+                                                        <button type="button" className="ghost-button" onClick={() => setEditingTaskId(null)}>
+                                                          Cancel
+                                                        </button>
+                                                        {taskEditDraft.dueDate ? (
+                                                          <button type="button" className="ghost-button" onClick={() => setTaskEditDraft((current) => ({ ...current, dueDate: "" }))}>
+                                                            Clear due date
+                                                          </button>
+                                                        ) : null}
+                                                      </div>
+                                                    </form>
+                                                  ) : null}
                                                 </div>
                                               );
                                             })
@@ -2952,46 +4107,6 @@ function App() {
                                 <h3>Exams in this semester</h3>
                               </div>
                             </div>
-
-                            {addingExamSemesterId === semester.id ? (
-                              <form className="inline-form-card nested-form" onSubmit={addExam}>
-                                <div className="inline-form-grid inline-form-grid-exam">
-                                  <label className="field">
-                                    <span>Course</span>
-                                    <select value={examDraft.courseId} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, courseId: event.target.value }))}>
-                                      <option value="">Select course</option>
-                                      {courses.map((course) => (
-                                        <option key={course.id} value={course.id}>
-                                          {course.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </label>
-                                  <label className="field">
-                                    <span>Exam title</span>
-                                    <input value={examDraft.title} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, title: event.target.value }))} placeholder="Midterm, final, oral..." />
-                                  </label>
-                                  <label className="field">
-                                    <span>Date</span>
-                                    <input type="date" value={examDraft.examDate} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, examDate: event.target.value }))} />
-                                  </label>
-                                  <label className="field">
-                                    <span>Weight %</span>
-                                    <input type="number" min="0" max="100" value={examDraft.weight} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, weight: event.target.value }))} />
-                                  </label>
-                                  <label className="field">
-                                    <span>Preparedness %</span>
-                                    <input type="number" min="0" max="100" value={examDraft.preparedness} onChange={(event) => setExamDraft((current) => ({ ...current, semesterId: semester.id, preparedness: event.target.value }))} />
-                                  </label>
-                                </div>
-                                <div className="inline-form-actions">
-                                  <button type="submit">Add exam</button>
-                                  <button type="button" className="ghost-button" onClick={() => setAddingExamSemesterId(null)}>
-                                    Cancel
-                                  </button>
-                                </div>
-                              </form>
-                            ) : null}
 
                             <div className="stack-list compact">
                               {semesterExams.length ? (
@@ -3223,8 +4338,14 @@ function App() {
                       timer: {
                         ...current.timer,
                         presetLabel: "Custom",
-                        mode: current.timer.mode === "exam" ? "exam" : "focus",
-                        remainingSeconds: current.timer.mode === "exam" ? current.timer.examMinutes * 60 : current.timer.studyMinutes * 60,
+                        mode: "focus",
+                        studyMinutes: defaultTimer.studyMinutes,
+                        breakMinutes: defaultTimer.breakMinutes,
+                        phase: "idle",
+                        running: false,
+                        startedAt: null,
+                        endsAt: null,
+                        remainingSeconds: defaultTimer.studyMinutes * 60,
                       },
                     }))
                   }
@@ -3300,10 +4421,10 @@ function App() {
                 </label>
               </div>
 
-              {isCustomTimerPreset ? (
+              {isCustomTimerPreset || state.timer.mode === "exam" ? (
                 <div className="timer-custom-row">
                   <label className="field compact-field">
-                    <span>Focus minutes</span>
+                    <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
                     <input
                       type="number"
                       min="1"
@@ -3311,34 +4432,41 @@ function App() {
                       disabled={state.timer.running}
                       onChange={(event) => {
                         const next = Number(event.target.value) || 1;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
+                        setState((current) => {
+                          const timer = {
                             ...current.timer,
-                            studyMinutes: next,
-                            examMinutes: next,
-                            remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
-                            presetLabel: "Custom",
-                          },
-                        }));
+                            studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                            examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
+                            presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
+                          };
+                          return {
+                            ...current,
+                            timer: {
+                              ...timer,
+                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                            },
+                          };
+                        });
                       }}
                     />
                   </label>
-                  <label className="field compact-field">
-                    <span>Break minutes</span>
-                    <input
-                      type="number"
-                      min="0"
-                      disabled={state.timer.running || state.timer.mode === "exam"}
-                      value={state.timer.breakMinutes}
-                      onChange={(event) =>
-                        setState((current) => ({
-                          ...current,
-                          timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
-                        }))
-                      }
-                    />
-                  </label>
+                  {state.timer.mode !== "exam" ? (
+                    <label className="field compact-field">
+                      <span>Break minutes</span>
+                      <input
+                        type="number"
+                        min="0"
+                        disabled={state.timer.running}
+                        value={state.timer.breakMinutes}
+                        onChange={(event) =>
+                          setState((current) => ({
+                            ...current,
+                            timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
+                          }))
+                        }
+                      />
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -3493,23 +4621,28 @@ function App() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>Focus minutes</span>
+                    <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
                     <input
                       type="number"
                       min="1"
                       value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
                       onChange={(event) => {
                         const next = Number(event.target.value) || 1;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
+                        setState((current) => {
+                          const timer = {
                             ...current.timer,
-                            studyMinutes: next,
-                            examMinutes: next,
-                            remainingSeconds: current.timer.running ? current.timer.remainingSeconds : next * 60,
-                            presetLabel: "Custom",
-                          },
-                        }));
+                            studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                            examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
+                            presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
+                          };
+                          return {
+                            ...current,
+                            timer: {
+                              ...timer,
+                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                            },
+                          };
+                        });
                       }}
                     />
                   </label>
@@ -3612,136 +4745,400 @@ function App() {
       ) : null}
 
       {state.activeTab === "vault" ? (
-        <section className="vault-grid">
-          <article className="panel-card vault-card vault-setup-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Obsidian</p>
-                <h2>Create or link your markdown vault</h2>
-              </div>
-              <button type="button" className="ghost-button" onClick={() => setVaultSetupOpen((current) => !current)}>
-                {vaultSetupOpen ? "Hide setup" : "Show setup"}
+        <section className="vault-shell">
+          <div className="vault-hero">
+            <div>
+              <h1>Vault</h1>
+              <p>Your Obsidian-compatible markdown knowledge base.</p>
+            </div>
+            <div className="vault-hero-actions">
+              {state.settings.vaultPath ? (
+                <span className="vault-status-pill"><span />{state.settings.vaultName || "Linked vault"}</span>
+              ) : null}
+              <button type="button" className="ghost-button" onClick={() => setMarkdownCheatsheetOpen(true)}>
+                Markdown
+              </button>
+              <button type="button" className="ghost-button vault-settings-button" onClick={() => setVaultSetupOpen((current) => !current)}>
+                {vaultSetupOpen ? "Close setup" : "Vault setup"}
               </button>
             </div>
+          </div>
 
-            {vaultSetupOpen ? (
-              <>
-                <div className="form-grid compact-grid">
-                  <label className="field">
-                    <span>Vault name</span>
-                    <input
-                      value={state.settings.vaultName}
-                      onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
-                      placeholder="StudyTrackerVault"
-                    />
-                  </label>
-
-                  <label className="field wide">
-                    <span>Current vault path</span>
-                    <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
-                  </label>
-                </div>
-
-                <div className="control-row left roomy-top">
-                  <button type="button" onClick={handleCreateVault}>
-                    Create new vault
-                  </button>
-                  <button type="button" className="ghost-button" onClick={handleLinkVault}>
-                    Link existing vault
-                  </button>
-                </div>
-
-                <p className="section-note">An Obsidian vault is just a folder of markdown files. Study Tracker creates or uses Daily, Weekly, Subjects, Exams, Summaries, Templates, and Inbox without locking you into the app.</p>
-              </>
-            ) : (
-              <p className="section-note">{state.settings.vaultPath ? `Linked vault: ${state.settings.vaultPath}` : "No vault linked yet. Open setup to create or link one."}</p>
-            )}
-          </article>
-
-          <article className="panel-card note-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Markdown</p>
-                <h2>Daily note editor</h2>
-              </div>
-              <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
-            </div>
-
-            <div className="form-grid compact-grid">
-              <label className="field">
-                <span>Note date</span>
-                <input
-                  type="date"
-                  value={vaultNoteDate}
-                  onChange={(event) => {
-                    setVaultNoteDate(event.target.value || localIsoDate());
-                    setVaultNotePath(null);
-                    setVaultNoteContent("");
-                    setVaultNoteDirty(false);
-                  }}
-                />
-              </label>
-              <label className="field wide">
-                <span>Note path</span>
-                <button type="button" className="path-button" onClick={handleLinkVault}>
-                  {vaultNotePath ?? (state.settings.vaultPath ? `${state.settings.vaultPath}/Daily/${vaultNoteDate}.md` : "No vault linked yet")}
-                </button>
-              </label>
-            </div>
-
-            <textarea
-              className="note-preview"
-              value={vaultNoteContent}
-              onChange={(event) => {
-                setVaultNoteContent(event.target.value);
-                setVaultNoteDirty(true);
-              }}
-              placeholder="Load a daily note from your vault or generate a draft from today's Study Tracker sessions."
-            />
-
-            <div className="control-row left roomy-top">
-              <button type="button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>
-                {vaultNoteLoading ? "Working..." : "Load note"}
-              </button>
-              <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>
-                Generate from sessions
-              </button>
-              <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading || !state.settings.vaultPath}>
-                Save note
-              </button>
-            </div>
-
-            <p className="section-note">Saving writes this editor to the markdown file. Timer sessions stay inside Study Tracker until you choose to generate or save a note.</p>
-
-            <div className="stack-list compact export-list">
-              {state.exports.length ? (
-                state.exports.map((item) => (
-                  <div key={item.id} className="session-row">
-                    <div>
-                      <strong>{item.noteDate}</strong>
-                      <p>{item.notePath}</p>
-                    </div>
-                    <small>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(item.exportedAt))}</small>
+          {markdownCheatsheetOpen ? (
+            <div className="markdown-cheatsheet-backdrop" onMouseDown={() => setMarkdownCheatsheetOpen(false)}>
+              <section className="markdown-cheatsheet-panel" onMouseDown={(event) => event.stopPropagation()} aria-label="Markdown cheatsheet">
+                <div className="markdown-cheatsheet-head">
+                  <div>
+                    <p className="eyebrow">Vault markdown</p>
+                    <h2>Cheatsheet</h2>
+                    <p>These are the markdown features Study Tracker currently previews.</p>
                   </div>
-                ))
-              ) : (
-                <p className="empty-copy">Exports will appear here once you write the first daily note.</p>
-              )}
-            </div>
-          </article>
+                  <button type="button" className="ghost-button small-button" onClick={() => setMarkdownCheatsheetOpen(false)} aria-label="Close markdown cheatsheet">
+                    X
+                  </button>
+                </div>
 
-          <article className="panel-card markdown-preview-card">
-            <div className="section-head">
-              <div>
-                <p className="eyebrow">Preview</p>
-                <h2>Markdown preview</h2>
+                <div className="markdown-cheatsheet-grid">
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Headings</h3>
+                    <pre><code>{"# Title\n## Section\n### Subsection"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Emphasis</h3>
+                    <pre><code>{"**bold**\n*italic*\n`inline code`"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Lists</h3>
+                    <pre><code>{"- bullet item\n* another bullet\n\n1. first\n2. second"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Quotes</h3>
+                    <pre><code>{"> Important note or reminder"}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Links</h3>
+                    <pre><code>{"[ETH Video](https://video.ethz.ch/...)\nhttps://video.ethz.ch/..."}</code></pre>
+                  </div>
+                  <div className="markdown-cheatsheet-example">
+                    <h3>Code Blocks</h3>
+                    <pre><code>{"```\nconst topic = \"series\";\n```"}</code></pre>
+                  </div>
+                </div>
+
+                <div className="markdown-cheatsheet-note">
+                  <strong>Not supported in preview yet:</strong> tables, images, LaTeX/math rendering, nested lists, and interactive task checkboxes.
+                </div>
+              </section>
+            </div>
+          ) : null}
+
+          {!state.settings.vaultPath ? (
+            <article className="panel-card vault-empty-card">
+              <p className="eyebrow">No vault linked</p>
+              <h2>Connect your markdown vault</h2>
+              <p className="section-note">Notes are saved as standard `.md` files you can open in Obsidian or any editor.</p>
+              <div className="control-row roomy-top">
+                <button type="button" onClick={handleLinkVault}>Link existing vault</button>
+                <button type="button" className="ghost-button" onClick={handleCreateVault}>Create new vault</button>
               </div>
-            </div>
+            </article>
+          ) : null}
 
-            <div className="markdown-preview">
-              {vaultNoteContent.trim() ? renderMarkdownPreview(vaultNoteContent) : <p className="empty-copy">Your formatted markdown preview will appear here as you type.</p>}
-            </div>
-          </article>
+          {vaultSetupOpen ? (
+            <article className="panel-card vault-settings-panel">
+              <div className="section-head">
+                <div>
+                  <p className="eyebrow">Obsidian vault</p>
+                  <h2>Vault configuration</h2>
+                </div>
+              </div>
+              <div className="form-grid compact-grid">
+                <label className="field">
+                  <span>Vault name</span>
+                  <input
+                    value={state.settings.vaultName}
+                    onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
+                    placeholder="StudyTrackerVault"
+                  />
+                </label>
+                <label className="field wide">
+                  <span>Current vault path</span>
+                  <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
+                </label>
+              </div>
+              <div className="vault-folder-strip" aria-label="Vault folders">
+                {["Daily", "References", "Summaries"].map((folder) => <span key={folder}>{folder}</span>)}
+              </div>
+              <div className="control-row left roomy-top">
+                <button type="button" onClick={handleCreateVault}>Create new vault</button>
+                <button type="button" className="ghost-button" onClick={handleLinkVault}>Link existing vault</button>
+              </div>
+            </article>
+          ) : null}
+
+          {state.settings.vaultPath ? (
+            <>
+              <nav className="vault-nav" aria-label="Vault spaces">
+                {vaultSpaces.map((space) => {
+                  const active = space.id === vaultSpace;
+                  return (
+                    <button
+                      key={space.id}
+                      type="button"
+                      className={`vault-nav-item ${active ? "active" : ""}`}
+                      onClick={() => setVaultSpace(space.id)}
+                    >
+                      {space.label}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {vaultSpace === "daily" ? (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Daily</span>
+                        <input
+                          type="date"
+                          value={vaultNoteDate}
+                          onChange={(event) => {
+                            setVaultNoteDate(event.target.value || localIsoDate());
+                            setVaultNotePath(null);
+                            setVaultNoteContent("");
+                            setVaultNoteDirty(false);
+                            setVaultDailyEditing(false);
+                          }}
+                        />
+                      </label>
+                      <span className="vault-path-chip">{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</span>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      <button type="button" className="ghost-button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>{vaultNoteLoading ? "Working..." : "Load"}</button>
+                      <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>Use session draft</button>
+                      {vaultDailyEditing ? (
+                        <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading}>Save</button>
+                      ) : (
+                        <button type="button" className="ghost-button" onClick={() => setVaultDailyEditing(true)}>Edit</button>
+                      )}
+                      <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
+                    </div>
+                  </div>
+
+                  {vaultDailyEditing ? (
+                    <div className="vault-split">
+                      <div className="vault-editor-pane">
+                        <div className="vault-pane-head"><span className="eyebrow">Editor</span></div>
+                        <textarea
+                          className="vault-markdown-editor"
+                          value={vaultNoteContent || notePreview}
+                          onChange={(event) => {
+                            setVaultNoteContent(event.target.value);
+                            setVaultNoteDirty(true);
+                          }}
+                          placeholder="Write today's markdown note."
+                        />
+                      </div>
+                      <div className="vault-preview-pane">
+                        <div className="vault-pane-head"><span className="eyebrow">Preview</span></div>
+                        <div className="markdown-preview vault-prose compact">{renderMarkdownPreview(dailyPreviewContent)}</div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="vault-document-wrap">
+                      <article className="panel-card vault-document">
+                        <div className="vault-document-meta">
+                          <span>Daily</span>
+                          <code>{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</code>
+                        </div>
+                        <div className="markdown-preview vault-prose">{renderMarkdownPreview(dailyPreviewContent)}</div>
+                      </article>
+
+                      <div className="vault-recent-list">
+                        <p className="eyebrow">Recent exports</p>
+                        {state.exports.length ? state.exports.slice(0, 4).map((item) => (
+                          <div key={item.id} className="vault-recent-row">
+                            <span>{item.noteDate}</span>
+                            <code>{item.notePath}</code>
+                          </div>
+                        )) : <p className="empty-copy">Exports will appear here once you save a daily note.</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : vaultSpace === "references" ? (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main references-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Semester</span>
+                        <select
+                          value={referenceSemesterId}
+                          onChange={(event) => {
+                            if (referenceDirty) {
+                              setMessage("Save the current reference note before switching courses.");
+                              return;
+                            }
+                            setReferenceSemesterId(event.target.value);
+                            setReferenceCourseId("");
+                          }}
+                        >
+                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                        </select>
+                      </label>
+                      <div className="vault-course-chips">
+                        {referenceCourses.map((course) => (
+                          <button
+                            key={course.id}
+                            type="button"
+                            className={`vault-course-chip ${course.id === referenceCourseId ? "active" : ""}`}
+                            onClick={() => {
+                              if (referenceDirty) {
+                                setMessage("Save the current reference note before switching courses.");
+                                return;
+                              }
+                              setReferenceCourseId(course.id);
+                            }}
+                          >
+                            <span style={{ background: course.color }} />{course.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      {referenceEditing ? (
+                        <button type="button" className="ghost-button" onClick={handleSaveReferenceNote} disabled={referenceLoading || !selectedReferenceCourse}>{referenceLoading ? "Saving..." : "Save"}</button>
+                      ) : (
+                        <button type="button" className="ghost-button" onClick={handleEditReferenceNote} disabled={!selectedReferenceCourse}>Edit</button>
+                      )}
+                      <span className="design-chip">{referenceDirty ? "Unsaved" : "Saved"}</span>
+                    </div>
+                  </div>
+
+                  {selectedReferenceSemester && selectedReferenceCourse ? (
+                    referenceEditing ? (
+                      <div className="vault-split">
+                        <div className="vault-editor-pane">
+                          <div className="vault-pane-head"><span className="eyebrow">Markdown</span></div>
+                          <textarea
+                            className="vault-markdown-editor"
+                            value={referenceContent}
+                            onChange={(event) => {
+                              setReferenceContent(event.target.value);
+                              setReferenceDirty(true);
+                            }}
+                            placeholder="Add useful markdown links for this course."
+                          />
+                        </div>
+                        <div className="vault-preview-pane">
+                          <div className="vault-pane-head"><span className="eyebrow">Preview</span></div>
+                          <div className="markdown-preview vault-prose compact">{renderMarkdownPreview(referencePreview)}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="vault-document-wrap">
+                        <article className="panel-card vault-document">
+                          <div className="vault-document-meta">
+                            <button type="button" className="vault-document-meta-button" onClick={() => setReferencePathVisible((current) => !current)}>
+                              References
+                            </button>
+                            {referencePathVisible ? <code>{referencePath ?? `References/${selectedReferenceSemester.name}/${selectedReferenceCourse.name}.md`}</code> : null}
+                          </div>
+                          <div className="markdown-preview vault-prose">{renderMarkdownPreview(referencePreview)}</div>
+                        </article>
+                      </div>
+                    )
+                  ) : (
+                    <article className="panel-card vault-empty-card">
+                      <p className="eyebrow">No courses yet</p>
+                      <h2>References need courses</h2>
+                      <p className="section-note">Create at least one semester and course in Planner before adding course reference notes.</p>
+                    </article>
+                  )}
+                </div>
+              ) : (
+                <div className="vault-space-panel">
+                  <div className="vault-toolbar">
+                    <div className="vault-toolbar-main references-toolbar-main">
+                      <label className="vault-compact-field">
+                        <span>Semester</span>
+                        <select
+                          value={summarySemesterId}
+                          onChange={(event) => {
+                            setSummarySemesterId(event.target.value);
+                            setSummaryCourseId("");
+                          }}
+                        >
+                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                        </select>
+                      </label>
+                      <div className="vault-course-chips">
+                        {summaryCourses.map((course) => (
+                          <button
+                            key={course.id}
+                            type="button"
+                            className={`vault-course-chip ${course.id === summaryCourseId ? "active" : ""}`}
+                            onClick={() => setSummaryCourseId(course.id)}
+                          >
+                            <span style={{ background: course.color }} />{course.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="vault-toolbar-actions">
+                      <button type="button" className="ghost-button" onClick={() => loadSummaryFileList()} disabled={summaryLoading || !selectedSummaryCourse}>{summaryLoading ? "Loading..." : "Refresh"}</button>
+                      <button type="button" onClick={handleAddSummaryFiles} disabled={summaryLoading || !selectedSummaryCourse}>Add files</button>
+                    </div>
+                  </div>
+
+                  {selectedSummarySemester && selectedSummaryCourse ? (
+                    <div className="summaries-layout">
+                      <aside className="panel-card summary-file-list">
+                        <div className="summary-file-list-head">
+                          <div>
+                            <p className="eyebrow">Summaries</p>
+                            <h2>{selectedSummaryCourse.name}</h2>
+                          </div>
+                          <span>{summaryFiles.length}</span>
+                        </div>
+                        {summaryFiles.length ? (
+                          <div className="summary-file-links">
+                            {summaryFiles.map((file) => (
+                              <button
+                                key={file.path}
+                                type="button"
+                                className={`summary-file-link ${file.path === selectedSummaryFile?.path ? "active" : ""}`}
+                                onClick={() => setSelectedSummaryPath(file.path)}
+                              >
+                                <span>{file.name}</span>
+                                <small>{file.kind.toUpperCase()} • {formatFileSize(file.sizeBytes)}</small>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="empty-copy">No summaries yet. Add PDFs, formula sheets, or cheatsheet images for this course.</p>
+                        )}
+                      </aside>
+
+                      <section className="panel-card summary-viewer-card">
+                        {selectedSummaryFile && selectedSummaryUrl ? (
+                          <>
+                            <div className="summary-viewer-head">
+                              <div>
+                                <p className="eyebrow">Viewer</p>
+                                <h2>{selectedSummaryFile.name}</h2>
+                              </div>
+                              <button type="button" className="ghost-button small-button" onClick={() => revealItemInDir(selectedSummaryFile.path)}>Show file</button>
+                            </div>
+                            {selectedSummaryFile.kind === "pdf" ? (
+                              <iframe className="summary-pdf-viewer" src={selectedSummaryUrl} title={selectedSummaryFile.name} />
+                            ) : (
+                              <div className="summary-image-viewer">
+                                <img src={selectedSummaryUrl} alt={selectedSummaryFile.name} />
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <div className="summary-viewer-empty">
+                            <p className="eyebrow">Viewer</p>
+                            <h2>Select a summary</h2>
+                            <p className="section-note">Choose a file from the list, or add PDFs/images to this course.</p>
+                          </div>
+                        )}
+                      </section>
+                    </div>
+                  ) : (
+                    <article className="panel-card vault-empty-card">
+                      <p className="eyebrow">No courses yet</p>
+                      <h2>Summaries need courses</h2>
+                      <p className="section-note">Create at least one semester and course in Planner before adding summary files.</p>
+                    </article>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
         </section>
       ) : null}
 
@@ -3832,6 +5229,7 @@ function App() {
         </div>
       ) : null}
     </div>
+    </>
   );
 }
 

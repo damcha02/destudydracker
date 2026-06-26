@@ -608,7 +608,9 @@
   --garden-soil: #e5ddde;
 }
 
-/* ---------- FOREST — deep woodland greens ---------- */
+/* ---------- FOREST — deep pine night / leafy daylight ---------- */
+/* DARK: near-black pine ground; cards rise as lighter moss/evergreen
+   surfaces with stronger borders so widgets clearly separate. */
 [data-palette="forest"][data-theme="dark"] {
   --bg: #0d160d;
   --bg-grad-1: #142014;
@@ -655,6 +657,8 @@
   --garden-sky: #0b130b;
   --garden-soil: #2f432f;
 }
+/* LIGHT: reads green on sight — leaf/cream surfaces over a moss-tinted
+   field, soft sunlight, calm not neon. No plain white. */
 [data-palette="forest"][data-theme="light"] {
   --bg: #e9f2e2;
   --bg-grad-1: #f2f8ec;
@@ -749,6 +753,9 @@
   --garden-sky: #0a1829;
   --garden-soil: #27303d;
 }
+/* LIGHT: shallow Greek beach water on a sunny day — turquoise field,
+   seafoam-glass surfaces, sand-gold warnings, coral danger, deep teal
+   ink for crisp contrast. Reads as water + light, never grey-blue. */
 [data-palette="ocean"][data-theme="light"] {
   --bg: #d8f1ec;
   --bg-grad-1: #ebf9f5;
@@ -1031,6 +1038,9 @@
   --garden-sky: #000000;
   --garden-soil: #272727;
 }
+/* LIGHT: green phosphor CRT seen in daylight — low-glare green-grey
+   glass, never white. Dark phosphor-green ink + bright green accent
+   keep widgets high-contrast against the muted terminal-glass field. */
 [data-palette="terminal"][data-theme="light"] {
   --bg: #c7d4c3;
   --bg-grad-1: #d2ddce;
@@ -1078,7 +1088,9 @@
   --garden-soil: #b3c2af;
 }
 
-/* ---------- ORGANS — cream on near-black with oxblood red ---------- */
+/* ---------- ORGANS — anatomical oxblood / blood-red ---------- */
+/* DARK: near-black depth pushed redder — oxblood surfaces, blood-red
+   accent, cream ink. Richer and more visceral, still readable. */
 [data-palette="organs"][data-theme="dark"] {
   --bg: #110406;
   --bg-grad-1: #1d090b;
@@ -1094,7 +1106,7 @@
   --line-soft: #5a1e2261;
   --line-strong: #7a2c30e6;
 
-  --ink: #efe1c8;
+  --ink: #f0e2c9;
   --ink-2: #c8a896;
   --ink-3: #9c786f;
   --ink-4: #7a544f;
@@ -1125,6 +1137,8 @@
   --garden-sky: #0a0203;
   --garden-soil: #3a2122;
 }
+/* LIGHT: warm anatomical parchment with red-tinted surfaces and a
+   stronger blood-red accent. Oxblood ink, not pink/candy. */
 [data-palette="organs"][data-theme="light"] {
   --bg: #f6e7e2;
   --bg-grad-1: #fbf1ee;
