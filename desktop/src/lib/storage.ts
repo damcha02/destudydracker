@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Semester, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 
@@ -52,6 +52,18 @@ export const defaultState: AppState = {
   },
   timer: defaultTimer,
   activeTab: "dashboard",
+  unlockedGames: [],
+  unlockedGamesDate: "",
+  playedBreaks: [],
+  playedBreaksDate: "",
+  totalUnlocks: 0,
+  unlockStreak: 0,
+  lastUnlockDate: "",
+  speedrunnerToday: false,
+  playedGamesAllTime: [],
+  waterGlasses: 0,
+  waterDate: "",
+  petRockPats: 0,
 };
 
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {

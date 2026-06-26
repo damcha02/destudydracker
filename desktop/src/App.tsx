@@ -29,11 +29,12 @@ import {
   getTodayMinutes,
   getUpcomingExams,
   getWeeklyActivity,
+  isoDate,
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -223,6 +224,122 @@ const studyBreakGames = [
   { name: "Geodle", url: "https://geodle.me", desc: "Guess the location from a photo" },
 ];
 
+const breakQuotes = [
+  { text: "Almost everything will work again if you unplug it for a few minutes, including you.", author: "Anne Lamott" },
+  { text: "Rest is not idleness, and to lie sometimes on the grass under trees on a summer's day, listening to the murmur of the water, or watching the clouds float across the sky, is by no means a waste of time.", author: "John Lubbock" },
+  { text: "The time to relax is when you don't have time for it.", author: "Sydney J. Harris" },
+  { text: "Sometimes the most productive thing you can do is relax.", author: "Mark Black" },
+  { text: "Take rest; a field that has rested gives a bountiful crop.", author: "Ovid" },
+  { text: "Tension is who you think you should be. Relaxation is who you are.", author: "Chinese Proverb" },
+  { text: "Sleep is the best meditation.", author: "Dalai Lama" },
+  { text: "If you can't change your fate, change your attitude.", author: "Amy Tan" },
+  { text: "The mind is like a parachute — it works best when it's open.", author: "Frank Zappa" },
+  { text: "What seems to us as bitter trials are often blessings in disguise.", author: "Oscar Wilde" },
+  { text: "You should sit in nature for 20 minutes a day. Unless you're busy, then you should sit for an hour.", author: "Zen Proverb" },
+  { text: "In the midst of movement and chaos, keep stillness inside of you.", author: "Deepak Chopra" },
+  { text: "The greatest weapon against stress is our ability to choose one thought over another.", author: "William James" },
+  { text: "A calm mind brings inner strength and self-confidence, so that's very important for good health.", author: "Dalai Lama" },
+  { text: "Time you enjoy wasting was not wasted.", author: "John Lennon" },
+  { text: "Give yourself a break. Stop and rest. Your mind will thank you.", author: "Unknown" },
+  { text: "Do not confuse motion and progress. A rocking horse keeps moving but does not make any progress.", author: "Alfred A. Montapert" },
+  { text: "The tree that is unbending is easily broken.", author: "Lao Tzu" },
+  { text: "There is virtue in work and there is virtue in rest. Use both and overlook neither.", author: "Alan Cohen" },
+  { text: "Relaxation is a form of meditation, and in the quiet of the mind, we find the solution to our problems.", author: "Unknown" },
+  { text: "The soul always knows what to do to heal itself. The challenge is to silence the mind.", author: "Caroline Myss" },
+  { text: "Stress is caused by being 'here' but wanting to be 'there.'", author: "Eckhart Tolle" },
+  { text: "Now and then it's good to pause in our pursuit of happiness and just be happy.", author: "Guillaume Apollinaire" },
+  { text: "Rest when you're weary. Refresh and renew yourself, your body, your mind, your spirit. Then get back to work.", author: "Ralph Marston" },
+  { text: "It is not a luxury to rest. It is a necessity.", author: "Unknown" },
+  { text: "Within you, there is a stillness and a sanctuary to which you can retreat at any time.", author: "Hermann Hesse" },
+  { text: "Almost everything comes from nothing.", author: "Henri-Frédéric Amiel" },
+  { text: "There is a certain kind of peace that comes from stepping away from the noise.", author: "Unknown" },
+  { text: "If you get tired, learn to rest, not to quit.", author: "Banksy" },
+  { text: "For fast-acting relief, try slowing down.", author: "Lily Tomlin" },
+  { text: "The mind is not a vessel to be filled, but a fire to be kindled.", author: "Plutarch" },
+  { text: "Rest and self-care are so important. When you take time to replenish your spirit, it allows you to serve others from the overflow.", author: "Eleanor Brown" },
+  { text: "Breathe. Let go. And remind yourself that this very moment is the only one you know you have for sure.", author: "Oprah Winfrey" },
+  { text: "Nothing can bring you peace but yourself.", author: "Ralph Waldo Emerson" },
+  { text: "In the pause between thoughts, there is peace.", author: "Unknown" },
+  { text: "The more you are motivated by love, the more fearless and free your action will be.", author: "Dalai Lama" },
+  { text: "A step backward after making a wrong turn is a step in the right direction.", author: "Kurt Vonnegut" },
+  { text: "Your mind will answer most questions if you learn to relax and wait for the answer.", author: "William S. Burroughs" },
+  { text: "Every now and then go away, have a little relaxation, for when you come back to your work your judgment will be surer.", author: "Leonardo da Vinci" },
+  { text: "Peace is not the absence of noise, trouble, or hard work. It is to be in the midst of those things and still be calm in your heart.", author: "Unknown" },
+  { text: "The ability to be in the present moment is a major component of mental wellness.", author: "Abraham Maslow" },
+  { text: "Slowing down is not a luxury, it's a necessity for a well-lived life.", author: "Unknown" },
+  { text: "You don't have to be positive all the time. It's perfectly okay to feel sad, angry, annoyed, frustrated, scared, or anxious. Having feelings doesn't make you a negative person. It makes you human.", author: "Lori Deschene" },
+  { text: "The best way to capture moments is to pay attention. This is how we cultivate mindfulness.", author: "Jon Kabat-Zinn" },
+  { text: "Don't underestimate the value of doing nothing.", author: "A. A. Milne" },
+  { text: "The pause between notes is what makes the music.", author: "Unknown" },
+  { text: "Sometimes you need to step outside, get some air, and remind yourself of who you are and who you want to be.", author: "Unknown" },
+  { text: "What lies behind us and what lies before us are tiny matters compared to what lies within us.", author: "Ralph Waldo Emerson" },
+  { text: "All of humanity's problems stem from man's inability to sit quietly in a room alone.", author: "Blaise Pascal" },
+  { text: "In the middle of difficulty lies opportunity.", author: "Albert Einstein" },
+  { text: "To sit with the stillness of your own heart is the greatest gift you can give yourself.", author: "Unknown" },
+  { text: "Sometime the most urgent thing you can possibly do is take a complete rest.", author: "Ashleigh Brilliant" },
+  { text: "When you recover or discover something that nourishes your soul and brings joy, care enough about yourself to make room for it.", author: "Jean Shinoda Bolen" },
+  { text: "Take a deep breath. It's just a bad day, not a bad life.", author: "Unknown" },
+  { text: "You can't pour from an empty cup. Take care of yourself first.", author: "Unknown" },
+  { text: "Let yourself be drawn by the stronger pull of that which you truly love.", author: "Rumi" },
+  { text: "Worrying is like paying a debt you don't owe.", author: "Mark Twain" },
+  { text: "The quieter you become, the more you can hear.", author: "Ram Dass" },
+  { text: "Between stimulus and response there is a space. In that space is our power to choose our response. In our response lies our growth and our freedom.", author: "Viktor Frankl" },
+  { text: "Nature does not hurry, yet everything is accomplished.", author: "Lao Tzu" },
+  { text: "Be gentle with yourself. You are a child of the universe, no less than the trees and the stars.", author: "Max Ehrmann" },
+  { text: "Your calm mind is the ultimate weapon against your challenges.", author: "Bryant McGill" },
+  { text: "The mind is like water. When it's turbulent, it's difficult to see. When it's calm, everything becomes clear.", author: "Prasad Mahes" },
+  { text: "Burnout is nature's way of telling you you've been going through the motions when your soul has departed.", author: "Unknown" },
+  { text: "If you want to be creative, you have to rest and let your mind wander.", author: "Unknown" },
+  { text: "Some of the most beautiful things in the world come from silence.", author: "Unknown" },
+  { text: "Step outside. The air is still there, waiting for you.", author: "Unknown" },
+  { text: "There's no need to fix everything. Sometimes just breathing is enough.", author: "Unknown" },
+  { text: "Pause and remember: you are exactly where you need to be.", author: "Unknown" },
+  { text: "Joy is not in things; it is in us.", author: "Richard Wagner" },
+  { text: "Think of all the beauty still left around you and be happy.", author: "Anne Frank" },
+  { text: "The sun is a daily reminder that we too can rise again from the darkness, that we too can shine.", author: "S. Ajna" },
+  { text: "Be where you are, not where you think you should be.", author: "Unknown" },
+  { text: "The best time to plant a tree was 20 years ago. The second best time is now.", author: "Chinese Proverb" },
+  { text: "A seed grows with no sound, but a tree falls with a huge noise. Destruction has noise, but creation is quiet.", author: "Unknown" },
+  { text: "Stillness is not about focusing on nothingness; it's about creating a clear space in which you can think.", author: "Unknown" },
+  { text: "Sometimes, to stay alive, you have to kill the version of yourself that's trying to do everything.", author: "Unknown" },
+  { text: "Not all those who wander are lost.", author: "J. R. R. Tolkien" },
+  { text: "The most precious gift we can offer others is our presence. When mindfulness embraces those we love, they will bloom like flowers.", author: "Thich Nhat Hanh" },
+  { text: "If you're overwhelmed, start small. Take a breath. Drink water. The rest will follow.", author: "Unknown" },
+  { text: "Don't let your mind bully your body into believing it must carry the burden of its worries.", author: "Astrid Alauda" },
+  { text: "An empty lantern provides no light. Rest is not a waste of time. It is fuel for the soul.", author: "Unknown" },
+  { text: "Every breath we take, every step we make, is filled with peace and joy.", author: "Thich Nhat Hanh" },
+  { text: "You are allowed to be both a masterpiece and a work in progress, simultaneously.", author: "Sophia Bush" },
+  { text: "The act of resting is the act of reclaiming yourself.", author: "Unknown" },
+  { text: "Turn your face to the sun and the shadows fall behind you.", author: "Maori Proverb" },
+  { text: "This moment is the only moment that exists. Be here now.", author: "Ram Dass" },
+  { text: "It does not matter how slowly you go as long as you do not stop.", author: "Confucius" },
+  { text: "You are not your productivity. Your worth is not measured by what you produce.", author: "Unknown" },
+  { text: "The magic you are looking for is in the work you are avoiding.", author: "Unknown" },
+  { text: "Nothing can dim the light that shines from within.", author: "Maya Angelou" },
+  { text: "The body achieves what the mind believes.", author: "Napoleon Hill" },
+  { text: "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", author: "Aristotle" },
+  { text: "Courage doesn't always roar. Sometimes courage is the little voice at the end of the day that says, 'I'll try again tomorrow.'", author: "Mary Anne Radmacher" },
+  { text: "To keep a lamp burning, we have to keep putting oil in it.", author: "Mother Teresa" },
+  { text: "Nearly every great discovery came from someone who was taking a break from what they were supposed to be doing.", author: "Unknown" },
+  { text: "Life moves pretty fast. If you don't stop and look around once in a while, you could miss it.", author: "Ferris Bueller" },
+  { text: "If you want to go fast, go alone. If you want to go far, go together.", author: "African Proverb" },
+  { text: "In the middle of the ordinary, there is always something extraordinary.", author: "Unknown" },
+  { text: "You have been criticizing yourself for years, and it hasn't worked. Try approving of yourself and see what happens.", author: "Louise Hay" },
+];
+
+const stretchIdeas = [
+  "Look away from screen, focus 20 ft away for 20s",
+  "Roll your shoulders back 5 times",
+  "Stand up, reach arms to the ceiling, side bend",
+  "Clasp hands behind back, open chest, hold 10s",
+  "Neck tilt: ear to shoulder, hold 10s each side",
+  "Wrist stretch: palm up, pull fingers back gently",
+  "Seated spinal twist: look over shoulder, hold 8s each side",
+  "March in place for 15 seconds",
+  "Shake out your hands and arms for 10s",
+  "Take 3 deep belly breaths, exhale slowly",
+];
+
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
@@ -258,7 +375,7 @@ type ThemePalette =
   | "claude"
   | "cute";
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
-type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
+type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats" | "fossil";
 type DashboardWidgetWidth = "full" | "half" | "third";
 
 type DashboardWidgetLayout = {
@@ -346,6 +463,7 @@ const dashboardWidgetIds: DashboardWidgetId[] = [
   "examRunway",
   "garden",
   "stats",
+  "fossil",
 ];
 
 const defaultCustomDashboardLayout: DashboardWidgetLayout[] = [
@@ -356,6 +474,7 @@ const defaultCustomDashboardLayout: DashboardWidgetLayout[] = [
   { id: "examRunway", width: "half" },
   { id: "garden", width: "third" },
   { id: "stats", width: "third" },
+  { id: "fossil", width: "full" },
 ];
 
 function isDashboardLayout(value: string | null): value is DashboardLayout {
@@ -915,7 +1034,7 @@ function App() {
   });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
-  const [examFullscreen, setExamFullscreen] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
@@ -1129,10 +1248,10 @@ function App() {
   }, [state.timer.running]);
 
   useEffect(() => {
-    if (state.timer.phase !== "exam" || !state.timer.running) {
-      setExamFullscreen(false);
+    if (state.timer.phase === "idle") {
+      setFullscreen(false);
     }
-  }, [state.timer.phase, state.timer.running]);
+  }, [state.timer.phase]);
 
   useEffect(() => {
     if (
@@ -1329,7 +1448,46 @@ function App() {
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const maxWeeklyMinutes = Math.max(30, ...weeklyActivity.map((entry) => entry.minutes));
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
-  const studyBreakUnlocked = Math.min(5, Math.floor(getTodayMinutes(state) / 45));
+  const studyBreakTokens = Math.min(5, Math.floor(getTodayMinutes(state) / 45));
+  const todayStr = isoDate();
+  const effectiveUnlocked = state.unlockedGamesDate === todayStr ? state.unlockedGames : [];
+  const canUnlockMore = effectiveUnlocked.length < studyBreakTokens;
+  const minsUntilNext = studyBreakTokens < 5 ? Math.max(1, 45 - (getTodayMinutes(state) % 45)) : 0;
+  const xpProgress = getTodayMinutes(state) % 45;
+  const xpPercent = (xpProgress / 45) * 100;
+  const effectivePlayed: PlayedBreak[] = state.playedBreaksDate === todayStr ? state.playedBreaks : [];
+  const todayPlayedNames = [...new Set(effectivePlayed.map(p => p.name))];
+  const waterCount = state.waterDate === todayStr ? state.waterGlasses : 0;
+  const badgeFullHouse = effectiveUnlocked.length === 5;
+  const badgeFirstBreak = state.totalUnlocks >= 1;
+  const badgeOnFire = state.unlockStreak >= 3;
+  const badgeEarlyBird = effectivePlayed.some(p => new Date(p.playedAt).getHours() < 9);
+  const badgeNightOwl = effectivePlayed.some(p => new Date(p.playedAt).getHours() >= 22);
+  const badgeSpeedrunner = state.speedrunnerToday;
+  const badgeExplorer = state.playedGamesAllTime.length >= 5;
+  const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === 5;
+  const badgeVeteran = state.totalUnlocks >= 10;
+  const badgeRockMaster = state.petRockPats >= 1000;
+  const rockStage = state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
+    : state.petRockPats >= 500 ? { plant: "\u{1F451}", label: "Royal Rock" }
+    : state.petRockPats >= 250 ? { plant: "\u{1F98B}", label: "Blooming Rock" }
+    : state.petRockPats >= 100 ? { plant: "\u{1F333}", label: "Flourished Rock" }
+    : state.petRockPats >= 50 ? { plant: "\u{1F33F}", label: "Growing Rock" }
+    : state.petRockPats >= 10 ? { plant: "\u{1F331}", label: "Sprouting Rock" }
+    : { plant: "", label: "Pet Rock" };
+  const streakEmoji = state.unlockStreak >= 7 ? "\u{1F525}\u{1F525}\u{1F525}" : state.unlockStreak >= 3 ? "\u{1F525}\u{1F525}" : state.unlockStreak >= 1 ? "\u{1F525}" : "";
+  const badges = [
+    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse },
+    { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak },
+    { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire },
+    { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird },
+    { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl },
+    { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner },
+    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer },
+    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist },
+    { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran },
+    { id: "rock-master", icon: "\u{1F31F}", name: "Rock Master", earned: badgeRockMaster },
+  ];
   const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
@@ -1450,6 +1608,60 @@ function App() {
     const maxMinutes = Math.max(60, ...courses.map((c) => c.minutes));
     return { stage, courses, maxMinutes };
   }, [state, weeklyTotalMinutes]);
+
+  const totalAllTimeMinutes = state.sessions.reduce((s, se) => s + se.minutes, 0);
+  const sessionDays = new Set(state.sessions.map(s => isoDate(new Date(s.endedAt))));
+  const firstSessionDate = state.sessions.length
+    ? [...state.sessions].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())[0].startedAt
+    : null;
+
+  const fossilStrata = useMemo(() => {
+    const dayMap = new Map<string, typeof state.sessions>();
+    for (const session of state.sessions) {
+      const key = isoDate(new Date(session.endedAt));
+      if (!dayMap.has(key)) dayMap.set(key, []);
+      dayMap.get(key)!.push(session);
+    }
+
+    const DAYS = 60;
+    const days: { date: string; layers: { height: number; color: string; label: string; minutes: number }[]; totalMinutes: number }[] = [];
+    const today = isoDate();
+
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = isoDate(d);
+      const sessions = dayMap.get(key) ?? [];
+      const totalMin = sessions.reduce((s, se) => s + se.minutes, 0);
+      const maxMin = Math.max(...sessions.map(s => s.minutes), 1);
+      const maxLayerH = 72;
+      const layers = sessions.map(session => ({
+        height: Math.max(3, (session.minutes / maxMin) * maxLayerH),
+        color: courseLookup.get(session.courseId ?? "")?.color ?? "var(--ink-4)",
+        label: session.courseId ? (courseLookup.get(session.courseId)?.name ?? "Unknown") : "General",
+        minutes: session.minutes,
+      }));
+      days.push({ date: key, layers, totalMinutes: totalMin });
+    }
+
+    let cumulative = totalAllTimeMinutes;
+    for (const day of days) {
+      cumulative -= day.totalMinutes;
+    }
+    const milestones: { emoji: string; dayIndex: number; label: string }[] = [];
+    const icons = ["\u{1FAB8}", "\u{1F9B4}", "\u{1F995}", "\u{1F41A}", "\u{1F48E}"];
+    const thresholds = [600, 3000, 6000, 30000, 60000];
+    let mi = 0;
+    for (const [i, day] of days.entries()) {
+      cumulative += day.totalMinutes;
+      while (mi < thresholds.length && cumulative >= thresholds[mi]) {
+        milestones.push({ emoji: icons[mi] ?? "\u{2B50}", dayIndex: i, label: `${thresholds[mi] / 60}h total` });
+        mi++;
+      }
+    }
+
+    return { days, milestones, today };
+  }, [state.sessions, courseLookup, totalAllTimeMinutes]);
 
   function setActiveTab(activeTab: TabKey) {
     setState((current) => ({ ...current, activeTab }));
@@ -2017,6 +2229,78 @@ function App() {
     setState((current) => ({ ...current, exams: current.exams.filter((exam) => exam.id !== examId) }));
   }
 
+  function unlockGame(name: string) {
+    const t = isoDate();
+    setState((current) => {
+      const freshUnlocked = current.unlockedGamesDate === t ? current.unlockedGames : [];
+      const isFirstUnlockToday = freshUnlocked.length === 0;
+      const todayMin = getTodayMinutes(current);
+
+      const newStreak = (() => {
+        if (!current.lastUnlockDate) return 1;
+        const prev = new Date(current.lastUnlockDate);
+        const today = new Date(t + "T00:00:00");
+        const diff = (today.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24);
+        if (diff === 1) return current.unlockStreak + 1;
+        if (diff === 0) return current.unlockStreak;
+        return 1;
+      })();
+
+      return {
+        ...current,
+        unlockedGamesDate: t,
+        unlockedGames: [...freshUnlocked, name],
+        totalUnlocks: current.totalUnlocks + 1,
+        speedrunnerToday: current.speedrunnerToday || (isFirstUnlockToday && todayMin < 45),
+        unlockStreak: newStreak,
+        lastUnlockDate: t,
+      };
+    });
+  }
+
+  function logPlayedBreak(name: string) {
+    const t = isoDate();
+    setState(s => ({
+      ...s,
+      playedBreaksDate: t,
+      playedBreaks: [
+        ...(s.playedBreaksDate === t ? s.playedBreaks : []),
+        { name, playedAt: new Date().toISOString() },
+      ],
+      playedGamesAllTime: s.playedGamesAllTime.includes(name)
+        ? s.playedGamesAllTime
+        : [...s.playedGamesAllTime, name],
+    }));
+  }
+
+  function addWater() {
+    const t = isoDate();
+    setState(s => ({
+      ...s,
+      waterDate: t,
+      waterGlasses: (s.waterDate === t ? s.waterGlasses : 0) + 1,
+    }));
+  }
+
+  const [rockBounce, setRockBounce] = useState(false);
+  const [rockCelebrating, setRockCelebrating] = useState(false);
+
+  function patRock() {
+    setState(s => {
+      const next = s.petRockPats + 1;
+      if (next === 1000) setRockCelebrating(true);
+      return { ...s, petRockPats: next };
+    });
+    setRockBounce(true);
+    setTimeout(() => setRockBounce(false), 350);
+  }
+
+  const [celebrating, setCelebrating] = useState<string | null>(null);
+  const [quoteIndex] = useState(() => Math.floor(Math.random() * breakQuotes.length));
+  const quote = breakQuotes[quoteIndex];
+  const [stretchIndex, setStretchIndex] = useState(() => Math.floor(Math.random() * stretchIdeas.length));
+  const stretch = stretchIdeas[stretchIndex];
+
   function addCalendarEntry(task: Task, date: string) {
     if (task.dueDate && date > task.dueDate) {
       setMessage(`"${task.title}" cannot be scheduled after ${formatDate(task.dueDate)}.`);
@@ -2187,7 +2471,7 @@ function App() {
       },
     }));
 
-    if (isExam) setExamFullscreen(true);
+    setFullscreen(true);
   }
 
   function pauseTimer() {
@@ -2823,6 +3107,55 @@ function App() {
     );
   }
 
+  function renderFossilCard(heightClass = "") {
+    const { days, milestones, today } = fossilStrata;
+    const hasData = days.some(d => d.totalMinutes > 0);
+
+    return (
+      <article className={`panel-card design-card fossil-card ${heightClass}`}>
+        <div className="section-head compact-headline">
+          <div>
+            <p className="eyebrow">Focus Fossil</p>
+            <h3>Your study strata</h3>
+          </div>
+          <span className="section-note">{formatMinutes(totalAllTimeMinutes)} total</span>
+        </div>
+        <div className="fossil-scroll" ref={el => { if (el) setTimeout(() => el.scrollLeft = el.scrollWidth, 0); }}>
+          {hasData ? (
+            <div className="fossil-strata">
+              {days.map((day, i) => (
+                <div key={day.date} className={`fossil-day ${day.date === today ? "today" : ""}`}>
+                  <div className="fossil-column" title={`${day.date}: ${formatMinutes(day.totalMinutes)}`}>
+                    {day.layers.length > 0 ? (
+                      day.layers.map((layer, li) => (
+                        <div key={li} className="fossil-layer"
+                          style={{ height: layer.height, background: layer.color }}
+                          title={`${layer.label} \u00B7 ${formatMinutes(layer.minutes)}`} />
+                      ))
+                    ) : (
+                      <div className="fossil-gap" />
+                    )}
+                  </div>
+                  {milestones.filter(m => m.dayIndex === i).map(m => (
+                    <span key={m.label} className="fossil-milestone" title={m.label}>{m.emoji}</span>
+                  ))}
+                  {day.date === today ? <span className="fossil-today-marker">Today</span> : null}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="fossil-empty">
+              <p className="empty-copy">No sessions yet. Start studying to build your fossil record.</p>
+            </div>
+          )}
+        </div>
+        <div className="fossil-legend">
+          <span className="mono">{formatMinutes(totalAllTimeMinutes)} across {sessionDays.size} day{sessionDays.size !== 1 ? "s" : ""}</span>
+        </div>
+      </article>
+    );
+  }
+
   function renderGardenCard(heightClass = "") {
     const gardenStageNames = ["Dormant", "Sprouting", "Growing", "Leafy", "Blooming", "Flourishing"];
     const { stage, courses, maxMinutes } = gardenCoursePlants;
@@ -3167,6 +3500,8 @@ function App() {
         return renderGardenCard("custom-garden");
       case "stats":
         return renderStatsWidget();
+      case "fossil":
+        return renderFossilCard();
     }
   }
 
@@ -3620,7 +3955,7 @@ function App() {
             </div>
           </div>
 
-          {dashboardLayout === "cockpit" ? (
+          {dashboardLayout === "cockpit" ? (<>
             <div className="dash-3col">
               <div className="design-stack">
                 {renderTodayCard()}
@@ -3635,9 +3970,10 @@ function App() {
                 {renderExamRunway()}
               </div>
             </div>
-          ) : null}
+            {renderFossilCard()}
+          </>) : null}
 
-          {dashboardLayout === "focus" ? (
+          {dashboardLayout === "focus" ? (<>
             <div className="dash-focus-claude">
               {renderTodayCard()}
               {renderGardenCard("hero-garden")}
@@ -3647,7 +3983,8 @@ function App() {
                 {renderExamRunway()}
               </div>
             </div>
-          ) : null}
+            {renderFossilCard()}
+          </>) : null}
 
           {dashboardLayout === "analyst" ? (
             <div className="design-stack">
@@ -3671,6 +4008,12 @@ function App() {
           ) : null}
 
           {dashboardLayout === "custom" ? renderCustomDashboard() : null}
+
+          {state.sessions.length > 0 ? (
+            <p className="long-now">{formatMinutes(totalAllTimeMinutes)} across {sessionDays.size} day{sessionDays.size !== 1 ? "s" : ""} since {formatDate(firstSessionDate!)}</p>
+          ) : (
+            <p className="long-now dim">Your timeline begins when you complete your first session.</p>
+          )}
         </section>
       ) : null}
 
@@ -4470,7 +4813,7 @@ function App() {
                 </div>
               ) : null}
 
-              <div className="timer-face spacious-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg` } as CSSProperties}>
+              <div className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
                 <div className="timer-phase-row">
                   <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
@@ -4484,16 +4827,16 @@ function App() {
                 <button
                   type="button"
                   className="timer-primary-action"
-                  onClick={state.timer.phase === "stopwatch" && state.timer.running ? completeSessionManually : state.timer.phase === "idle" ? startTimer : pauseTimer}
+                  onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}
                 >
-                  <span>{state.timer.phase === "stopwatch" && state.timer.running ? "■" : "▷"}</span>
-                  {state.timer.phase === "stopwatch" ? (state.timer.running ? "Stop" : "Resume") : state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "Start tracking" : "Start") : state.timer.running ? "Pause" : "Resume"}
+                  <span>{"\u25B7"}</span>
+                  {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "Start tracking" : "Start") : state.timer.running ? "Pause" : "Resume"}
                 </button>
                 <button type="button" className="timer-save-action" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
                   ▣ Save
                 </button>
-                {state.timer.phase === "exam" && state.timer.running ? (
-                  <button type="button" className="timer-maximise-action" onClick={() => setExamFullscreen(true)} title="Maximise">
+                {state.timer.running && state.timer.phase !== "idle" ? (
+                  <button type="button" className="timer-maximise-action" onClick={() => setFullscreen(true)} title="Maximise">
                     ⛶
                   </button>
                 ) : null}
@@ -5150,20 +5493,32 @@ function App() {
                 <p className="eyebrow">Recharge</p>
                 <h2>Break Room</h2>
               </div>
-              <span className="section-note">{studyBreakUnlocked} of 5 breaks available</span>
+              <span className="section-note">{effectiveUnlocked.length} of 5 breaks available</span>
             </div>
 
+            <div className="break-xp-bar-wrap">
+              <div className="break-xp-bar">
+                <div className="break-xp-fill" style={{ width: `${xpPercent}%` }} />
+                <div className="break-xp-tick" style={{ left: "25%" }} />
+                <div className="break-xp-tick" style={{ left: "50%" }} />
+                <div className="break-xp-tick" style={{ left: "75%" }} />
+              </div>
+              <span className="break-xp-label">
+                XP: {xpProgress} / 45 — ~{minsUntilNext} min
+              </span>
+              {streakEmoji ? <span className="break-streak-badge">{streakEmoji} {state.unlockStreak}-day streak</span> : null}
+            </div>
+
+            <p className="break-quote">{"\u201C"}{quote.text}{"\u201D"} — {quote.author}</p>
+
             <div className="break-card-grid">
-              {studyBreakGames.map((game, index) => {
-                const unlocked = index < studyBreakUnlocked;
+              {studyBreakGames.map((game) => {
+                const unlocked = effectiveUnlocked.includes(game.name);
                 return (
-                  <a
+                  <div
                     key={game.name}
-                    href={unlocked ? game.url : undefined}
-                    target={unlocked ? "_blank" : undefined}
-                    rel={unlocked ? "noreferrer" : undefined}
-                    className={`break-game-card ${unlocked ? "unlocked" : "locked"}`}
-                    onClick={unlocked ? undefined : (event) => event.preventDefault()}
+                    className={`break-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
+                    onAnimationEnd={() => setCelebrating(null)}
                   >
                     <div className="break-game-main">
                       <strong>{game.name}</strong>
@@ -5171,34 +5526,77 @@ function App() {
                     </div>
                     <div className="break-game-side">
                       {unlocked ? (
-                        <span className="design-chip">Play</span>
+                        <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" onClick={() => logPlayedBreak(game.name)}>
+                          Play
+                        </a>
+                      ) : canUnlockMore ? (
+                        <button type="button" className="break-unlock-btn" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>
+                          Unlock
+                        </button>
                       ) : (
-                        <span className="break-lock">
-                          45 min
-                        </span>
+                        <span className="break-lock">~{minsUntilNext} min</span>
                       )}
                     </div>
-                  </a>
+                  </div>
                 );
               })}
+            </div>
+
+            <div className="break-stats-row">
+              <span className="break-stats-chip">{'\u{1F513}'} Unlocked {effectiveUnlocked.length}/5</span>
+              <span className="break-stats-chip">{'\u25B6'} Played {todayPlayedNames.length} today</span>
+              {badgeFullHouse ? <span className="break-stats-chip collection">{'\u{1F3C6}'} Full house!</span> : null}
+            </div>
+
+            <div className="break-water-row">
+              <button type="button" className="break-water-btn" onClick={addWater}>{'\u{1F4A7}'}</button>
+              <span className="break-water-count">{waterCount} glass{waterCount !== 1 ? "es" : ""} today</span>
+              <button type="button" className="break-water-btn plus" onClick={addWater}>+</button>
+            </div>
+
+            <div className="break-badge-heading">Achievements</div>
+
+            <div className="break-badge-row">
+              {badges.map(b => (
+                <div key={b.id} className={`break-badge ${b.earned ? "earned" : ""}`}>
+                  <span>{b.icon}</span>
+                  <span>{b.name}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="break-stretch-card">
+              <span className="stretch-icon">{'\u{1F9D8}'}</span>
+              <span className="stretch-text">{stretch}</span>
+              <button type="button" className="stretch-refresh" onClick={() => setStretchIndex(i => (i + 1) % stretchIdeas.length)}>
+                {'\u21BB'}
+              </button>
+            </div>
+
+            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") patRock(); }}>
+              <div className="rock-area">
+                <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
+                {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}
+              </div>
+              <span className="rock-pats">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
             </div>
           </article>
         </section>
       ) : null}
 
-      {examFullscreen && state.timer.phase === "exam" ? (
+      {fullscreen && state.timer.phase !== "idle" ? (
         <div className="exam-fullscreen-overlay">
           <button
             type="button"
             className="exam-fullscreen-exit"
-            onClick={() => setExamFullscreen(false)}
+            onClick={() => setFullscreen(false)}
           >
             Minimize
           </button>
 
-          <div className="exam-fullscreen-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg` } as CSSProperties}>
+          <div className={`exam-fullscreen-face ${state.timer.running ? "running" : "paused"}`} style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
             <div className="timer-phase-row">
-              <span className="timer-phase-pill">Exam</span>
+              <span className="timer-phase-pill">{state.timer.phase === "exam" ? "Exam" : state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : "Study"}</span>
               <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
               <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
             </div>
