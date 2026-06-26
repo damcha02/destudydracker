@@ -114,6 +114,14 @@ const focusPresets = [
   { label: "∞ Endless", study: 0, breakMinutes: 0, mode: "endless" as const },
 ];
 
+const studyBreakGames = [
+  { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
+  { name: "Travle", url: "https://travle.earth", desc: "Travel from one country to another" },
+  { name: "Flaggle", url: "https://flaggle.net", desc: "Identify the flag one clue at a time" },
+  { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
+  { name: "Geodle", url: "https://geodle.me", desc: "Guess the location from a photo" },
+];
+
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
@@ -636,6 +644,7 @@ function App() {
   const [addingExamSemesterId, setAddingExamSemesterId] = useState<string | null>(null);
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
+  const [examFullscreen, setExamFullscreen] = useState(false);
   const [calendarView, setCalendarView] = useState<CalendarView>("month");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
@@ -775,6 +784,12 @@ function App() {
   }, [state.timer.running]);
 
   useEffect(() => {
+    if (state.timer.phase !== "exam" || !state.timer.running) {
+      setExamFullscreen(false);
+    }
+  }, [state.timer.phase, state.timer.running]);
+
+  useEffect(() => {
     if (
       selectedTaskId === TOTAL_WORKLOAD_ID ||
       (selectedTaskId && state.tasks.some((task) => task.id === selectedTaskId))
@@ -882,6 +897,7 @@ function App() {
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const maxWeeklyMinutes = Math.max(30, ...weeklyActivity.map((entry) => entry.minutes));
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
+  const studyBreakUnlocked = Math.min(5, Math.floor(getTodayMinutes(state) / 45));
   const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
@@ -1399,6 +1415,8 @@ function App() {
         remainingSeconds: totalSeconds,
       },
     }));
+
+    if (isExam) setExamFullscreen(true);
   }
 
   function pauseTimer() {
@@ -2534,6 +2552,7 @@ function App() {
           ["planner", "Planner"],
           ["timer", "Timer"],
           ["vault", "Vault"],
+          ["break", "Study break"],
         ] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -2546,6 +2565,7 @@ function App() {
               {key === "planner" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M7 14h5M7 17h8" /></>}
               {key === "timer" && <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M12 5V3M9 3h6" /></>}
               {key === "vault" && <><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z" /><path d="M9 12l2 2 4-4" /></>}
+              {key === "break" && <><path d="M6 12h4M14 12h4M8 10V8M16 10V8" /><rect x="2" y="7" width="20" height="12" rx="3" /></>}
             </svg>
             {label}
           </button>
@@ -3344,6 +3364,11 @@ function App() {
                 <button type="button" className="timer-save-action" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
                   ▣ Save
                 </button>
+                {state.timer.phase === "exam" && state.timer.running ? (
+                  <button type="button" className="timer-maximise-action" onClick={() => setExamFullscreen(true)} title="Maximise">
+                    ⛶
+                  </button>
+                ) : null}
                 <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
                   ↻
                 </button>
@@ -3718,6 +3743,93 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {state.activeTab === "break" ? (
+        <section className="break-grid">
+          <article className="panel-card break-main-card">
+            <div className="section-head">
+              <div>
+                <p className="eyebrow">Recharge</p>
+                <h2>Study Break</h2>
+              </div>
+              <span className="section-note">{studyBreakUnlocked} of 5 breaks available</span>
+            </div>
+
+            <div className="break-card-grid">
+              {studyBreakGames.map((game, index) => {
+                const unlocked = index < studyBreakUnlocked;
+                return (
+                  <a
+                    key={game.name}
+                    href={unlocked ? game.url : undefined}
+                    target={unlocked ? "_blank" : undefined}
+                    rel={unlocked ? "noreferrer" : undefined}
+                    className={`break-game-card ${unlocked ? "unlocked" : "locked"}`}
+                    onClick={unlocked ? undefined : (event) => event.preventDefault()}
+                  >
+                    <div className="break-game-main">
+                      <strong>{game.name}</strong>
+                      <span>{game.desc}</span>
+                    </div>
+                    <div className="break-game-side">
+                      {unlocked ? (
+                        <span className="design-chip">Play</span>
+                      ) : (
+                        <span className="break-lock">
+                          45 min
+                        </span>
+                      )}
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          </article>
+        </section>
+      ) : null}
+
+      {examFullscreen && state.timer.phase === "exam" ? (
+        <div className="exam-fullscreen-overlay">
+          <button
+            type="button"
+            className="exam-fullscreen-exit"
+            onClick={() => setExamFullscreen(false)}
+          >
+            Minimize
+          </button>
+
+          <div className="exam-fullscreen-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg` } as CSSProperties}>
+            <div className="timer-phase-row">
+              <span className="timer-phase-pill">Exam</span>
+              <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
+              <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
+            </div>
+            <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+            <p>{state.timer.running ? "In session" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
+          </div>
+
+          <div className="exam-fullscreen-actions">
+            <button
+              type="button"
+              className="timer-primary-action"
+              onClick={state.timer.running ? pauseTimer : startTimer}
+            >
+              <span>{state.timer.running ? "▷" : "▶"}</span>
+              {state.timer.running ? "Pause" : "Resume"}
+            </button>
+            <button
+              type="button"
+              className="timer-save-action"
+              onClick={completeSessionManually}
+            >
+              ▣ Save
+            </button>
+            <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
+              ↻
+            </button>
+          </div>
+        </div>
       ) : null}
     </div>
   );

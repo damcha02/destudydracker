@@ -2,7 +2,7 @@ export type Priority = "low" | "medium" | "high";
 export type SessionKind = "study" | "break" | "exam";
 export type TimerPhase = "idle" | "study" | "break" | "exam" | "stopwatch";
 export type TimerMode = "focus" | "exam" | "endless";
-export type TabKey = "dashboard" | "planner" | "timer" | "vault";
+export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "break";
 
 export interface Semester {
   id: string;
