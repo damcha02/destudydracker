@@ -3550,6 +3550,7 @@ function App() {
       examRunway: "Exam runway",
       garden: "Knowledge garden",
       stats: "Stats",
+      fossil: "Focus fossil",
     };
 
     return (
@@ -5608,7 +5609,7 @@ function App() {
             <button
               type="button"
               className="timer-primary-action"
-              onClick={state.timer.running ? pauseTimer : startTimer}
+              onClick={pauseTimer}
             >
               <span>{state.timer.running ? "▷" : "▶"}</span>
               {state.timer.running ? "Pause" : "Resume"}

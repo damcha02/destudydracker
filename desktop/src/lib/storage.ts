@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Semester, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 
