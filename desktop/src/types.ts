@@ -105,6 +105,11 @@ export interface TimerState {
   presetLabel: string;
 }
 
+export interface PlayedBreak {
+  name: string;
+  playedAt: string;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -116,4 +121,16 @@ export interface AppState {
   settings: Settings;
   timer: TimerState;
   activeTab: TabKey;
+  unlockedGames: string[];
+  unlockedGamesDate: string;
+  playedBreaks: PlayedBreak[];
+  playedBreaksDate: string;
+  totalUnlocks: number;
+  unlockStreak: number;
+  lastUnlockDate: string;
+  speedrunnerToday: boolean;
+  playedGamesAllTime: string[];
+  waterGlasses: number;
+  waterDate: string;
+  petRockPats: number;
 }

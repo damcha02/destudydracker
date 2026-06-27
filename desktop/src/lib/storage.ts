@@ -52,6 +52,18 @@ export const defaultState: AppState = {
   },
   timer: defaultTimer,
   activeTab: "dashboard",
+  unlockedGames: [],
+  unlockedGamesDate: "",
+  playedBreaks: [],
+  playedBreaksDate: "",
+  totalUnlocks: 0,
+  unlockStreak: 0,
+  lastUnlockDate: "",
+  speedrunnerToday: false,
+  playedGamesAllTime: [],
+  waterGlasses: 0,
+  waterDate: "",
+  petRockPats: 0,
 };
 
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
