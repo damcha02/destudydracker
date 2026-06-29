@@ -2335,6 +2335,86 @@ button:hover:not(:disabled) {
   font-weight: 700;
 }
 
+.update-notice {
+  position: fixed;
+  top: 86px;
+  right: 24px;
+  z-index: 85;
+  width: min(360px, calc(100vw - 32px));
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 16px 15px 18px;
+  border: 1px solid var(--accent-line);
+  border-radius: 22px;
+  background: linear-gradient(135deg, var(--surface-raised), var(--accent-soft));
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+  animation: update-notice-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.update-notice strong,
+.update-notice span {
+  display: block;
+}
+
+.update-notice strong {
+  margin-bottom: 3px;
+}
+
+.update-notice span {
+  color: var(--ink-3);
+  font-size: 0.92rem;
+}
+
+.update-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.update-notice-close {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-pill);
+  color: var(--ink-4) !important;
+  text-decoration: none !important;
+}
+
+.update-notice-close:hover {
+  background: var(--surface-2);
+  color: var(--ink) !important;
+}
+
+@keyframes update-notice-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 28px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 620px) {
+  .update-notice {
+    top: 76px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+}
+
 .panel-card,
 .semester-card,
 .course-sheet,

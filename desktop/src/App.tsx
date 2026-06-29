@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -347,6 +347,7 @@ const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
+const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
 const DEV_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:dev";
@@ -413,6 +414,11 @@ type LinuxUpdateDownload = {
   filePath: string;
   installCommand: string;
   message: string;
+};
+
+type CheckForUpdatesOptions = {
+  silent?: boolean;
+  automatic?: boolean;
 };
 
 type CalendarDay = {
@@ -1139,6 +1145,7 @@ function App() {
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
   const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
+  const [updateNoticeVisible, setUpdateNoticeVisible] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
@@ -1798,6 +1805,11 @@ function App() {
     setDeleteConfirmOpen(false);
   }
 
+  function openUpdateSettingsFromNotice() {
+    setUpdateNoticeVisible(false);
+    openMenuPanel("settings");
+  }
+
   function savePersonalSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const userName = personalNameDraft.trim();
@@ -1806,52 +1818,61 @@ function App() {
     closeMenuPanel();
   }
 
-  async function checkForUpdates() {
+  async function checkForUpdates(options: CheckForUpdatesOptions = {}) {
+    const { silent = false, automatic = false } = options;
+
     if (!isTauriApp()) {
-      setUpdateInfo({
-        status: "idle",
-        releaseUrl: RELEASES_PAGE_URL,
-        message: "Automatic updates are only available in the installed desktop app.",
-      });
+      if (!silent) {
+        setUpdateInfo({
+          status: "idle",
+          releaseUrl: RELEASES_PAGE_URL,
+          message: "Automatic updates are only available in the installed desktop app.",
+        });
+      }
       return;
     }
 
     if (updateInstallSupport.packageHint === "development") {
       pendingUpdateRef.current = null;
-      setUpdateInfo({
-        status: "idle",
-        releaseUrl: "https://github.com/damcha02/destudydracker",
-        message: updateInstallSupport.message,
-      });
+      if (!silent) {
+        setUpdateInfo({
+          status: "idle",
+          releaseUrl: "https://github.com/damcha02/destudydracker",
+          message: updateInstallSupport.message,
+        });
+      }
       return;
     }
 
     if (updateInstallSupport.packageHint === "source-build") {
       pendingUpdateRef.current = null;
-      setUpdateInfo({
-        status: "available",
-        releaseUrl: "https://github.com/damcha02/destudydracker",
-        message: updateInstallSupport.message,
-      });
+      if (!silent) {
+        setUpdateInfo({
+          status: "available",
+          releaseUrl: "https://github.com/damcha02/destudydracker",
+          message: updateInstallSupport.message,
+        });
+      }
       return;
     }
 
-    setUpdateChecking(true);
+    if (!silent) setUpdateChecking(true);
     pendingUpdateRef.current = null;
-    setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
+    if (!silent) setUpdateInfo({ status: "idle", releaseUrl: RELEASES_PAGE_URL, message: "Checking for updates..." });
 
     try {
       const update = await check({ timeout: 30000 });
 
       if (update) {
         pendingUpdateRef.current = update;
+        if (automatic) setUpdateNoticeVisible(true);
         setUpdateInfo({
           status: "available",
           latestVersion: update.version,
           releaseUrl: RELEASES_PAGE_URL,
           message: updateInstallSupport.canAutoInstall ? `Version ${update.version} is available and can be installed automatically.` : `Version ${update.version} is available. ${updateInstallSupport.message}`,
         });
-      } else {
+      } else if (!silent) {
         setUpdateInfo({
           status: "current",
           releaseUrl: RELEASES_PAGE_URL,
@@ -1859,15 +1880,33 @@ function App() {
         });
       }
     } catch (error) {
-      setUpdateInfo({
-        status: "error",
-        releaseUrl: RELEASES_PAGE_URL,
-        message: `${getErrorMessage(error, "Could not check for updates. Check your internet connection.")} You can still download installers from the release page.`,
-      });
+      if (silent) {
+        console.warn("Automatic update check failed.", error);
+      } else {
+        setUpdateInfo({
+          status: "error",
+          releaseUrl: RELEASES_PAGE_URL,
+          message: `${getErrorMessage(error, "Could not check for updates. Check your internet connection.")} You can still download installers from the release page.`,
+        });
+      }
     } finally {
-      setUpdateChecking(false);
+      if (!silent) setUpdateChecking(false);
     }
   }
+
+  const runAutomaticUpdateCheck = useEffectEvent(() => {
+    void checkForUpdates({ silent: true, automatic: true });
+  });
+
+  useEffect(() => {
+    if (!isTauriApp()) return undefined;
+    if (updateInstallSupport.packageHint === "unknown" && updateInstallSupport.runtimeChannel === "unknown") return undefined;
+    if (updateInstallSupport.packageHint === "development" || updateInstallSupport.packageHint === "source-build") return undefined;
+
+    runAutomaticUpdateCheck();
+    const interval = window.setInterval(runAutomaticUpdateCheck, AUTO_UPDATE_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [updateInstallSupport.packageHint, updateInstallSupport.runtimeChannel]);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -3235,6 +3274,13 @@ function App() {
     const columnMaxHeight = maxHeight - 5;
     const rangeDensityClass = focusRange === "week" ? "range-week" : focusRange <= 14 ? "range-short" : focusRange <= 30 ? "range-medium" : focusRange === 365 ? "range-year" : "range-long";
     const rangeLabel = focusRange === "week" ? "this week" : focusRange === 365 ? "past year" : `last ${focusRange} days`;
+    const updateFocusTip = (event: MouseEvent<HTMLDivElement>, idx: number) => {
+      const anchor = event.currentTarget.querySelector(".fossil-column")
+        ?? event.currentTarget.querySelector(".fossil-eroded-day")
+        ?? event.currentTarget;
+      const rect = anchor.getBoundingClientRect();
+      setFocusTip({ idx, x: rect.left + rect.width / 2, y: rect.top });
+    };
 
     return (
       <article className={`panel-card design-card design-weekly-card fossil-card ${rangeDensityClass} ${heightClass}`}>
@@ -3284,8 +3330,10 @@ function App() {
                         key={day.date}
                         className={`fossil-day ${day.isToday ? "today" : ""} ${isHovered ? "hovered" : ""} ${hasHover && !isHovered ? "dimmed" : ""}`}
                         onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
-                          const rect = event.currentTarget.getBoundingClientRect();
-                          setFocusTip({ idx: dayIndex, x: rect.left + rect.width / 2, y: rect.top });
+                          updateFocusTip(event, dayIndex);
+                        }}
+                        onMouseMove={(event: MouseEvent<HTMLDivElement>) => {
+                          updateFocusTip(event, dayIndex);
                         }}
                         onMouseLeave={() => setFocusTip(null)}
                       >
@@ -3371,7 +3419,7 @@ function App() {
             </div>
 
             {focusTip && hoveredDay ? (
-              <div className="fossil-tooltip" style={{ left: focusTip.x, top: focusTip.y - 10 }}>
+              <div className="fossil-tooltip" style={{ left: focusTip.x, top: focusTip.y - 8 }}>
                 <div className="fossil-tooltip-head">
                   <strong>{fossilDateLabel(hoveredDay.date)}</strong>
                   {hoveredDay.isToday ? <span>TODAY</span> : null}
@@ -3947,7 +3995,7 @@ function App() {
                   <p>{updateInfo.message}</p>
                 </div>
                 <div className="update-actions">
-                  <button type="button" className="ghost-button" onClick={checkForUpdates} disabled={updateChecking}>
+                  <button type="button" className="ghost-button" onClick={() => void checkForUpdates()} disabled={updateChecking}>
                     {updateChecking && updateInfo.status !== "installing" ? "Checking..." : "Check for updates"}
                   </button>
                   {updateInfo.status === "available" && updateInstallSupport.canAutoInstall ? (
@@ -4147,6 +4195,20 @@ function App() {
       </header>
 
       {renderMenuPanel()}
+
+      {updateNoticeVisible ? (
+        <aside className="update-notice" role="status" aria-live="polite">
+          <div>
+            <strong>New update available.</strong>
+            <span>
+              Go to <button type="button" onClick={openUpdateSettingsFromNotice}>Settings</button> to update the app.
+            </span>
+          </div>
+          <button type="button" className="update-notice-close" onClick={() => setUpdateNoticeVisible(false)} aria-label="Dismiss update notice">
+            X
+          </button>
+        </aside>
+      ) : null}
 
       <nav className="tab-row" aria-label="Primary navigation">
         {([
