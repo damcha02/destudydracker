@@ -79,6 +79,7 @@ export interface VaultExport {
 export interface Settings {
   accent: string;
   userName: string;
+  dailyGoalMinutes: number;
   themeFamily: "normal";
   vaultPath: string | null;
   vaultName: string;

@@ -25,6 +25,7 @@ import {
   getSemesterHealth,
   getSemesterTasks,
   getStreakDays,
+  getTasksCompletedToday,
   getTaskProgress,
   getTodayMinutes,
   getUpcomingExams,
@@ -1116,6 +1117,7 @@ function App() {
   const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
   const [calendarToday, setCalendarToday] = useState(localIsoDate);
   const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
+  const [personalDailyGoalHoursDraft, setPersonalDailyGoalHoursDraft] = useState(() => String((state.settings.dailyGoalMinutes ?? 120) / 60));
   const [vaultNoteDate, setVaultNoteDate] = useState(localIsoDate);
   const [vaultNoteContent, setVaultNoteContent] = useState("");
   const [vaultNotePath, setVaultNotePath] = useState<string | null>(null);
@@ -1797,7 +1799,10 @@ function App() {
     setActiveMenuPanel(panel);
     setMenuOpen(false);
     setDeleteConfirmOpen(false);
-    if (panel === "personal") setPersonalNameDraft(state.settings.userName);
+    if (panel === "personal") {
+      setPersonalNameDraft(state.settings.userName);
+      setPersonalDailyGoalHoursDraft(String((state.settings.dailyGoalMinutes ?? 120) / 60));
+    }
   }
 
   function closeMenuPanel() {
@@ -1813,8 +1818,10 @@ function App() {
   function savePersonalSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const userName = personalNameDraft.trim();
-    setState((current) => ({ ...current, settings: { ...current.settings, userName } }));
-    setMessage(userName ? `Personal greeting saved for ${userName}.` : "Personal greeting cleared.");
+    const dailyGoalHours = Number(personalDailyGoalHoursDraft);
+    const dailyGoalMinutes = clamp(Math.round((Number.isFinite(dailyGoalHours) ? dailyGoalHours : 2) * 60), 15, 1440);
+    setState((current) => ({ ...current, settings: { ...current.settings, userName, dailyGoalMinutes } }));
+    setMessage("Personal settings saved.");
     closeMenuPanel();
   }
 
@@ -3240,18 +3247,26 @@ function App() {
 
   function renderTodayCard() {
     const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+    const todayMinutes = getTodayMinutes(state);
+    const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
+    const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
+    const tasksCompletedToday = getTasksCompletedToday(state);
     return (
       <article className="panel-card design-card design-today-card">
         <div className="design-today-top">
-          <div>
+          <div className="design-today-focus-stat">
             <p className="eyebrow">Today · {todayLabel}</p>
-            <strong className="design-big-stat">{formatMinutes(getTodayMinutes(state))}</strong>
+            <strong className="design-big-stat">{formatMinutes(todayMinutes)}</strong>
             <span>focused</span>
           </div>
           <div className="design-icon-badge">⌖</div>
         </div>
 
         <div className="design-mini-metrics">
+          <div>
+            <span>Tasks done</span>
+            <strong>{tasksCompletedToday}</strong>
+          </div>
           <div>
             <span>Day streak</span>
             <strong>{getStreakDays(state)}</strong>
@@ -3260,6 +3275,17 @@ function App() {
             <span>Momentum</span>
             <strong>{getFocusMomentum(state)}</strong>
           </div>
+        </div>
+
+        <div className="design-goal-meter">
+          <div className="design-goal-head">
+            <span>Daily goal</span>
+            <strong>{formatMinutes(todayMinutes)} / {formatMinutes(dailyGoalMinutes)}</strong>
+          </div>
+          <div className="design-goal-track" aria-label={`Daily goal ${goalProgress}% complete`}>
+            <span style={{ width: `${goalProgress}%` }} />
+          </div>
+          <small>{goalProgress}% complete</small>
         </div>
       </article>
     );
@@ -3979,9 +4005,21 @@ function App() {
                   placeholder="e.g. Damcha"
                 />
               </label>
+              <label className="field">
+                <span>Daily focus goal (hours)</span>
+                <input
+                  type="number"
+                  min="0.25"
+                  max="24"
+                  step="0.25"
+                  value={personalDailyGoalHoursDraft}
+                  onChange={(event) => setPersonalDailyGoalHoursDraft(event.target.value)}
+                  placeholder="2"
+                />
+              </label>
               <div className="inline-form-actions">
-                <button type="submit">Save personal info</button>
-                <button type="button" className="ghost-button" onClick={() => setPersonalNameDraft("")}>Clear</button>
+                <button type="submit">Save personal settings</button>
+                <button type="button" className="ghost-button" onClick={() => setPersonalNameDraft("")}>Clear name</button>
               </div>
             </form>
           ) : null}

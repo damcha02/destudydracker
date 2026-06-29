@@ -2821,6 +2821,12 @@ input[type="color"] {
   display: flex;
   justify-content: space-between;
   gap: 14px;
+  align-items: flex-start;
+}
+
+.design-today-focus-stat {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .design-big-stat {
@@ -2836,6 +2842,7 @@ input[type="color"] {
 
 .design-icon-badge {
   display: grid;
+  flex: 0 0 auto;
   width: 42px;
   height: 42px;
   place-items: center;
@@ -2849,12 +2856,13 @@ input[type="color"] {
 
 .design-mini-metrics {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 
 .design-mini-metrics > div,
 .design-stat-card {
+  min-width: 0;
   border: 1px solid var(--line-soft);
   border-radius: var(--r-md);
   background: var(--surface-inset);
@@ -2875,9 +2883,69 @@ input[type="color"] {
 .design-stat-card strong {
   display: block;
   margin-top: 4px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 1.18rem;
+}
+
+.dashboard-widget.third .design-today-card .design-mini-metrics strong {
+  font-size: 0.62rem;
+}
+
+.dashboard-widget.third .design-today-card .design-mini-metrics > div {
+  padding: 10px 8px;
+}
+
+.dashboard-widget.third .design-today-card .design-mini-metrics span {
+  font-size: 0.54rem;
+}
+
+.design-goal-meter {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--surface-inset) 88%, var(--accent-soft));
+}
+
+.design-goal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.design-goal-head span,
+.design-goal-meter small {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.design-goal-head strong {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+}
+
+.design-goal-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface) 72%, black);
+}
+
+.design-goal-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent) 55%, white));
 }
 
 .design-stat-card strong {
@@ -4110,6 +4178,20 @@ input[type="color"] {
 }
 
 @media (max-width: 620px) {
+  .design-today-top {
+    display: grid;
+    grid-template-columns: 1fr auto;
+  }
+
+  .design-mini-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .design-goal-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .vault-hero,
   .vault-toolbar {
     align-items: flex-start;
@@ -4208,7 +4290,7 @@ input[type="color"] {
 }
 
 .dash-focus-claude .design-mini-metrics {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 22px;
 }
 
@@ -5109,6 +5191,21 @@ input[type="color"] {
   padding: 12px 14px;
   border-radius: var(--r-md);
   background: var(--surface-inset);
+}
+
+.dash-3col .design-today-card .design-mini-metrics > div,
+.dashboard-widget.third .design-today-card .design-mini-metrics > div {
+  padding: 10px 8px;
+}
+
+.dash-3col .design-today-card .design-mini-metrics span,
+.dashboard-widget.third .design-today-card .design-mini-metrics span {
+  font-size: 0.54rem;
+}
+
+.dash-3col .design-today-card .design-mini-metrics strong,
+.dashboard-widget.third .design-today-card .design-mini-metrics strong {
+  font-size: 0.62rem;
 }
 
 .dash-focus-claude .design-icon-badge {

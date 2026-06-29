@@ -248,6 +248,16 @@ export function getTodayMinutes(state: AppState) {
   return getTodaySessions(state).reduce((sum, session) => sum + session.minutes, 0);
 }
 
+export function getTasksCompletedToday(state: AppState) {
+  const today = isoDate();
+  const completedTaskIds = new Set(
+    state.calendarEntries
+      .filter((entry) => entry.completedAt && isoDate(new Date(entry.completedAt)) === today)
+      .map((entry) => entry.taskId),
+  );
+  return completedTaskIds.size;
+}
+
 export function getStreakDays(state: AppState) {
   const sessionDays = new Set(state.sessions.map(sessionDateKey));
   let streak = 0;

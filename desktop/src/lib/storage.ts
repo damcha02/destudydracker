@@ -46,6 +46,7 @@ export const defaultState: AppState = {
   settings: {
     accent: "#8fb4ff",
     userName: "",
+    dailyGoalMinutes: 120,
     themeFamily: "normal",
     vaultPath: null,
     vaultName: "StudyTrackerVault",
