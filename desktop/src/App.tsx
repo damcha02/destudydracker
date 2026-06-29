@@ -375,7 +375,7 @@ type ThemePalette =
   | "claude"
   | "cute";
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
-type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats" | "fossil";
+type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
 type DashboardWidgetWidth = "full" | "half" | "third";
 
 type DashboardWidgetLayout = {
@@ -463,7 +463,6 @@ const dashboardWidgetIds: DashboardWidgetId[] = [
   "examRunway",
   "garden",
   "stats",
-  "fossil",
 ];
 
 const defaultCustomDashboardLayout: DashboardWidgetLayout[] = [
@@ -474,7 +473,6 @@ const defaultCustomDashboardLayout: DashboardWidgetLayout[] = [
   { id: "examRunway", width: "half" },
   { id: "garden", width: "third" },
   { id: "stats", width: "third" },
-  { id: "fossil", width: "full" },
 ];
 
 function isDashboardLayout(value: string | null): value is DashboardLayout {
@@ -945,6 +943,74 @@ function pruneSessionHistory(sessions: StudySession[], today = new Date()) {
     .slice(0, SESSION_HISTORY_MAX);
 }
 
+const focusMilestones = [
+  { hours: 10, label: "Seed Fossil", desc: "10 hours of study unearthed" },
+  { hours: 25, label: "Shell Fragment", desc: "25 hours - patterns forming" },
+  { hours: 50, label: "Ammonite", desc: "50 hours - taking shape" },
+  { hours: 100, label: "Crystal Cluster", desc: "100 hours crystallized" },
+  { hours: 250, label: "Complete Specimen", desc: "250 hours - a rare find" },
+  { hours: 500, label: "Ancient Artifact", desc: "500 hours - legendary" },
+  { hours: 1000, label: "Golden Record", desc: "1000 hours - transcendent" },
+];
+
+type FocusRange = "week" | 7 | 14 | 30 | 60 | 365;
+type FocusTip = { idx: number; x: number; y: number };
+
+function fossilRand(seed: number) {
+  let s = Math.imul(seed | 0, 2654435761);
+  s = Math.imul((s >>> 16) ^ s, 0x45d9f3b);
+  s = Math.imul((s >>> 16) ^ s, 0x45d9f3b);
+  return (((s >>> 16) ^ s) >>> 0) / 4294967296;
+}
+
+function fossilDateLabel(date: string) {
+  return new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short" }).format(new Date(`${date}T00:00:00`));
+}
+
+function StrataIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="1" y="1.5" width="12" height="2.8" rx="1.2" fill="currentColor" opacity="0.3" />
+      <rect x="1" y="5.5" width="12" height="2.8" rx="1.2" fill="currentColor" opacity="0.5" />
+      <rect x="1" y="9.5" width="12" height="2.8" rx="1.2" fill="currentColor" opacity="0.75" />
+    </svg>
+  );
+}
+
+function FossilMilestoneIcon({ hours, size = 14 }: { hours: number; size?: number }) {
+  const style = { width: size, height: size, display: "block" };
+  if (hours <= 10) return (
+    <svg viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">
+      <circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="8" cy="8" r="2" fill="currentColor" />
+    </svg>
+  );
+  if (hours <= 25) return (
+    <svg viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">
+      <path d="M10.5 3C7 2.5 4 6 4 9.5S6 14 8 14s4-2 4-5.5S11.5 3 10.5 3z" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M6.5 9.5c1-2 2.5-3 3.5-2.5" stroke="currentColor" strokeWidth="0.9" opacity="0.5" />
+    </svg>
+  );
+  if (hours <= 50) return (
+    <svg viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M8 5a3 3 0 1 0 0 6" stroke="currentColor" strokeWidth="1.1" />
+      <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+    </svg>
+  );
+  if (hours <= 100) return (
+    <svg viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">
+      <path d="M8 1L12.5 6 8 15 3.5 6z" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M3.5 6h9" stroke="currentColor" strokeWidth="0.9" opacity="0.6" />
+    </svg>
+  );
+  return (
+    <svg viewBox="0 0 16 16" fill="none" style={style} aria-hidden="true">
+      <path d="M8 1.5l2 4.2h4.5l-3.5 2.8 1.2 4.3L8 10.5l-4.2 2.3 1.2-4.3L1.5 5.7H6z" stroke="currentColor" strokeWidth="1.1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
 async function startWindowDrag() {
   if (!isTauriApp()) return;
   await getCurrentWindow().startDragging();
@@ -976,6 +1042,9 @@ function App() {
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
   const [dashboardEditing, setDashboardEditing] = useState(false);
   const [draggingWidgetId, setDraggingWidgetId] = useState<DashboardWidgetId | null>(null);
+  const [focusRange, setFocusRange] = useState<FocusRange>("week");
+  const [focusTip, setFocusTip] = useState<FocusTip | null>(null);
+  const [activeFocusMilestone, setActiveFocusMilestone] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
@@ -1446,7 +1515,6 @@ function App() {
   const dashboardGreeting = `${getTimeGreeting()}${greetingName ? `, ${greetingName}` : ""}`;
   const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
-  const maxWeeklyMinutes = Math.max(30, ...weeklyActivity.map((entry) => entry.minutes));
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
   const studyBreakTokens = Math.min(5, Math.floor(getTodayMinutes(state) / 45));
   const todayStr = isoDate();
@@ -1615,53 +1683,104 @@ function App() {
     ? [...state.sessions].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())[0].startedAt
     : null;
 
-  const fossilStrata = useMemo(() => {
-    const dayMap = new Map<string, typeof state.sessions>();
-    for (const session of state.sessions) {
+  const focusTimeline = useMemo(() => {
+    type FossilLayer = { id: string; name: string; color: string; minutes: number };
+    type FossilDay = { date: string; isToday: boolean; totalMinutes: number; layers: FossilLayer[]; cumulative: number };
+
+    const sortedSessions = [...state.sessions].sort((a, b) => a.endedAt.localeCompare(b.endedAt));
+    const dayMap = new Map<string, StudySession[]>();
+    for (const session of sortedSessions) {
       const key = isoDate(new Date(session.endedAt));
-      if (!dayMap.has(key)) dayMap.set(key, []);
-      dayMap.get(key)!.push(session);
+      const sessions = dayMap.get(key) ?? [];
+      sessions.push(session);
+      dayMap.set(key, sessions);
     }
 
-    const DAYS = 60;
-    const days: { date: string; layers: { height: number; color: string; label: string; minutes: number }[]; totalMinutes: number }[] = [];
+    const days: FossilDay[] = [];
     const today = isoDate();
+    const rangeStartDate = new Date();
+    const rangeDayCount = focusRange === "week" ? 7 : focusRange;
+    if (focusRange === "week") {
+      const day = rangeStartDate.getDay();
+      const mondayOffset = day === 0 ? -6 : 1 - day;
+      rangeStartDate.setDate(rangeStartDate.getDate() + mondayOffset);
+    } else {
+      rangeStartDate.setDate(rangeStartDate.getDate() - focusRange + 1);
+    }
+    const rangeStart = isoDate(rangeStartDate);
+    let cumulative = sortedSessions
+      .filter((session) => isoDate(new Date(session.endedAt)) < rangeStart)
+      .reduce((sum, session) => sum + session.minutes, 0);
+    let maxDayMinutes = 30;
+    const milestoneHits: Array<(typeof focusMilestones)[number] & { dayIndex: number; date: string }> = [];
 
-    for (let i = DAYS - 1; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
+    for (let i = 0; i < rangeDayCount; i++) {
+      const d = new Date(rangeStartDate);
+      d.setDate(rangeStartDate.getDate() + i);
       const key = isoDate(d);
       const sessions = dayMap.get(key) ?? [];
-      const totalMin = sessions.reduce((s, se) => s + se.minutes, 0);
-      const maxMin = Math.max(...sessions.map(s => s.minutes), 1);
-      const maxLayerH = 72;
-      const layers = sessions.map(session => ({
-        height: Math.max(3, (session.minutes / maxMin) * maxLayerH),
-        color: courseLookup.get(session.courseId ?? "")?.color ?? "var(--ink-4)",
-        label: session.courseId ? (courseLookup.get(session.courseId)?.name ?? "Unknown") : "General",
-        minutes: session.minutes,
-      }));
-      days.push({ date: key, layers, totalMinutes: totalMin });
+      const totalMinutes = sessions.reduce((sum, session) => sum + session.minutes, 0);
+      const previousCumulative = cumulative;
+      cumulative += totalMinutes;
+      maxDayMinutes = Math.max(maxDayMinutes, totalMinutes);
+
+      focusMilestones.forEach((milestone) => {
+        const threshold = milestone.hours * 60;
+        if (previousCumulative < threshold && cumulative >= threshold) {
+          milestoneHits.push({ ...milestone, dayIndex: days.length, date: key });
+        }
+      });
+
+      const layerMap = new Map<string, FossilLayer>();
+      sessions.forEach((session) => {
+        const course = session.courseId ? courseLookup.get(session.courseId) : null;
+        const id = course?.id ?? "general";
+        const current = layerMap.get(id) ?? {
+          id,
+          name: course?.name ?? "General",
+          color: course?.color ?? "var(--ink-4)",
+          minutes: 0,
+        };
+        current.minutes += session.minutes;
+        layerMap.set(id, current);
+      });
+
+      days.push({
+        date: key,
+        isToday: key === today,
+        totalMinutes,
+        layers: [...layerMap.values()].sort((a, b) => b.minutes - a.minutes),
+        cumulative,
+      });
     }
 
-    let cumulative = totalAllTimeMinutes;
-    for (const day of days) {
-      cumulative -= day.totalMinutes;
-    }
-    const milestones: { emoji: string; dayIndex: number; label: string }[] = [];
-    const icons = ["\u{1FAB8}", "\u{1F9B4}", "\u{1F995}", "\u{1F41A}", "\u{1F48E}"];
-    const thresholds = [600, 3000, 6000, 30000, 60000];
-    let mi = 0;
-    for (const [i, day] of days.entries()) {
-      cumulative += day.totalMinutes;
-      while (mi < thresholds.length && cumulative >= thresholds[mi]) {
-        milestones.push({ emoji: icons[mi] ?? "\u{2B50}", dayIndex: i, label: `${thresholds[mi] / 60}h total` });
-        mi++;
-      }
-    }
+    const activeDays = days.filter((day) => day.totalMinutes > 0).length;
+    const biggestDay = days.reduce((biggest, day) => (day.totalMinutes > biggest.totalMinutes ? day : biggest), days[0] ?? { date: "", isToday: false, totalMinutes: 0, layers: [], cumulative: 0 });
+    const activeCourseMap = new Map<string, FossilLayer>();
+    days.forEach((day) => {
+      day.layers.forEach((layer) => {
+        const current = activeCourseMap.get(layer.id) ?? { ...layer, minutes: 0 };
+        current.minutes += layer.minutes;
+        activeCourseMap.set(layer.id, current);
+      });
+    });
 
-    return { days, milestones, today };
-  }, [state.sessions, courseLookup, totalAllTimeMinutes]);
+    const achievedMilestones = focusMilestones.filter((milestone) => totalAllTimeMinutes >= milestone.hours * 60);
+    const visibleMinutes = days.reduce((sum, day) => sum + day.totalMinutes, 0);
+
+    return {
+      days,
+      milestoneHits,
+      today,
+      activeDays,
+      biggestDay,
+      maxDayMinutes,
+      activeCourses: [...activeCourseMap.values()].sort((a, b) => b.minutes - a.minutes),
+      achievedMilestones,
+      latestMilestone: achievedMilestones.at(-1) ?? null,
+      visibleMinutes,
+    };
+  }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
   function setActiveTab(activeTab: TabKey) {
     setState((current) => ({ ...current, activeTab }));
@@ -3107,51 +3226,211 @@ function App() {
     );
   }
 
-  function renderFossilCard(heightClass = "") {
-    const { days, milestones, today } = fossilStrata;
-    const hasData = days.some(d => d.totalMinutes > 0);
+  function renderWeeklyChart(heightClass = "") {
+    const { days, milestoneHits, activeDays, biggestDay, maxDayMinutes, activeCourses, achievedMilestones, latestMilestone, visibleMinutes } = focusTimeline;
+    const hasData = totalAllTimeMinutes > 0;
+    const hoveredDay = focusTip ? days[focusTip.idx] : null;
+    const columnGap = focusRange === 365 ? 0 : focusRange === "week" || focusRange === 7 ? 4 : focusRange <= 14 ? 3 : focusRange <= 30 ? 2 : 1;
+    const maxHeight = heightClass.includes("short-weekly") ? 105 : 124;
+    const columnMaxHeight = maxHeight - 5;
+    const rangeDensityClass = focusRange === "week" ? "range-week" : focusRange <= 14 ? "range-short" : focusRange <= 30 ? "range-medium" : focusRange === 365 ? "range-year" : "range-long";
+    const rangeLabel = focusRange === "week" ? "this week" : focusRange === 365 ? "past year" : `last ${focusRange} days`;
 
     return (
-      <article className={`panel-card design-card fossil-card ${heightClass}`}>
-        <div className="section-head compact-headline">
+      <article className={`panel-card design-card design-weekly-card fossil-card ${rangeDensityClass} ${heightClass}`}>
+        <div className="fossil-card-grain" aria-hidden="true" />
+
+        <div className="fossil-head">
           <div>
-            <p className="eyebrow">Focus Fossil</p>
-            <h3>Your study strata</h3>
+            <p className="fossil-eyebrow"><StrataIcon size={13} /> Focus history</p>
+            <h3>Weekly focus</h3>
           </div>
-          <span className="section-note">{formatMinutes(totalAllTimeMinutes)} total</span>
+          <div className="fossil-total">
+            <strong>{formatMinutes(visibleMinutes)}</strong>
+            <span>{rangeLabel}</span>
+          </div>
         </div>
-        <div className="fossil-scroll" ref={el => { if (el) setTimeout(() => el.scrollLeft = el.scrollWidth, 0); }}>
-          {hasData ? (
-            <div className="fossil-strata">
-              {days.map((day, i) => (
-                <div key={day.date} className={`fossil-day ${day.date === today ? "today" : ""}`}>
-                  <div className="fossil-column" title={`${day.date}: ${formatMinutes(day.totalMinutes)}`}>
-                    {day.layers.length > 0 ? (
-                      day.layers.map((layer, li) => (
-                        <div key={li} className="fossil-layer"
-                          style={{ height: layer.height, background: layer.color }}
-                          title={`${layer.label} \u00B7 ${formatMinutes(layer.minutes)}`} />
-                      ))
-                    ) : (
-                      <div className="fossil-gap" />
-                    )}
+
+        <div className="fossil-range-toggle" aria-label="Weekly Focus range">
+          {(["week", 7, 14, 30, 60, 365] as FocusRange[]).map((range) => (
+            <button
+              key={range}
+              type="button"
+              className={range === focusRange ? "active" : ""}
+              onClick={() => {
+                setFocusRange(range);
+                setFocusTip(null);
+                setActiveFocusMilestone(null);
+              }}
+            >
+              {range === "week" ? "This week" : range === 365 ? "1y" : `${range}d`}
+            </button>
+          ))}
+        </div>
+
+        {hasData ? (
+          <>
+            <div className="fossil-strata-shell" style={{ "--focus-day-count": days.length, "--focus-col-gap": `${columnGap}px` } as CSSProperties}>
+              <div className="fossil-depth-lines" aria-hidden="true" />
+              <div className="fossil-scroll">
+                <div className="fossil-track">
+                <div className="fossil-strata" style={{ height: maxHeight }}>
+                  {days.map((day, dayIndex) => {
+                    const columnHeight = day.totalMinutes > 0 ? Math.max(6, Math.sqrt(day.totalMinutes / maxDayMinutes) * columnMaxHeight) : 0;
+                    const isHovered = focusTip?.idx === dayIndex;
+                    const hasHover = focusTip !== null;
+                    return (
+                      <div
+                        key={day.date}
+                        className={`fossil-day ${day.isToday ? "today" : ""} ${isHovered ? "hovered" : ""} ${hasHover && !isHovered ? "dimmed" : ""}`}
+                        onMouseEnter={(event: MouseEvent<HTMLDivElement>) => {
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          setFocusTip({ idx: dayIndex, x: rect.left + rect.width / 2, y: rect.top });
+                        }}
+                        onMouseLeave={() => setFocusTip(null)}
+                      >
+                        {day.totalMinutes === 0 ? (
+                          <div className="fossil-eroded-day" />
+                        ) : (
+                          <div className="fossil-column" style={{ height: columnHeight }} title={`${fossilDateLabel(day.date)}: ${formatMinutes(day.totalMinutes)}`}>
+                            {day.layers.map((layer, layerIndex) => {
+                              const layerHeight = Math.max(4, (layer.minutes / day.totalMinutes) * columnHeight - 1);
+                              const seed = dayIndex * 97 + layerIndex * 31;
+                              return (
+                                <div
+                                  key={layer.id}
+                                  className="fossil-layer"
+                                  style={{
+                                    "--layer-color": layer.color,
+                                    "--layer-height": `${layerHeight}px`,
+                                    "--layer-width": `${82 + fossilRand(seed) * 18}%`,
+                                    "--layer-radius-a": `${1.5 + fossilRand(seed + 1) * 4}px`,
+                                    "--layer-radius-b": `${1.5 + fossilRand(seed + 2) * 4}px`,
+                                    "--layer-radius-c": `${0.5 + fossilRand(seed + 3) * 2.5}px`,
+                                    "--layer-radius-d": `${0.5 + fossilRand(seed + 4) * 2.5}px`,
+                                  } as CSSProperties}
+                                  title={`${layer.name} · ${formatMinutes(layer.minutes)}`}
+                                />
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {day.isToday ? (
+                          <span className="fossil-survey-flag" aria-label="Today">
+                            <svg width="16" height="22" viewBox="0 0 16 22" fill="none" aria-hidden="true">
+                              <line x1="2.5" y1="1" x2="2.5" y2="21" stroke="currentColor" strokeWidth="1.8" opacity="0.5" />
+                              <polygon points="3,1 14,5 3,9" fill="currentColor" />
+                            </svg>
+                          </span>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="fossil-bedrock" />
+                {milestoneHits.length ? (
+                  <div className="fossil-milestones-row">
+                    {days.map((day, dayIndex) => {
+                      const milestone = milestoneHits.find((item) => item.dayIndex === dayIndex);
+                      if (!milestone) return <span key={day.date} className="fossil-milestone-spacer" />;
+                      const active = activeFocusMilestone === milestone.hours;
+                      return (
+                        <button
+                          key={`${day.date}-${milestone.hours}`}
+                          type="button"
+                          className={`fossil-milestone ${active ? "active" : ""}`}
+                          onClick={() => setActiveFocusMilestone(active ? null : milestone.hours)}
+                        >
+                          <FossilMilestoneIcon hours={milestone.hours} size={13} />
+                          <span>{milestone.hours}h</span>
+                          {active ? (
+                            <span className="fossil-milestone-popover">
+                              <strong>{milestone.label}</strong>
+                              <small>{milestone.desc}</small>
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
                   </div>
-                  {milestones.filter(m => m.dayIndex === i).map(m => (
-                    <span key={m.label} className="fossil-milestone" title={m.label}>{m.emoji}</span>
-                  ))}
-                  {day.date === today ? <span className="fossil-today-marker">Today</span> : null}
+                ) : null}
+                <div className="fossil-date-row">
+                  {days.map((day, dayIndex) => {
+                    const date = new Date(`${day.date}T00:00:00`);
+                    const label = focusRange === "week" || focusRange <= 14
+                      ? ["S", "M", "T", "W", "T", "F", "S"][date.getDay()]
+                      : dayIndex === 0 || date.getDate() === 1
+                        ? new Intl.DateTimeFormat("en", { month: "short" }).format(date)
+                        : "";
+                    return <span key={day.date} className={day.isToday ? "today" : ""}>{label}</span>;
+                  })}
+                </div>
+                </div>
+              </div>
+            </div>
+
+            {focusTip && hoveredDay ? (
+              <div className="fossil-tooltip" style={{ left: focusTip.x, top: focusTip.y - 10 }}>
+                <div className="fossil-tooltip-head">
+                  <strong>{fossilDateLabel(hoveredDay.date)}</strong>
+                  {hoveredDay.isToday ? <span>TODAY</span> : null}
+                </div>
+                {hoveredDay.totalMinutes > 0 ? (
+                  <>
+                    <div className="fossil-tooltip-layers">
+                      {hoveredDay.layers.map((layer) => (
+                        <div key={layer.id}>
+                          <span style={{ background: layer.color }} />
+                          <em>{layer.name}</em>
+                          <strong>{formatMinutes(layer.minutes)}</strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="fossil-tooltip-total"><span>Total</span><strong>{formatMinutes(hoveredDay.totalMinutes)}</strong></div>
+                  </>
+                ) : (
+                  <p>No study - rest day</p>
+                )}
+              </div>
+            ) : null}
+
+            <div className="fossil-legend">
+              <span>Courses</span>
+              {activeCourses.map((course) => (
+                <div key={course.id}>
+                  <i style={{ background: course.color }} />
+                  <span>{course.name}</span>
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="fossil-empty">
-              <p className="empty-copy">No sessions yet. Start studying to build your fossil record.</p>
+
+            {achievedMilestones.length ? (
+              <div className="fossil-discovered">
+                <span>Discovered</span>
+                {achievedMilestones.map((milestone) => (
+                  <div key={milestone.hours}>
+                    <FossilMilestoneIcon hours={milestone.hours} size={11} />
+                    <span>{milestone.label}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            <div className="fossil-stats">
+              <div><span>Active days</span><strong>{activeDays}</strong><em>/ {focusRange === "week" ? "week" : focusRange === 365 ? "1y" : focusRange}</em></div>
+              <div><span>Streak</span><strong>{getStreakDays(state)}</strong><em>days</em></div>
+              {biggestDay.totalMinutes > 0 ? <div><span>Biggest day</span><strong>{formatMinutes(biggestDay.totalMinutes)}</strong><em>{formatDate(biggestDay.date)}</em></div> : null}
+              {latestMilestone ? <div><span>Latest find</span><strong>{latestMilestone.label}</strong><em>at {latestMilestone.hours}h</em></div> : null}
             </div>
-          )}
-        </div>
-        <div className="fossil-legend">
-          <span className="mono">{formatMinutes(totalAllTimeMinutes)} across {sessionDays.size} day{sessionDays.size !== 1 ? "s" : ""}</span>
-        </div>
+          </>
+        ) : (
+          <div className="fossil-empty">
+            <StrataIcon size={40} />
+            <strong>No focus history yet</strong>
+            <p>Complete your first study block to begin building your focus history.</p>
+          </div>
+        )}
       </article>
     );
   }
@@ -3329,35 +3608,6 @@ function App() {
     );
   }
 
-  function renderWeeklyChart(heightClass = "") {
-    return (
-      <article className={`panel-card design-card design-weekly-card ${heightClass}`}>
-        <div className="section-head compact-headline">
-          <div>
-            <p className="eyebrow">Last 7 days</p>
-            <h3>Weekly focus</h3>
-          </div>
-          <span className="design-chip">{formatMinutes(weeklyTotalMinutes)}</span>
-        </div>
-
-        <div className="design-weekly-bars">
-          {weeklyActivity.map((entry) => {
-            const height = entry.minutes ? Math.max(4, (entry.minutes / maxWeeklyMinutes) * 100) : 0;
-            return (
-              <div key={entry.key} className="design-weekly-column" title={`${entry.label}: ${entry.minutes} minutes`}>
-                <span>{entry.minutes || ""}</span>
-                <div className="design-weekly-track">
-                  {entry.minutes ? <div className="design-weekly-fill" style={{ height: `${height}%` }} /> : null}
-                </div>
-                <strong>{entry.label}</strong>
-              </div>
-            );
-          })}
-        </div>
-      </article>
-    );
-  }
-
   function renderCourseRadar() {
     return (
       <article className="panel-card design-card design-course-radar">
@@ -3500,8 +3750,6 @@ function App() {
         return renderGardenCard("custom-garden");
       case "stats":
         return renderStatsWidget();
-      case "fossil":
-        return renderFossilCard();
     }
   }
 
@@ -3550,7 +3798,6 @@ function App() {
       examRunway: "Exam runway",
       garden: "Knowledge garden",
       stats: "Stats",
-      fossil: "Focus fossil",
     };
 
     return (
@@ -3971,20 +4218,20 @@ function App() {
                 {renderExamRunway()}
               </div>
             </div>
-            {renderFossilCard()}
           </>) : null}
 
           {dashboardLayout === "focus" ? (<>
             <div className="dash-focus-claude">
-              {renderTodayCard()}
-              {renderGardenCard("hero-garden")}
-              <div className="dash-focus-support">
+              <div className="dash-focus-top-row">
+                {renderTodayCard()}
                 {renderUrgentTasks(4)}
+              </div>
+              {renderGardenCard("hero-garden")}
+              <div className="dash-focus-bottom-row">
                 {renderWeeklyChart("short-weekly")}
                 {renderExamRunway()}
               </div>
             </div>
-            {renderFossilCard()}
           </>) : null}
 
           {dashboardLayout === "analyst" ? (
@@ -3997,7 +4244,7 @@ function App() {
               </div>
               <div className="dash-analyst-grid">
                 <div className="design-stack">
-                  {renderWeeklyChart("tall-weekly")}
+                  {renderWeeklyChart()}
                   {renderUrgentTasks(4)}
                 </div>
                 <div className="design-stack">
