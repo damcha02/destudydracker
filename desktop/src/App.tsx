@@ -34,9 +34,9 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, isSocialApiConfigured, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
+import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getSocialFeed, isSocialApiConfigured, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -398,6 +398,45 @@ const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
   { id: "daily", label: "Daily" },
   { id: "references", label: "References" },
   { id: "summaries", label: "Summaries" },
+];
+
+const socialSubtabs: Array<{ id: SocialSubtab; label: string; badge?: string }> = [
+  { id: "feed", label: "Feed" },
+  { id: "leaderboard", label: "Leaderboard" },
+  { id: "friends", label: "Friends" },
+  { id: "squad", label: "Squad", badge: "Coming soon" },
+  { id: "profile", label: "Profile" },
+];
+
+const feedFallbackNotes = [
+  "only 5 billion things to go...",
+  "keeping up with the deadline",
+  "not wasting time",
+  "deleted instagram",
+  "none of it is real...",
+  "hustling",
+  "grinding",
+  "workaholic",
+  "need a breather",
+  "one more sesh",
+  "fantasizing about my next break",
+  "spending too much time in the breakroom",
+  "cannot break into the vault",
+  "slaying demons",
+  "training dragons",
+  "living in delusion",
+  "code never sleeps",
+  "brain.exe running",
+  "fueled by caffeine",
+  "in the zone",
+  "closing tabs, opening minds",
+  "debugging my life",
+  "on the grindset",
+  "minimum viable student",
+  "late to the party, early to the library",
+  "ctrl+s my sanity",
+  "segfault in real life",
+  "stack overflow of assignments",
 ];
 
 type UpdateInfo = {
@@ -1017,6 +1056,55 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
   };
 }
 
+function pickFeedFallbackNote(seed: string) {
+  const total = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return feedFallbackNotes[total % feedFallbackNotes.length];
+}
+
+function buildFeedPostFromSession(session: StudySession, state: AppState, courseName: string, note?: string): SocialFeedPost {
+  const subject = courseName || session.goal || (session.kind === "exam" ? "Exam session" : "Study session");
+  const detail = `${formatMinutes(session.minutes)} · ${session.presetLabel || (session.kind === "exam" ? "Exam" : "Focus")}`;
+  return {
+    id: session.id,
+    userId: state.social.userId,
+    displayName: state.social.displayName,
+    friendCode: state.social.friendCode,
+    type: "session",
+    subject,
+    detail,
+    note: (note ?? "").trim() || pickFeedFallbackNote(session.id),
+    icon: session.kind === "exam" ? "⚔" : "✦",
+    minutes: session.minutes,
+    presetLabel: session.presetLabel,
+    createdAt: session.endedAt,
+    isSelf: true,
+    reactions: { fire: 0, brain: 0, clap: 0 },
+    reacted: {},
+  };
+}
+
+function getSessionCourseName(state: AppState, session: StudySession) {
+  return state.courses.find((course) => course.id === session.courseId)?.name ?? "";
+}
+
+function queueFeedPost(state: AppState, session: StudySession, courseName: string, note?: string) {
+  const post = buildFeedPostFromSession(session, state, courseName, note);
+  const alreadyQueued = state.social.pendingFeedPosts.some((item) => item.id === post.id);
+  const cachedLocally = [...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((item) => item.id === post.id);
+  if (alreadyQueued || cachedLocally) return state;
+  return {
+    ...state,
+    social: {
+      ...state.social,
+      pendingFeedPosts: [post, ...state.social.pendingFeedPosts].slice(0, 25),
+      cachedFeeds: {
+        global: [post, ...state.social.cachedFeeds.global].slice(0, 50),
+        friends: [post, ...state.social.cachedFeeds.friends].slice(0, 50),
+      },
+    },
+  };
+}
+
 function pruneSessionHistory(sessions: StudySession[], today = new Date()) {
   const cutoff = new Date(today);
   cutoff.setDate(cutoff.getDate() - SESSION_HISTORY_DAYS);
@@ -1312,6 +1400,10 @@ function App() {
     releaseUrl: RELEASES_PAGE_URL,
     message: "Check whether a newer release is available.",
   });
+  const [socialSubtab, setSocialSubtab] = useState<SocialSubtab>("feed");
+  const [feedScope, setFeedScope] = useState<SocialFeedScope>("global");
+  const [feedNoteDraft, setFeedNoteDraft] = useState("");
+  const [feedLoading, setFeedLoading] = useState(false);
   const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("global");
   const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
   const [friendCodeDraft, setFriendCodeDraft] = useState("");
@@ -1444,11 +1536,12 @@ function App() {
         const endedAt = new Date().toISOString();
         if (timer.phase === "study") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
+          const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
             ringBell();
             return {
-              ...current,
-              sessions: pruneSessionHistory([session, ...current.sessions]),
+              ...socialState,
+              sessions: pruneSessionHistory([session, ...socialState.sessions]),
               timer: {
                 ...timer,
                 phase: "break",
@@ -1462,18 +1555,19 @@ function App() {
 
           ringBell();
           return {
-            ...current,
-            sessions: pruneSessionHistory([session, ...current.sessions]),
+            ...socialState,
+            sessions: pruneSessionHistory([session, ...socialState.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
 
         if (timer.phase === "exam") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
+          const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
           ringBell();
           return {
-            ...current,
-            sessions: pruneSessionHistory([session, ...current.sessions]),
+            ...socialState,
+            sessions: pruneSessionHistory([session, ...socialState.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -1823,6 +1917,18 @@ function App() {
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
   const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
   const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
+  const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
+  const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
+  const latestFeedSessionPosted = latestFeedSession
+    ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
+    : false;
+  const liveFriends = state.social.friends.filter((friend) => {
+    if (!friend.lastSeenAt) return false;
+    return Date.now() - new Date(friend.lastSeenAt).getTime() < 45 * 60 * 1000;
+  });
+  const weekCompareEntries = [localSocialWeekly, ...state.social.cachedLeaderboards.friends.weekly.filter((entry) => entry.userId !== state.social.userId)]
+    .sort((a, b) => b.minutes - a.minutes)
+    .slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const rockStage = state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
@@ -2090,6 +2196,7 @@ function App() {
         social: {
           ...current.social,
           ...result.social,
+          pendingFeedPosts: [],
           lastSyncedAt: syncedAt,
           lastSyncError: null,
           nextAutoSyncAt: getNextAutoSyncAt(),
@@ -2143,6 +2250,85 @@ function App() {
     if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
   }
 
+  function postLatestSessionToFeed(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!latestFeedSession) {
+      setMessage("Finish a study session before posting to the feed.");
+      return;
+    }
+    if (latestFeedSessionPosted) {
+      setMessage("That session is already queued for the feed.");
+      return;
+    }
+
+    setState((current) => queueFeedPost(current, latestFeedSession, getSessionCourseName(current, latestFeedSession), feedNoteDraft));
+    setFeedNoteDraft("");
+    setMessage(socialConfigured ? "Post queued. Sync to publish it to the feed." : "Post queued locally. Configure sync to publish it.");
+  }
+
+  function toggleProfilePrivacy() {
+    const nextState = {
+      ...state,
+      social: {
+        ...state.social,
+        isPrivate: !state.social.isPrivate,
+      },
+    };
+    setState(nextState);
+    setMessage(nextState.social.isPrivate ? "Profile set to private." : "Profile set to public.");
+    if (socialConfigured) void runSocialSync({ silent: true, stateOverride: nextState });
+  }
+
+  function toggleAutoPostSessions() {
+    setState((current) => ({
+      ...current,
+      social: {
+        ...current.social,
+        autoPostSessions: !current.social.autoPostSessions,
+      },
+    }));
+    setMessage(state.social.autoPostSessions ? "Auto-post disabled." : "Auto-post enabled.");
+  }
+
+  async function toggleLocalFeedReaction(postId: string, emoji: "fire" | "brain" | "clap") {
+    setState((current) => {
+      const updatePost = (post: SocialFeedPost) => {
+        if (post.id !== postId) return post;
+        const reacted = Boolean(post.reacted?.[emoji]);
+        return {
+          ...post,
+          reactions: {
+            ...post.reactions,
+            [emoji]: Math.max(0, (post.reactions?.[emoji] ?? 0) + (reacted ? -1 : 1)),
+          },
+          reacted: {
+            ...post.reacted,
+            [emoji]: !reacted,
+          },
+        };
+      };
+      return {
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.map(updatePost),
+            friends: current.social.cachedFeeds.friends.map(updatePost),
+          },
+          pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost),
+        },
+      };
+    });
+    if (!socialConfigured || state.social.pendingFeedPosts.some((post) => post.id === postId)) return;
+    try {
+      await reactToFeedPost(state.social, postId, emoji);
+      await refreshSocialFeed();
+    } catch (error: unknown) {
+      console.warn("Could not sync feed reaction.", error);
+      setMessage(getErrorMessage(error, "Could not sync reaction."));
+    }
+  }
+
   async function submitFriendRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const friendCode = friendCodeDraft.trim().toUpperCase();
@@ -2178,6 +2364,7 @@ function App() {
         social: {
           ...current.social,
           ...result.social,
+          pendingFeedPosts: current.social.pendingFeedPosts,
           lastSyncedAt: new Date().toISOString(),
           lastSyncError: null,
           nextAutoSyncAt: getNextAutoSyncAt(),
@@ -2306,6 +2493,36 @@ function App() {
     if (shouldAutoSyncSocial(state.social)) void runSocialSync({ silent: true });
   });
 
+  const refreshSocialFeed = useEffectEvent(async () => {
+    if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return;
+    setFeedLoading(true);
+    try {
+      const result = await getSocialFeed(state.social, feedScope);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            ...current.social.cachedFeeds,
+            [feedScope]: result.feed,
+          },
+          lastSyncError: null,
+        },
+      }));
+    } catch (error: unknown) {
+      console.warn("Could not refresh social feed.", error);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          lastSyncError: getErrorMessage(error, "Could not refresh the feed."),
+        },
+      }));
+    } finally {
+      setFeedLoading(false);
+    }
+  });
+
   useEffect(() => {
     if (!isTauriApp()) return undefined;
     if (updateInstallSupport.packageHint === "unknown" && updateInstallSupport.runtimeChannel === "unknown") return undefined;
@@ -2321,6 +2538,10 @@ function App() {
     const interval = window.setInterval(runAutomaticSocialSync, 60 * 60 * 1000);
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    void refreshSocialFeed();
+  }, [feedScope, socialSubtab, state.activeTab]);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -3252,10 +3473,11 @@ function App() {
       if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return current;
       const minutes = getTimerMinutes(timer);
       const session = buildSessionFromTimer(timer, new Date().toISOString(), minutes);
+      const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
       playBellSound();
       return {
-        ...current,
-        sessions: pruneSessionHistory([session, ...current.sessions]),
+        ...socialState,
+        sessions: pruneSessionHistory([session, ...socialState.sessions]),
         timer: {
           ...defaultTimer,
           ...keepTimerContext(timer),
@@ -6609,8 +6831,119 @@ function App() {
             <span className="arena-hero-sub">Compete. Focus. Rise.</span>
           </div>
 
-          <div className="arena-layout">
-            <div className="arena-left">
+          <nav className="social-nav" aria-label="Social spaces">
+            {socialSubtabs.map((space) => {
+              const active = space.id === socialSubtab;
+              return (
+                <button key={space.id} type="button" className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
+                  {space.label}
+                  {space.badge ? <span>{space.badge}</span> : null}
+                </button>
+              );
+            })}
+          </nav>
+
+          {socialSubtab === "feed" ? (
+            <div className="social-feed-shell">
+              <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope">
+                {(["global", "friends"] as SocialFeedScope[]).map((scope) => (
+                  <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
+                    {scope === "global" ? "Global Feed" : "Friends Feed"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="stories" aria-label="Study circle stories">
+                <div className="story">
+                  <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} self size="md" /></div>
+                  <span>You</span>
+                </div>
+                {state.social.friends.slice(0, 10).map((friend) => (
+                  <div key={friend.userId} className="story">
+                    <div className={`story__ring ${friend.lastSeenAt ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} size="md" /></div>
+                    <span>{friend.displayName}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="live-bar">
+                <span className="live-dot" />
+                <strong>{liveFriends.length ? `${liveFriends.length} friends` : "No friends"}</strong>
+                <span>{liveFriends.length ? "studying or recently active" : "studying right now"}</span>
+                <small>{liveFriends.slice(0, 3).map((friend) => friend.displayName).join(" · ") || "Sync to update live status"}</small>
+              </div>
+
+              <form className="feed-composer" onSubmit={postLatestSessionToFeed}>
+                <div>
+                  <span className="arena-kicker">Share latest session</span>
+                  <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
+                  <p>{latestFeedSession ? "Write one sentence, or leave it blank for a chaotic default." : "Finish a study or exam block, then publish it here."}</p>
+                </div>
+                <input className="arena-input" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
+                <button type="submit" className="arena-btn arena-btn--send" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
+              </form>
+
+              <div className="section-label">Activity {feedLoading ? "· Refreshing" : ""}</div>
+              {socialFeed.length ? socialFeed.map((item) => (
+                item.type === "milestone" ? (
+                  <article key={item.id} className="milestone">
+                    <div className="milestone__icon">{item.icon || "🏆"}</div>
+                    <div>
+                      <h3>{item.displayName} hit a milestone</h3>
+                      <p>{item.note || item.detail}</p>
+                    </div>
+                  </article>
+                ) : (
+                  <article key={item.id} className="feed-card">
+                    <div className="feed-card__head">
+                      <ArenaAvatar name={item.displayName} self={item.userId === state.social.userId || item.isSelf} />
+                      <div>
+                        <strong>{item.displayName}{item.userId === state.social.userId || item.isSelf ? " (You)" : ""}</strong>
+                        <span>{formatDate(item.createdAt)}</span>
+                      </div>
+                    </div>
+                    <div className="feed-card__body">
+                      <div className="feed-card__session">
+                        <span>{item.icon || "✦"}</span>
+                        <div>
+                          <strong>{item.subject || "Study session"}</strong>
+                          <small>{item.detail || `${formatMinutes(item.minutes)} · ${item.presetLabel || "Focus"}`}</small>
+                        </div>
+                      </div>
+                      {item.note ? <p>"{item.note}"</p> : null}
+                    </div>
+                    <div className="feed-card__reactions">
+                      {(["fire", "brain", "clap"] as const).map((emoji) => (
+                        <button key={emoji} type="button" className={`reaction-btn ${item.reacted?.[emoji] ? "reaction-btn--active" : ""}`} onClick={() => void toggleLocalFeedReaction(item.id, emoji)}>
+                          {emoji === "fire" ? "🔥" : emoji === "brain" ? "🧠" : "👏"} {item.reactions?.[emoji] ?? 0}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                )
+              )) : (
+                <div className="arena-empty"><strong>No feed posts yet</strong><span>Post a session or sync to pull the latest arena activity.</span></div>
+              )}
+
+              <div className="section-label">This Week</div>
+              <article className="week-compare">
+                {weekCompareEntries.length ? weekCompareEntries.map((entry) => {
+                  const max = Math.max(1, ...weekCompareEntries.map((item) => item.minutes));
+                  return (
+                    <div key={entry.userId} className="week-compare__row">
+                      <ArenaAvatar name={entry.displayName} self={entry.isSelf} />
+                      <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
+                      <div className="week-compare__bar-wrap"><span style={{ width: `${(entry.minutes / max) * 100}%` }} /></div>
+                      <small>{formatMinutes(entry.minutes)}</small>
+                    </div>
+                  );
+                }) : <p className="empty-copy">Weekly comparison appears after you sync with friends.</p>}
+              </article>
+            </div>
+          ) : null}
+
+          {socialSubtab === "profile" ? (
+            <div className="social-single-panel">
               <article className="arena-player-card">
                 <div className="arena-player-card__inner">
                   <div className="arena-player-main">
@@ -6659,8 +6992,23 @@ function App() {
                     {socialSyncing ? "Syncing..." : "Sync Arena"}
                   </button>
                 </div>
-              </article>
 
+                <div className="profile-options">
+                  <button type="button" className={`profile-toggle ${state.social.isPrivate ? "" : "active"}`} onClick={toggleProfilePrivacy}>
+                    <strong>{state.social.isPrivate ? "Private profile" : "Public profile"}</strong>
+                    <span>{state.social.isPrivate ? "Hidden from global feed and leaderboard." : "Shown on global feed and leaderboard."}</span>
+                  </button>
+                  <button type="button" className={`profile-toggle ${state.social.autoPostSessions ? "active" : ""}`} onClick={toggleAutoPostSessions}>
+                    <strong>{state.social.autoPostSessions ? "Auto-post on" : "Auto-post off"}</strong>
+                    <span>{state.social.autoPostSessions ? "Completed sessions queue feed posts automatically." : "You choose which sessions to post."}</span>
+                  </button>
+                </div>
+              </article>
+            </div>
+          ) : null}
+
+          {socialSubtab === "squad" ? (
+            <div className="social-single-panel">
               <article className="arena-panel arena-squad-coming-soon">
                 <div className="arena-panel-head">
                   <span className="arena-panel-icon">S</span>
@@ -6671,7 +7019,11 @@ function App() {
                 </div>
                 <p>Team up in study squads, climb group rankings, and run focus challenges together. For now, friend leaderboards are live.</p>
               </article>
+            </div>
+          ) : null}
 
+          {socialSubtab === "friends" ? (
+            <div className="social-single-panel">
               <article className="arena-panel arena-friends-panel">
                 <div className="arena-panel-head">
                   <span className="arena-panel-icon">+</span>
@@ -6726,7 +7078,9 @@ function App() {
                 </div>
               </article>
             </div>
+          ) : null}
 
+          {socialSubtab === "leaderboard" ? (
             <article className="arena-leaderboard">
               <div className="arena-leaderboard-head">
                 <div className="arena-title-cluster">
@@ -6781,7 +7135,7 @@ function App() {
                 ) : null}
               </div>
             </article>
-          </div>
+          ) : null}
         </section>
       ) : null}
 

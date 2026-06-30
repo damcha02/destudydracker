@@ -11,11 +11,23 @@ interface SyncPayload {
     deviceSecret: string;
     friendCode: string;
     displayName: string;
+    isPrivate?: boolean;
   };
   stats: Array<{
     date: string;
     minutes: number;
     sessions: number;
+  }>;
+  feedPosts?: Array<{
+    id: string;
+    type: "session" | "milestone";
+    subject?: string;
+    detail?: string;
+    note?: string;
+    icon?: string;
+    minutes?: number;
+    presetLabel?: string;
+    createdAt?: string;
   }>;
 }
 
@@ -79,6 +91,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const deviceSecret = String(payload.deviceSecret ?? "").trim();
   const friendCode = cleanCode(payload.friendCode);
   const displayName = cleanName(payload.displayName);
+  const isPrivate = payload.isPrivate ? 1 : 0;
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
   const existing = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
@@ -88,14 +101,45 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   if (codeOwner) throw new Response("Friend code is already in use.", { status: 409, headers: corsHeaders });
 
   if (existing) {
-    await env.DB.prepare("UPDATE users SET friend_code = ?, display_name = ?, updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(friendCode, displayName, userId)
+    await env.DB.prepare("UPDATE users SET friend_code = ?, display_name = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(friendCode, displayName, isPrivate, userId)
       .run();
   } else {
-    await env.DB.prepare("INSERT INTO users (id, device_secret, friend_code, display_name) VALUES (?, ?, ?, ?)")
-      .bind(userId, deviceSecret, friendCode, displayName)
+    await env.DB.prepare("INSERT INTO users (id, device_secret, friend_code, display_name, is_private) VALUES (?, ?, ?, ?, ?)")
+      .bind(userId, deviceSecret, friendCode, displayName, isPrivate)
       .run();
   }
+}
+
+function cleanText(value: unknown, max = 180) {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["feedPosts"]) {
+  if (!Array.isArray(posts) || !posts.length) return;
+  const statements = posts.slice(0, 25).map((post) => env.DB.prepare(`
+    INSERT INTO feed_posts (id, user_id, type, subject, detail, note, icon, minutes, preset_label, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      subject = excluded.subject,
+      detail = excluded.detail,
+      note = excluded.note,
+      icon = excluded.icon,
+      minutes = excluded.minutes,
+      preset_label = excluded.preset_label
+  `).bind(
+    cleanText(post.id, 80) || crypto.randomUUID(),
+    userId,
+    post.type === "milestone" ? "milestone" : "session",
+    cleanText(post.subject, 80),
+    cleanText(post.detail, 80),
+    cleanText(post.note, 220),
+    cleanText(post.icon, 8),
+    Math.max(0, Math.round(Number(post.minutes ?? 0))),
+    cleanText(post.presetLabel, 60),
+    /^\d{4}-\d{2}-\d{2}T/.test(String(post.createdAt ?? "")) ? String(post.createdAt) : new Date().toISOString(),
+  ));
+  await env.DB.batch(statements);
 }
 
 async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]) {
@@ -125,8 +169,15 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
   const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
   const periodFilter = leaderboardWhere(period);
-  const idFilter = allowedIds.length ? `AND u.id IN (${allowedIds.map(() => "?").join(",")})` : "";
-  const params = [...periodFilter.params, ...allowedIds];
+  const clauses = [];
+  const params = [...periodFilter.params];
+  if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
+  if (scope === "global") clauses.push("u.is_private = 0");
+  if (allowedIds.length) {
+    clauses.push(`u.id IN (${allowedIds.map(() => "?").join(",")})`);
+    params.push(...allowedIds);
+  }
+  const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
       COALESCE(SUM(ds.minutes), 0) AS minutes,
@@ -134,8 +185,7 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     LEFT JOIN daily_stats ds ON ds.user_id = u.id
-    ${periodFilter.clause}
-    ${idFilter}
+    ${whereClause}
     GROUP BY u.id, u.display_name, u.friend_code
     ORDER BY minutes DESC, displayName ASC
     LIMIT 50
@@ -154,6 +204,66 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
     sessions: Number(row.sessions),
     rank: index + 1,
     isSelf: row.userId === userId,
+  }));
+}
+
+async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
+  const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
+  const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
+  const clauses = scope === "global" ? ["u.is_private = 0"] : [`p.user_id IN (${allowedIds.map(() => "?").join(",") || "?"})`];
+  const params = scope === "friends" ? (allowedIds.length ? allowedIds : [userId]) : [];
+  const posts = await env.DB.prepare(`
+    SELECT p.id, p.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+      p.type, p.subject, p.detail, p.note, p.icon, p.minutes, p.preset_label AS presetLabel, p.created_at AS createdAt
+    FROM feed_posts p
+    JOIN users u ON u.id = p.user_id
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY p.created_at DESC
+    LIMIT 80
+  `).bind(...params).all<{
+    id: string;
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    type: "session" | "milestone";
+    subject: string;
+    detail: string;
+    note: string;
+    icon: string;
+    minutes: number;
+    presetLabel: string;
+    createdAt: string;
+  }>();
+
+  const ids = posts.results.map((post) => post.id);
+  const reactionCounts = new Map<string, Record<string, number>>();
+  const reacted = new Map<string, Record<string, boolean>>();
+  if (ids.length) {
+    const countRows = await env.DB.prepare(`
+      SELECT post_id AS postId, emoji, COUNT(*) AS count
+      FROM feed_reactions
+      WHERE post_id IN (${ids.map(() => "?").join(",")})
+      GROUP BY post_id, emoji
+    `).bind(...ids).all<{ postId: string; emoji: string; count: number }>();
+    countRows.results.forEach((row) => {
+      reactionCounts.set(row.postId, { ...(reactionCounts.get(row.postId) ?? {}), [row.emoji]: Number(row.count) });
+    });
+    const reactedRows = await env.DB.prepare(`
+      SELECT post_id AS postId, emoji
+      FROM feed_reactions
+      WHERE user_id = ? AND post_id IN (${ids.map(() => "?").join(",")})
+    `).bind(userId, ...ids).all<{ postId: string; emoji: string }>();
+    reactedRows.results.forEach((row) => {
+      reacted.set(row.postId, { ...(reacted.get(row.postId) ?? {}), [row.emoji]: true });
+    });
+  }
+
+  return posts.results.map((post) => ({
+    ...post,
+    minutes: Number(post.minutes),
+    isSelf: post.userId === userId,
+    reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
+    reacted: reacted.get(post.id) ?? {},
   }));
 }
 
@@ -202,6 +312,10 @@ async function getSocialSnapshot(env: Env, userId: string) {
       overall: await getLeaderboard(env, userId, "friends", "overall"),
     },
   };
+  const cachedFeeds = {
+    global: await getFeed(env, userId, "global"),
+    friends: await getFeed(env, userId, "friends"),
+  };
 
   return {
     social: {
@@ -209,6 +323,7 @@ async function getSocialSnapshot(env: Env, userId: string) {
       incomingFriendRequests: incoming.results,
       outgoingFriendRequests: outgoing.results,
       cachedLeaderboards,
+      cachedFeeds,
     },
   };
 }
@@ -217,7 +332,32 @@ async function handleSync(request: Request, env: Env) {
   const payload = await readJson<SyncPayload>(request);
   await upsertUser(env, payload.user);
   await upsertStats(env, payload.user.userId, Array.isArray(payload.stats) ? payload.stats : []);
+  await upsertFeedPosts(env, payload.user.userId, payload.feedPosts);
   return json(await getSocialSnapshot(env, payload.user.userId));
+}
+
+async function handleFeed(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("userId") ?? "").trim();
+  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
+  const scope = url.searchParams.get("scope") === "friends" ? "friends" : "global";
+  await verifyUser(env, userId, deviceSecret);
+  return json({ feed: await getFeed(env, userId, scope) });
+}
+
+async function handleFeedReaction(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string; emoji: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const postId = cleanText(payload.postId, 80);
+  const emoji = ["fire", "brain", "clap"].includes(payload.emoji) ? payload.emoji : "fire";
+  const existing = await env.DB.prepare("SELECT 1 FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).first();
+  if (existing) {
+    await env.DB.prepare("DELETE FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).run();
+  } else {
+    await env.DB.prepare("INSERT OR IGNORE INTO feed_reactions (post_id, user_id, emoji) VALUES (?, ?, ?)").bind(postId, userId, emoji).run();
+  }
+  return json({ ok: true });
 }
 
 async function handleFriendRequest(request: Request, env: Env) {
@@ -268,7 +408,9 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
+      if (request.method === "GET" && url.pathname === "/feed") return handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return handleSync(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/react") return handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return handleFriendResponse(request, env);
       return text("Not found.", 404);

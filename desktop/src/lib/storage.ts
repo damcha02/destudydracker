@@ -31,9 +31,16 @@ function makeDefaultSocialState(): SocialState {
     lastSyncedAt: null,
     lastSyncError: null,
     nextAutoSyncAt: null,
+    isPrivate: false,
+    autoPostSessions: false,
     friends: [],
     incomingFriendRequests: [],
     outgoingFriendRequests: [],
+    cachedFeeds: {
+      global: [],
+      friends: [],
+    },
+    pendingFeedPosts: [],
     cachedLeaderboards: {
       global: { daily: [], weekly: [], overall: [] },
       friends: { daily: [], weekly: [], overall: [] },
@@ -144,9 +151,16 @@ function normalizeSocialState(social: unknown): SocialState {
     lastSyncedAt: typeof record.lastSyncedAt === "string" ? record.lastSyncedAt : null,
     lastSyncError: typeof record.lastSyncError === "string" ? record.lastSyncError : null,
     nextAutoSyncAt: typeof record.nextAutoSyncAt === "string" ? record.nextAutoSyncAt : null,
+    isPrivate: Boolean(record.isPrivate),
+    autoPostSessions: Boolean(record.autoPostSessions),
     friends: Array.isArray(record.friends) ? record.friends : [],
     incomingFriendRequests: Array.isArray(record.incomingFriendRequests) ? record.incomingFriendRequests : [],
     outgoingFriendRequests: Array.isArray(record.outgoingFriendRequests) ? record.outgoingFriendRequests : [],
+    cachedFeeds: {
+      global: Array.isArray(record.cachedFeeds?.global) ? record.cachedFeeds.global : [],
+      friends: Array.isArray(record.cachedFeeds?.friends) ? record.cachedFeeds.friends : [],
+    },
+    pendingFeedPosts: Array.isArray(record.pendingFeedPosts) ? record.pendingFeedPosts : [],
     cachedLeaderboards: {
       global: {
         daily: record.cachedLeaderboards?.global?.daily ?? [],

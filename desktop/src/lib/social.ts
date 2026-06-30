@@ -1,4 +1,4 @@
-import type { AppState, SocialFriendRequest, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
+import type { AppState, SocialFeedPost, SocialFeedScope, SocialFriendRequest, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -12,7 +12,11 @@ export interface SocialDailyStat {
 }
 
 interface SocialSyncResponse {
-  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards">;
+  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
+}
+
+interface SocialFeedResponse {
+  feed: SocialFeedPost[];
 }
 
 function sessionDateKey(session: StudySession) {
@@ -69,7 +73,7 @@ export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeader
   const self = getLocalLeaderboardEntry(state, period);
   const remote = state.social.cachedLeaderboards[scope][period].filter((entry) => entry.userId !== self.userId);
   const combined = [self, ...remote]
-    .filter((entry) => scope === "global" || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
+    .filter((entry) => (scope === "global" && !state.social.isPrivate) || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
 
   return combined.map((entry, index) => ({ ...entry, rank: index + 1, isSelf: entry.userId === self.userId }));
@@ -114,13 +118,36 @@ export async function syncSocialState(state: AppState) {
       deviceSecret: state.social.deviceSecret,
       friendCode: state.social.friendCode,
       displayName: state.social.displayName,
+      isPrivate: state.social.isPrivate,
     },
     stats: getLocalSocialStats(state.sessions),
+    feedPosts: state.social.pendingFeedPosts,
   };
 
   return requestSocialApi<SocialSyncResponse>("/sync", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+}
+
+export async function getSocialFeed(social: SocialState, scope: SocialFeedScope) {
+  const params = new URLSearchParams({
+    scope,
+    userId: social.userId,
+    deviceSecret: social.deviceSecret,
+  });
+  return requestSocialApi<SocialFeedResponse>(`/feed?${params.toString()}`, { method: "GET" });
+}
+
+export async function reactToFeedPost(social: SocialState, postId: string, emoji: string) {
+  return requestSocialApi<{ ok: boolean }>("/feed/react", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+      emoji,
+    }),
   });
 }
 

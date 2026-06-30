@@ -5,6 +5,8 @@ export type TimerMode = "focus" | "exam" | "endless";
 export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "friends" | "break";
 export type SocialLeaderboardScope = "global" | "friends";
 export type SocialLeaderboardPeriod = "daily" | "weekly" | "overall";
+export type SocialFeedScope = "global" | "friends";
+export type SocialSubtab = "feed" | "leaderboard" | "friends" | "squad" | "profile";
 export type SocialFriendRequestStatus = "pending" | "accepted" | "declined";
 
 export interface Semester {
@@ -124,6 +126,24 @@ export interface SocialFriend {
   lastSeenAt: string | null;
 }
 
+export interface SocialFeedPost {
+  id: string;
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  type: "session" | "milestone";
+  subject: string;
+  detail: string;
+  note: string;
+  icon: string;
+  minutes: number;
+  presetLabel: string;
+  createdAt: string;
+  isSelf?: boolean;
+  reactions: Record<string, number>;
+  reacted?: Record<string, boolean>;
+}
+
 export interface SocialState {
   userId: string;
   deviceSecret: string;
@@ -132,9 +152,13 @@ export interface SocialState {
   lastSyncedAt: string | null;
   lastSyncError: string | null;
   nextAutoSyncAt: string | null;
+  isPrivate: boolean;
+  autoPostSessions: boolean;
   friends: SocialFriend[];
   incomingFriendRequests: SocialFriendRequest[];
   outgoingFriendRequests: SocialFriendRequest[];
+  cachedFeeds: Record<SocialFeedScope, SocialFeedPost[]>;
+  pendingFeedPosts: SocialFeedPost[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
 }
 
