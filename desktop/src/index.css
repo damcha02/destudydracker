@@ -27,6 +27,7 @@
   --steady: oklch(0.78 0.11 215);
   --watch: oklch(0.80 0.13 70);
   --critical: oklch(0.66 0.17 22);
+  --on-accent: oklch(0.18 0.02 250);
 }
 
 :root,

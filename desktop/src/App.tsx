@@ -34,9 +34,10 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getSocialFeed, isSocialApiConfigured, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
+import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
+import type { PlayerStatsResponse } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -1248,9 +1249,9 @@ function ArenaRankBadge({ rank, large = false }: { rank: number; large?: boolean
   );
 }
 
-function ArenaLeaderboardRow({ entry }: { entry: SocialLeaderboardEntry }) {
+function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEntry; onProfile?: () => void }) {
   return (
-    <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`}>
+    <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`} onClick={onProfile} role={onProfile ? "button" : undefined} tabIndex={onProfile ? 0 : undefined} onKeyDown={onProfile ? (e) => { if (e.key === "Enter" || e.key === " ") onProfile(); } : undefined}>
       <ArenaRankBadge rank={entry.rank} />
       <ArenaAvatar name={entry.displayName} self={entry.isSelf} size="sm" />
       <div className="arena-lb-person">
@@ -1410,6 +1411,9 @@ function App() {
   const [socialSyncing, setSocialSyncing] = useState(false);
   const [socialNameEditing, setSocialNameEditing] = useState(false);
   const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
+  const [viewingFriend, setViewingFriend] = useState<SocialFriend | null>(null);
+  const [viewingFriendStats, setViewingFriendStats] = useState<PlayerStatsResponse | null>(null);
+  const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
 
   useEffect(() => {
     saveAppState(state);
@@ -1917,6 +1921,15 @@ function App() {
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
   const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
   const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
+  const monthStartAnchor = new Date();
+  monthStartAnchor.setDate(1);
+  monthStartAnchor.setHours(0, 0, 0, 0);
+  const localSocialMonthly = state.sessions.filter((session) => {
+    if (session.kind !== "study" && session.kind !== "exam") return false;
+    return new Date(session.endedAt) >= monthStartAnchor;
+  }).reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
+  const myGlobalRank = state.social.cachedLeaderboards.global.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
+  const myFriendRank = state.social.cachedLeaderboards.friends.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
   const latestFeedSessionPosted = latestFeedSession
@@ -2493,6 +2506,24 @@ function App() {
     if (shouldAutoSyncSocial(state.social)) void runSocialSync({ silent: true });
   });
 
+  const presencePingEffect = useEffectEvent(() => {
+    if (socialConfigured) void presencePing(state.social).catch(() => {});
+  });
+
+  async function openFriendProfile(friend: SocialFriend) {
+    setViewingFriend(friend);
+    setViewingFriendStats(null);
+    setViewingFriendLoading(true);
+    try {
+      const stats = await getPlayerStats(state.social, friend.userId);
+      setViewingFriendStats(stats);
+    } catch (error: unknown) {
+      console.warn("Could not load friend stats.", error);
+    } finally {
+      setViewingFriendLoading(false);
+    }
+  }
+
   const refreshSocialFeed = useEffectEvent(async () => {
     if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return;
     setFeedLoading(true);
@@ -2534,6 +2565,7 @@ function App() {
   }, [updateInstallSupport.packageHint, updateInstallSupport.runtimeChannel]);
 
   useEffect(() => {
+    presencePingEffect();
     runAutomaticSocialSync();
     const interval = window.setInterval(runAutomaticSocialSync, 60 * 60 * 1000);
     return () => window.clearInterval(interval);
@@ -2542,6 +2574,12 @@ function App() {
   useEffect(() => {
     void refreshSocialFeed();
   }, [feedScope, socialSubtab, state.activeTab]);
+
+  useEffect(() => {
+    if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile")) {
+      presencePingEffect();
+    }
+  }, [state.activeTab, socialSubtab]);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -6859,7 +6897,7 @@ function App() {
                   <span>You</span>
                 </div>
                 {state.social.friends.slice(0, 10).map((friend) => (
-                  <div key={friend.userId} className="story">
+                  <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
                     <div className={`story__ring ${friend.lastSeenAt ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} size="md" /></div>
                     <span>{friend.displayName}</span>
                   </div>
@@ -6975,9 +7013,12 @@ function App() {
                   </div>
 
                   <div className="arena-player-stats">
-                    <div className="arena-mini-stat arena-mini-stat--daily"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(localSocialDaily.minutes)}</strong><span>Today</span></div></div>
-                    <div className="arena-mini-stat arena-mini-stat--weekly"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(localSocialWeekly.minutes)}</strong><span>This Week</span></div></div>
-                    <div className="arena-mini-stat arena-mini-stat--overall"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(localSocialOverall.minutes)}</strong><span>All Time</span></div></div>
+                    <div className="arena-mini-stat arena-mini-stat--daily"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(localSocialDaily.minutes)}</strong><span>Today · {localSocialDaily.sessions} ses.</span></div></div>
+                    <div className="arena-mini-stat arena-mini-stat--weekly"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(localSocialWeekly.minutes)}</strong><span>This Week · {localSocialWeekly.sessions} ses.</span></div></div>
+                    <div className="arena-mini-stat arena-mini-stat--overall"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(localSocialOverall.minutes)}</strong><span>All Time · {localSocialOverall.sessions} ses.</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">📅</span><div><strong>{formatMinutes(localSocialMonthly.minutes)}</strong><span>This Month · {localSocialMonthly.sessions} ses.</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">⚔</span><div><strong>{myGlobalRank ? `#${myGlobalRank}` : "—"}</strong><span>Global Rank</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">👥</span><div><strong>{myFriendRank ? `#${myFriendRank}` : "—"}</strong><span>Friends Rank</span></div></div>
                   </div>
                 </div>
 
@@ -7068,7 +7109,7 @@ function App() {
                   {state.social.friends.length ? (
                     <div className="arena-friend-grid">
                       {state.social.friends.map((friend) => (
-                        <div key={friend.userId} className="arena-friend-card">
+                        <div key={friend.userId} className="arena-friend-card" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
                           <ArenaAvatar name={friend.displayName} size="sm" />
                           <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatDate(friend.lastSeenAt)}` : ""}</span></div>
                         </div>
@@ -7111,22 +7152,28 @@ function App() {
 
               {socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
-                  {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => (
-                    <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`}>
-                      <ArenaAvatar name={entry.displayName} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
-                      <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
-                      <span>{formatMinutes(entry.minutes)}</span>
-                      <div className={`arena-podium-block arena-podium-block--${entry.rank}`}>
-                        <ArenaRankBadge rank={entry.rank} large={index === 1} />
-                        <small>{entry.sessions} sessions</small>
+                  {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
+                    const friend = state.social.friends.find((f) => f.userId === entry.userId);
+                    return (
+                      <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={friend ? () => void openFriendProfile(friend) : undefined} role={friend ? "button" : undefined} tabIndex={friend ? 0 : undefined} onKeyDown={friend ? (e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); } : undefined}>
+                        <ArenaAvatar name={entry.displayName} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
+                        <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
+                        <span>{formatMinutes(entry.minutes)}</span>
+                        <div className={`arena-podium-block arena-podium-block--${entry.rank}`}>
+                          <ArenaRankBadge rank={entry.rank} large={index === 1} />
+                          <small>{entry.sessions} sessions</small>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : null}
 
               <div className="arena-lb-rows">
-                {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => <ArenaLeaderboardRow key={entry.userId} entry={entry} />)}
+                {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
+                  const friend = state.social.friends.find((f) => f.userId === entry.userId);
+                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={friend ? () => void openFriendProfile(friend) : undefined} />;
+                })}
                 {!socialLeaderboard.length ? (
                   <div className="arena-empty">
                     <strong>No contenders yet</strong>
@@ -7137,6 +7184,38 @@ function App() {
             </article>
           ) : null}
         </section>
+      ) : null}
+
+      {viewingFriend ? (
+        <div className="calendar-drawer-backdrop" style={{ justifyContent: "center", alignItems: "center" }} onClick={() => setViewingFriend(null)} role="presentation">
+          <article className="arena-player-card" style={{ width: "min(440px, 100%)", padding: 0, alignSelf: "center" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${viewingFriend.displayName}'s profile`}>
+            <div className="arena-player-card__inner">
+              <div className="arena-title-cluster" style={{ marginBottom: 16 }}>
+                <ArenaAvatar name={viewingFriend.displayName} size="lg" />
+                <div style={{ flex: 1 }}>
+                  <span className="arena-kicker">{viewingFriend.friendCode}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <h3 style={{ margin: 0 }}>{viewingFriend.displayName}</h3>
+                    <button type="button" className="arena-icon-button" onClick={() => setViewingFriend(null)} title="Close" style={{ marginLeft: "auto" }}>×</button>
+                  </div>
+                  {viewingFriend.lastSeenAt ? <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>Seen {formatDate(viewingFriend.lastSeenAt)}</span> : null}
+                </div>
+              </div>
+              {viewingFriendLoading ? (
+                <div className="arena-empty">Loading stats...</div>
+              ) : viewingFriendStats ? (
+                <div className="arena-player-stats" style={{ marginTop: 0 }}>
+                  <div className="arena-mini-stat"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(viewingFriendStats.daily.minutes)}</strong><span>Today · {viewingFriendStats.daily.sessions} ses.</span></div></div>
+                  <div className="arena-mini-stat"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(viewingFriendStats.weekly.minutes)}</strong><span>This Week · {viewingFriendStats.weekly.sessions} ses.</span></div></div>
+                  <div className="arena-mini-stat"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(viewingFriendStats.overall.minutes)}</strong><span>All Time · {viewingFriendStats.overall.sessions} ses.</span></div></div>
+                  <div className="arena-mini-stat"><span className="arena-mini-stat__icon">📅</span><div><strong>{viewingFriendStats.daily.lastActiveDate || "—"}</strong><span>Last Active</span></div></div>
+                </div>
+              ) : (
+                <div className="arena-error">Could not load stats.</div>
+              )}
+            </div>
+          </article>
+        </div>
       ) : null}
 
       {state.activeTab === "break" ? (

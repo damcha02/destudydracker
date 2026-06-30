@@ -177,3 +177,31 @@ export async function respondToFriendRequest(social: SocialState, requestId: str
 export function getNextAutoSyncAt() {
   return new Date(Date.now() + SOCIAL_SYNC_INTERVAL_MS).toISOString();
 }
+
+export async function presencePing(social: SocialState) {
+  return requestSocialApi<{ ok: boolean }>("/presence", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+    }),
+  });
+}
+
+export interface PlayerStatsResponse {
+  displayName: string;
+  friendCode: string;
+  lastSeenAt: string | null;
+  daily: { minutes: number; sessions: number; lastActiveDate: string | null };
+  weekly: { minutes: number; sessions: number; lastActiveDate: string | null };
+  overall: { minutes: number; sessions: number; lastActiveDate: string | null };
+}
+
+export async function getPlayerStats(social: SocialState, targetUserId: string) {
+  const params = new URLSearchParams({
+    userId: social.userId,
+    deviceSecret: social.deviceSecret,
+    targetUserId,
+  });
+  return requestSocialApi<PlayerStatsResponse>(`/player-stats?${params.toString()}`, { method: "GET" });
+}

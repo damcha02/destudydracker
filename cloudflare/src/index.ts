@@ -342,6 +342,7 @@ async function handleFeed(request: Request, env: Env) {
   const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
   const scope = url.searchParams.get("scope") === "friends" ? "friends" : "global";
   await verifyUser(env, userId, deviceSecret);
+  await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
   return json({ feed: await getFeed(env, userId, scope) });
 }
 
@@ -380,6 +381,58 @@ async function handleFriendRequest(request: Request, env: Env) {
   return json(await getSocialSnapshot(env, fromUserId));
 }
 
+async function handlePresence(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
+  return json({ ok: true });
+}
+
+async function handlePlayerStats(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("userId") ?? "").trim();
+  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
+  const targetUserId = String(url.searchParams.get("targetUserId") ?? "").trim();
+  await verifyUser(env, userId, deviceSecret);
+  if (!targetUserId) return text("Missing targetUserId.", 400);
+
+  const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt FROM users WHERE id = ?")
+    .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; lastSeenAt: string | null }>();
+  if (!targetUser) return text("User not found.", 404);
+
+  const [userLow, userHigh] = friendPair(userId, targetUserId);
+  const areFriends = await env.DB.prepare("SELECT 1 FROM friendships WHERE user_low = ? AND user_high = ?").bind(userLow, userHigh).first();
+  if (!areFriends && targetUserId !== userId) {
+    const isPublic = await env.DB.prepare("SELECT is_private FROM users WHERE id = ?").bind(targetUserId).first<{ is_private: number }>();
+    if (!isPublic || isPublic.is_private) return text("User is private.", 403);
+  }
+
+  async function getStats(period: LeaderboardPeriod) {
+    const periodFilter = leaderboardWhere(period);
+    const clauses = [`u.id = ?`];
+    const params: string[] = [targetUserId, ...periodFilter.params];
+    if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
+    const row = await env.DB.prepare(`
+      SELECT COALESCE(SUM(ds.minutes), 0) AS minutes, COALESCE(SUM(ds.sessions), 0) AS sessions, MAX(ds.date) AS lastActiveDate
+      FROM users u
+      LEFT JOIN daily_stats ds ON ds.user_id = u.id
+      WHERE ${clauses.join(" AND ")}
+      GROUP BY u.id
+    `).bind(...params).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
+    return row ?? { minutes: 0, sessions: 0, lastActiveDate: null };
+  }
+
+  return json({
+    displayName: targetUser.displayName,
+    friendCode: targetUser.friendCode,
+    lastSeenAt: targetUser.lastSeenAt,
+    daily: await getStats("daily"),
+    weekly: await getStats("weekly"),
+    overall: await getStats("overall"),
+  });
+}
+
 async function handleFriendResponse(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string; requestId: string; response: "accepted" | "declined" }>(request);
   const userId = String(payload.userId ?? "").trim();
@@ -413,6 +466,8 @@ export default {
       if (request.method === "POST" && url.pathname === "/feed/react") return handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return handleFriendResponse(request, env);
+      if (request.method === "POST" && url.pathname === "/presence") return handlePresence(request, env);
+      if (request.method === "GET" && url.pathname === "/player-stats") return handlePlayerStats(request, env);
       return text("Not found.", 404);
     } catch (error: unknown) {
       if (error instanceof Response) return error;
