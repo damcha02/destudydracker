@@ -2,7 +2,10 @@ export type Priority = "low" | "medium" | "high";
 export type SessionKind = "study" | "break" | "exam";
 export type TimerPhase = "idle" | "study" | "break" | "exam" | "stopwatch";
 export type TimerMode = "focus" | "exam" | "endless";
-export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "break";
+export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "friends" | "break";
+export type SocialLeaderboardScope = "global" | "friends";
+export type SocialLeaderboardPeriod = "daily" | "weekly" | "overall";
+export type SocialFriendRequestStatus = "pending" | "accepted" | "declined";
 
 export interface Semester {
   id: string;
@@ -85,6 +88,51 @@ export interface Settings {
   vaultName: string;
 }
 
+export interface SocialLeaderboardEntry {
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  minutes: number;
+  sessions: number;
+  rank: number;
+  lastActiveDate: string | null;
+  isSelf?: boolean;
+}
+
+export interface SocialFriendRequest {
+  id: string;
+  fromUserId: string;
+  toUserId: string;
+  fromDisplayName: string;
+  toDisplayName: string;
+  fromFriendCode: string;
+  toFriendCode: string;
+  status: SocialFriendRequestStatus;
+  createdAt: string;
+}
+
+export interface SocialFriend {
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  friendsSince: string;
+  lastSeenAt: string | null;
+}
+
+export interface SocialState {
+  userId: string;
+  deviceSecret: string;
+  friendCode: string;
+  displayName: string;
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  nextAutoSyncAt: string | null;
+  friends: SocialFriend[];
+  incomingFriendRequests: SocialFriendRequest[];
+  outgoingFriendRequests: SocialFriendRequest[];
+  cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
+}
+
 export interface TimerState {
   phase: TimerPhase;
   mode: TimerMode;
@@ -120,6 +168,7 @@ export interface AppState {
   sessions: StudySession[];
   exports: VaultExport[];
   settings: Settings;
+  social: SocialState;
   timer: TimerState;
   activeTab: TabKey;
   unlockedGames: string[];

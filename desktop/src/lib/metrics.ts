@@ -248,14 +248,11 @@ export function getTodayMinutes(state: AppState) {
   return getTodaySessions(state).reduce((sum, session) => sum + session.minutes, 0);
 }
 
-export function getTasksCompletedToday(state: AppState) {
+export function getUnitsCompletedToday(state: AppState) {
   const today = isoDate();
-  const completedTaskIds = new Set(
-    state.calendarEntries
-      .filter((entry) => entry.completedAt && isoDate(new Date(entry.completedAt)) === today)
-      .map((entry) => entry.taskId),
-  );
-  return completedTaskIds.size;
+  return state.calendarEntries
+    .filter((entry) => entry.completedAt && isoDate(new Date(entry.completedAt)) === today)
+    .reduce((sum, entry) => sum + (entry.unitAmount ?? 1), 0);
 }
 
 export function getStreakDays(state: AppState) {

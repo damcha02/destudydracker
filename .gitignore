@@ -1,1 +1,5 @@
 .idea/
+node_modules/
+cloudflare/node_modules/
+.env
+*.log

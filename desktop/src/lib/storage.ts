@@ -1,10 +1,44 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialState, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 
 export function makeId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function randomToken(length: number) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  if (globalThis.crypto?.getRandomValues) {
+    const values = globalThis.crypto.getRandomValues(new Uint8Array(length));
+    return Array.from(values, (value) => alphabet[value % alphabet.length]).join("");
+  }
+  return Array.from({ length }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("");
+}
+
+function makeFriendCode() {
+  return `${randomToken(4)}-${randomToken(4)}`;
+}
+
+function makeDefaultSocialState(): SocialState {
+  const friendCode = makeFriendCode();
+  const displaySuffix = friendCode.slice(-4).replace(/[^A-Z0-9]/g, "");
+  return {
+    userId: makeId(),
+    deviceSecret: makeId(),
+    friendCode,
+    displayName: `Student ${displaySuffix}`,
+    lastSyncedAt: null,
+    lastSyncError: null,
+    nextAutoSyncAt: null,
+    friends: [],
+    incomingFriendRequests: [],
+    outgoingFriendRequests: [],
+    cachedLeaderboards: {
+      global: { daily: [], weekly: [], overall: [] },
+      friends: { daily: [], weekly: [], overall: [] },
+    },
+  };
 }
 
 export function todayIso(date = new Date()) {
@@ -51,6 +85,7 @@ export const defaultState: AppState = {
     vaultPath: null,
     vaultName: "StudyTrackerVault",
   },
+  social: makeDefaultSocialState(),
   timer: defaultTimer,
   activeTab: "dashboard",
   unlockedGames: [],
@@ -91,6 +126,39 @@ function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
   return {
     ...merged,
     remainingSeconds: diff,
+  };
+}
+
+function normalizeSocialState(social: unknown): SocialState {
+  const fallback = makeDefaultSocialState();
+  if (!social || typeof social !== "object") return fallback;
+
+  const record = social as Partial<SocialState>;
+  return {
+    ...fallback,
+    ...record,
+    userId: typeof record.userId === "string" && record.userId ? record.userId : fallback.userId,
+    deviceSecret: typeof record.deviceSecret === "string" && record.deviceSecret ? record.deviceSecret : fallback.deviceSecret,
+    friendCode: typeof record.friendCode === "string" && record.friendCode ? record.friendCode : fallback.friendCode,
+    displayName: typeof record.displayName === "string" && record.displayName.trim() ? record.displayName : fallback.displayName,
+    lastSyncedAt: typeof record.lastSyncedAt === "string" ? record.lastSyncedAt : null,
+    lastSyncError: typeof record.lastSyncError === "string" ? record.lastSyncError : null,
+    nextAutoSyncAt: typeof record.nextAutoSyncAt === "string" ? record.nextAutoSyncAt : null,
+    friends: Array.isArray(record.friends) ? record.friends : [],
+    incomingFriendRequests: Array.isArray(record.incomingFriendRequests) ? record.incomingFriendRequests : [],
+    outgoingFriendRequests: Array.isArray(record.outgoingFriendRequests) ? record.outgoingFriendRequests : [],
+    cachedLeaderboards: {
+      global: {
+        daily: record.cachedLeaderboards?.global?.daily ?? [],
+        weekly: record.cachedLeaderboards?.global?.weekly ?? [],
+        overall: record.cachedLeaderboards?.global?.overall ?? [],
+      },
+      friends: {
+        daily: record.cachedLeaderboards?.friends?.daily ?? [],
+        weekly: record.cachedLeaderboards?.friends?.weekly ?? [],
+        overall: record.cachedLeaderboards?.friends?.overall ?? [],
+      },
+    },
   };
 }
 
@@ -200,6 +268,7 @@ export function loadAppState(): AppState {
         ...defaultState.settings,
         ...parsed.settings,
       },
+      social: normalizeSocialState(parsed.social),
       timer: rehydrateTimer(parsed.timer),
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],

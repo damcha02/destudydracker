@@ -25,17 +25,18 @@ import {
   getSemesterHealth,
   getSemesterTasks,
   getStreakDays,
-  getTasksCompletedToday,
   getTaskProgress,
   getTodayMinutes,
+  getUnitsCompletedToday,
   getUpcomingExams,
   getWeeklyActivity,
   isoDate,
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
+import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, isSocialApiConfigured, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, StudySession, TabKey, Task, TimerState } from "./types";
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -216,6 +217,10 @@ const focusPresets = [
   { label: "Exam", study: 120, breakMinutes: 0, mode: "exam" as const },
   { label: "∞ Endless", study: 0, breakMinutes: 0, mode: "endless" as const },
 ];
+
+function formatCompletedUnits(units: number) {
+  return Number.isInteger(units) ? String(units) : units.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
 
 const studyBreakGames = [
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
@@ -1038,6 +1043,68 @@ async function closeWindow() {
   await getCurrentWindow().close();
 }
 
+function getInitials(name: string) {
+  const initials = name
+    .trim()
+    .split(/[\s_-]+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  return initials || "ST";
+}
+
+function getArenaHue(name: string) {
+  return [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 360;
+}
+
+function ArenaBg() {
+  return (
+    <div className="arena-bg" aria-hidden="true">
+      <div className="arena-bg-orb arena-bg-orb--1" />
+      <div className="arena-bg-orb arena-bg-orb--2" />
+      <div className="arena-bg-orb arena-bg-orb--3" />
+    </div>
+  );
+}
+
+function ArenaAvatar({ name, self = false, size = "md" }: { name: string; self?: boolean; size?: "sm" | "md" | "lg" }) {
+  return (
+    <span
+      className={`arena-avatar arena-avatar--${size} ${self ? "arena-avatar--self" : ""}`}
+      style={{ "--avatar-hue": getArenaHue(name) } as CSSProperties}
+      aria-hidden="true"
+    >
+      {getInitials(name)}
+    </span>
+  );
+}
+
+function ArenaRankBadge({ rank, large = false }: { rank: number; large?: boolean }) {
+  return (
+    <span className={`arena-rank-badge arena-rank-badge--${rank <= 3 ? rank : "plain"} ${large ? "arena-rank-badge--lg" : ""}`}>
+      {rank === 1 ? "1" : rank === 2 ? "2" : rank === 3 ? "3" : `#${rank}`}
+    </span>
+  );
+}
+
+function ArenaLeaderboardRow({ entry }: { entry: SocialLeaderboardEntry }) {
+  return (
+    <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`}>
+      <ArenaRankBadge rank={entry.rank} />
+      <ArenaAvatar name={entry.displayName} self={entry.isSelf} size="sm" />
+      <div className="arena-lb-person">
+        <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
+        <span>{entry.friendCode}</span>
+      </div>
+      <div className="arena-lb-score">
+        <strong>{formatMinutes(entry.minutes)}</strong>
+        <span>{entry.sessions} sess.</span>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -1154,6 +1221,12 @@ function App() {
     releaseUrl: RELEASES_PAGE_URL,
     message: "Check whether a newer release is available.",
   });
+  const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("global");
+  const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
+  const [friendCodeDraft, setFriendCodeDraft] = useState("");
+  const [socialSyncing, setSocialSyncing] = useState(false);
+  const [socialNameEditing, setSocialNameEditing] = useState(false);
+  const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
 
   useEffect(() => {
     saveAppState(state);
@@ -1545,6 +1618,12 @@ function App() {
   const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === 5;
   const badgeVeteran = state.totalUnlocks >= 10;
   const badgeRockMaster = state.petRockPats >= 1000;
+  const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
+  const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
+  const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
+  const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
+  const socialConfigured = isSocialApiConfigured();
+  const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const rockStage = state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
     : state.petRockPats >= 500 ? { plant: "\u{1F451}", label: "Royal Rock" }
     : state.petRockPats >= 250 ? { plant: "\u{1F98B}", label: "Blooming Rock" }
@@ -1795,6 +1874,142 @@ function App() {
     setState((current) => ({ ...current, activeTab }));
   }
 
+  async function copyFriendCode() {
+    try {
+      await navigator.clipboard.writeText(state.social.friendCode);
+      setMessage("Friend code copied.");
+    } catch (error: unknown) {
+      console.warn("Could not copy friend code.", error);
+      setMessage("Could not copy the friend code. Select it manually instead.");
+    }
+  }
+
+  async function runSocialSync(options: { silent?: boolean; stateOverride?: AppState } = {}) {
+    const { silent = false, stateOverride } = options;
+    const syncState = stateOverride ?? state;
+    if (!isSocialApiConfigured()) {
+      if (!silent) setMessage("Social sync is not configured yet. Add the Cloudflare Worker URL first.");
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          lastSyncError: "Social sync is not configured yet.",
+        },
+      }));
+      return;
+    }
+
+    setSocialSyncing(true);
+    try {
+      const result = await syncSocialState(syncState);
+      const syncedAt = new Date().toISOString();
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          ...result.social,
+          lastSyncedAt: syncedAt,
+          lastSyncError: null,
+          nextAutoSyncAt: getNextAutoSyncAt(),
+        },
+      }));
+      if (!silent) setMessage("Social leaderboards updated.");
+    } catch (error: unknown) {
+      console.warn("Social sync failed.", error);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          lastSyncError: getErrorMessage(error, "Could not sync social data."),
+          nextAutoSyncAt: getNextAutoSyncAt(),
+        },
+      }));
+      if (!silent) setMessage(getErrorMessage(error, "Could not sync social data."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  function startEditingSocialName() {
+    setSocialNameDraft(state.social.displayName);
+    setSocialNameEditing(true);
+  }
+
+  function cancelEditingSocialName() {
+    setSocialNameDraft(state.social.displayName);
+    setSocialNameEditing(false);
+  }
+
+  async function saveSocialName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const displayName = socialNameDraft.trim().slice(0, 48);
+    if (!displayName) {
+      setMessage("Give your player a name first.");
+      return;
+    }
+
+    const nextState = {
+      ...state,
+      social: {
+        ...state.social,
+        displayName,
+      },
+    };
+    setState(nextState);
+    setSocialNameEditing(false);
+    setMessage("Player name saved.");
+    if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
+  }
+
+  async function submitFriendRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const friendCode = friendCodeDraft.trim().toUpperCase();
+    if (!friendCode) {
+      setMessage("Enter a friend code first.");
+      return;
+    }
+    if (friendCode === state.social.friendCode) {
+      setMessage("That is your own friend code.");
+      return;
+    }
+
+    setSocialSyncing(true);
+    try {
+      await createFriendRequest(state.social, friendCode);
+      setFriendCodeDraft("");
+      await runSocialSync({ silent: true });
+      setMessage("Friend request sent.");
+    } catch (error: unknown) {
+      console.warn("Could not send friend request.", error);
+      setMessage(getErrorMessage(error, "Could not send friend request."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function answerFriendRequest(requestId: string, response: "accepted" | "declined") {
+    setSocialSyncing(true);
+    try {
+      const result = await respondToFriendRequest(state.social, requestId, response);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          ...result.social,
+          lastSyncedAt: new Date().toISOString(),
+          lastSyncError: null,
+          nextAutoSyncAt: getNextAutoSyncAt(),
+        },
+      }));
+      setMessage(response === "accepted" ? "Friend request accepted." : "Friend request declined.");
+    } catch (error: unknown) {
+      console.warn("Could not respond to friend request.", error);
+      setMessage(getErrorMessage(error, "Could not update friend request."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
   function openMenuPanel(panel: Exclude<MenuPanel, null>) {
     setActiveMenuPanel(panel);
     setMenuOpen(false);
@@ -1905,6 +2120,10 @@ function App() {
     void checkForUpdates({ silent: true, automatic: true });
   });
 
+  const runAutomaticSocialSync = useEffectEvent(() => {
+    if (shouldAutoSyncSocial(state.social)) void runSocialSync({ silent: true });
+  });
+
   useEffect(() => {
     if (!isTauriApp()) return undefined;
     if (updateInstallSupport.packageHint === "unknown" && updateInstallSupport.runtimeChannel === "unknown") return undefined;
@@ -1914,6 +2133,12 @@ function App() {
     const interval = window.setInterval(runAutomaticUpdateCheck, AUTO_UPDATE_CHECK_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [updateInstallSupport.packageHint, updateInstallSupport.runtimeChannel]);
+
+  useEffect(() => {
+    runAutomaticSocialSync();
+    const interval = window.setInterval(runAutomaticSocialSync, 60 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -3250,7 +3475,7 @@ function App() {
     const todayMinutes = getTodayMinutes(state);
     const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
     const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
-    const tasksCompletedToday = getTasksCompletedToday(state);
+    const unitsCompletedToday = getUnitsCompletedToday(state);
     return (
       <article className="panel-card design-card design-today-card">
         <div className="design-today-top">
@@ -3264,8 +3489,8 @@ function App() {
 
         <div className="design-mini-metrics">
           <div>
-            <span>Tasks done</span>
-            <strong>{tasksCompletedToday}</strong>
+            <span>Units done</span>
+            <strong>{formatCompletedUnits(unitsCompletedToday)}</strong>
           </div>
           <div>
             <span>Day streak</span>
@@ -4255,6 +4480,7 @@ function App() {
           ["timer", "Timer"],
           ["vault", "Vault"],
           ["break", "Break Room"],
+          ["friends", "Social"],
         ] as [TabKey, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -4267,6 +4493,7 @@ function App() {
               {key === "planner" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M7 14h5M7 17h8" /></>}
               {key === "timer" && <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M12 5V3M9 3h6" /></>}
               {key === "vault" && <><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z" /><path d="M9 12l2 2 4-4" /></>}
+              {key === "friends" && <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.4 3-5 6-5s5.2 1.6 6 5" /><path d="M16 11a2.5 2.5 0 1 0 0-5" /><path d="M17 15c2.1.5 3.4 2 4 5" /></>}
               {key === "break" && <><path d="M6 12h4M14 12h4M8 10V8M16 10V8" /><rect x="2" y="7" width="20" height="12" rx="3" /></>}
             </svg>
             {label}
@@ -5830,6 +6057,190 @@ function App() {
               )}
             </>
           ) : null}
+        </section>
+      ) : null}
+
+      {state.activeTab === "friends" ? (
+        <section className="arena-root fade-up">
+          <ArenaBg />
+          <div className="arena-hero-header">
+            <span className="arena-hero-title">Study Arena</span>
+            <span className="arena-hero-sub">Compete. Focus. Rise.</span>
+          </div>
+
+          <div className="arena-layout">
+            <div className="arena-left">
+              <article className="arena-player-card">
+                <div className="arena-player-card__inner">
+                  <div className="arena-player-main">
+                    <ArenaAvatar name={state.social.displayName} self size="lg" />
+                    <div className="arena-player-copy">
+                      {socialNameEditing ? (
+                        <form className="arena-name-edit" onSubmit={saveSocialName}>
+                          <input className="arena-name-input" value={socialNameDraft} onChange={(event) => setSocialNameDraft(event.target.value)} maxLength={48} autoFocus />
+                          <button type="submit" className="arena-icon-button arena-icon-button--save" title="Save player name">✓</button>
+                          <button type="button" className="arena-icon-button" onClick={cancelEditingSocialName} title="Cancel">×</button>
+                        </form>
+                      ) : (
+                        <div className="arena-name-row">
+                          <h2>{state.social.displayName}</h2>
+                          <button type="button" className="arena-name-edit-button" onClick={startEditingSocialName}>Edit</button>
+                        </div>
+                      )}
+                      <div className="arena-player-tags">
+                        <button type="button" className="arena-code-plate" onClick={copyFriendCode} title="Copy player tag">
+                          <span className="arena-code-key">#</span>
+                          <span>{state.social.friendCode}</span>
+                          <span className="arena-code-copy">⧉</span>
+                        </button>
+                        <span className={`arena-sync-pill ${state.social.lastSyncError ? "arena-sync-pill--error" : socialConfigured ? "arena-sync-pill--ready" : "arena-sync-pill--local"}`}>
+                          <span />{state.social.lastSyncError ? "Sync Issue" : socialConfigured ? "Arena Synced" : "Local Only"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="arena-player-stats">
+                    <div className="arena-mini-stat arena-mini-stat--daily"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(localSocialDaily.minutes)}</strong><span>Today</span></div></div>
+                    <div className="arena-mini-stat arena-mini-stat--weekly"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(localSocialWeekly.minutes)}</strong><span>This Week</span></div></div>
+                    <div className="arena-mini-stat arena-mini-stat--overall"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(localSocialOverall.minutes)}</strong><span>All Time</span></div></div>
+                  </div>
+                </div>
+
+                <div className="arena-sync-console">
+                  <div>
+                    <span className="arena-kicker">Cloud sync</span>
+                    <p>Last synced: {lastSocialSyncLabel}</p>
+                    {state.social.lastSyncError ? <p className="arena-error">{state.social.lastSyncError}</p> : null}
+                    {!socialConfigured ? <p className="arena-error">Cloudflare Worker URL has not been configured yet.</p> : null}
+                  </div>
+                  <button type="button" className="arena-btn arena-btn--send" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                    {socialSyncing ? "Syncing..." : "Sync Arena"}
+                  </button>
+                </div>
+              </article>
+
+              <article className="arena-panel arena-squad-coming-soon">
+                <div className="arena-panel-head">
+                  <span className="arena-panel-icon">S</span>
+                  <div>
+                    <span className="arena-kicker">Coming soon</span>
+                    <h3>Squads</h3>
+                  </div>
+                </div>
+                <p>Team up in study squads, climb group rankings, and run focus challenges together. For now, friend leaderboards are live.</p>
+              </article>
+
+              <article className="arena-panel arena-friends-panel">
+                <div className="arena-panel-head">
+                  <span className="arena-panel-icon">+</span>
+                  <div>
+                    <span className="arena-kicker">Player tags</span>
+                    <h3>Friends</h3>
+                  </div>
+                </div>
+
+                <form className="arena-add-friend" onSubmit={submitFriendRequest}>
+                  <input className="arena-input" value={friendCodeDraft} onChange={(event) => setFriendCodeDraft(event.target.value.toUpperCase())} placeholder="Enter player tag, e.g. ABCD-1234" disabled={!socialConfigured} />
+                  <button type="submit" className="arena-btn arena-btn--send" disabled={socialSyncing || !socialConfigured}>Send</button>
+                </form>
+
+                <div className="arena-social-section">
+                  <h4>Incoming <span>{state.social.incomingFriendRequests.length}</span></h4>
+                  {state.social.incomingFriendRequests.length ? state.social.incomingFriendRequests.map((request) => (
+                    <div key={request.id} className="arena-request-card">
+                      <ArenaAvatar name={request.fromDisplayName} size="sm" />
+                      <div className="arena-request-copy"><strong>{request.fromDisplayName}</strong><span>{request.fromFriendCode}</span></div>
+                      <div className="arena-request-actions">
+                        <button type="button" className="arena-btn arena-btn--accept" onClick={() => void answerFriendRequest(request.id, "accepted")} disabled={socialSyncing}>Accept</button>
+                        <button type="button" className="arena-btn arena-btn--decline" onClick={() => void answerFriendRequest(request.id, "declined")} disabled={socialSyncing}>Decline</button>
+                      </div>
+                    </div>
+                  )) : <div className="arena-empty small">No incoming requests.</div>}
+                </div>
+
+                <div className="arena-social-section">
+                  <h4>Pending <span>{state.social.outgoingFriendRequests.length}</span></h4>
+                  {state.social.outgoingFriendRequests.length ? state.social.outgoingFriendRequests.map((request) => (
+                    <div key={request.id} className="arena-request-card">
+                      <ArenaAvatar name={request.toDisplayName} size="sm" />
+                      <div className="arena-request-copy"><strong>{request.toDisplayName}</strong><span>{request.toFriendCode}</span></div>
+                      <span className="arena-pending-badge">Pending</span>
+                    </div>
+                  )) : <div className="arena-empty small">No pending sent requests.</div>}
+                </div>
+
+                <div className="arena-social-section">
+                  <h4>Your Friends <span>{state.social.friends.length}</span></h4>
+                  {state.social.friends.length ? (
+                    <div className="arena-friend-grid">
+                      {state.social.friends.map((friend) => (
+                        <div key={friend.userId} className="arena-friend-card">
+                          <ArenaAvatar name={friend.displayName} size="sm" />
+                          <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatDate(friend.lastSeenAt)}` : ""}</span></div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="arena-empty">Share your player tag to build your friends leaderboard.</div>}
+                </div>
+              </article>
+            </div>
+
+            <article className="arena-leaderboard">
+              <div className="arena-leaderboard-head">
+                <div className="arena-title-cluster">
+                  <span className="arena-title-icon">⚔</span>
+                  <div>
+                    <span className="arena-kicker">Arena standings</span>
+                    <h2>{socialScope === "global" ? "World Arena" : "Friends Arena"}</h2>
+                    <p>{socialPeriod === "daily" ? "Daily Sprint" : socialPeriod === "weekly" ? "Weekly League" : "Hall of Focus"}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="arena-scope-toggle" aria-label="Leaderboard scope">
+                {(["global", "friends"] as SocialLeaderboardScope[]).map((scope) => (
+                  <button key={scope} type="button" className={socialScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setSocialScope(scope)}>
+                    {scope === "global" ? "World Arena" : "Friends Arena"}
+                  </button>
+                ))}
+              </div>
+
+              <div className="arena-period-chips" aria-label="Leaderboard period">
+                {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => (
+                  <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>
+                    {period === "daily" ? "Daily Sprint" : period === "weekly" ? "Weekly League" : "Hall of Focus"}
+                  </button>
+                ))}
+              </div>
+
+              {socialLeaderboard.length >= 3 ? (
+                <div className="arena-podium">
+                  {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => (
+                    <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`}>
+                      <ArenaAvatar name={entry.displayName} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
+                      <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
+                      <span>{formatMinutes(entry.minutes)}</span>
+                      <div className={`arena-podium-block arena-podium-block--${entry.rank}`}>
+                        <ArenaRankBadge rank={entry.rank} large={index === 1} />
+                        <small>{entry.sessions} sessions</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              <div className="arena-lb-rows">
+                {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => <ArenaLeaderboardRow key={entry.userId} entry={entry} />)}
+                {!socialLeaderboard.length ? (
+                  <div className="arena-empty">
+                    <strong>No contenders yet</strong>
+                    <span>Start studying and sync to claim your rank.</span>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          </div>
         </section>
       ) : null}
 
