@@ -2,7 +2,8 @@ import type { AppState, SocialFriendRequest, SocialLeaderboardEntry, SocialLeade
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
-const SOCIAL_API_URL = import.meta.env.VITE_SOCIAL_API_URL?.replace(/\/$/, "") ?? "";
+const DEFAULT_SOCIAL_API_URL = "https://study-tracker-social.danil-poluyanov13.workers.dev";
+const SOCIAL_API_URL = (import.meta.env.VITE_SOCIAL_API_URL || DEFAULT_SOCIAL_API_URL).replace(/\/$/, "");
 
 export interface SocialDailyStat {
   date: string;
