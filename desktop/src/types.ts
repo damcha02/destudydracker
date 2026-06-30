@@ -53,6 +53,11 @@ export interface CalendarEntry {
   completed: boolean;
   completedAt: string | null;
   createdAt: string;
+  startTime?: string;
+  endTime?: string;
+  adHocTitle?: string;
+  adHocSemesterId?: string;
+  adHocCourseId?: string;
 }
 
 export interface StudySession {

@@ -239,6 +239,11 @@ function normalizeCalendarEntries(entries: unknown): CalendarEntry[] {
       completed: Boolean(record.completed),
       completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+      startTime: typeof record.startTime === "string" ? record.startTime : undefined,
+      endTime: typeof record.endTime === "string" ? record.endTime : undefined,
+      adHocTitle: typeof record.adHocTitle === "string" ? record.adHocTitle : undefined,
+      adHocSemesterId: typeof record.adHocSemesterId === "string" ? record.adHocSemesterId : undefined,
+      adHocCourseId: typeof record.adHocCourseId === "string" ? record.adHocCourseId : undefined,
     }];
   });
 }

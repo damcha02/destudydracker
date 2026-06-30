@@ -434,6 +434,52 @@ type CalendarDay = {
 };
 
 type CalendarUnitAmount = CalendarEntry["unitAmount"];
+type CalendarTaskSource = "planner" | "new";
+type CalendarAddDraft = {
+  semesterId: string;
+  courseId: string;
+  source: CalendarTaskSource;
+  taskId: string;
+  title: string;
+  unitAmount: CalendarUnitAmount;
+  startTime: string;
+  durationMinutes: string;
+  noTime: boolean;
+};
+type CalendarEditDraft = {
+  startTime: string;
+  endTime: string;
+};
+type CalendarResizeState = {
+  entryId: string;
+  startY: number;
+  startMinutes: number;
+  endMinutes: number;
+};
+type CalendarMoveDragState = {
+  entryId: string;
+  durationMinutes: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+};
+type CalendarMovePreview = {
+  entryId: string;
+  x: number;
+  y: number;
+  top: number;
+  time: string;
+};
+
+const calendarTimelineHours = Array.from({ length: 18 }, (_, index) => index + 6);
+const calendarDurationOptions = [15, 30, 45, 60, 90, 120, 180];
+const calendarTimeStepMinutes = 5;
+const calendarTimelineStartHour = 6;
+const calendarTimelineHourHeight = 72;
+const calendarTimelineStartMinutes = calendarTimelineStartHour * 60;
+const calendarTimelineEndMinutes = 24 * 60;
+const calendarTimelineTotalMinutes = calendarTimelineEndMinutes - calendarTimelineStartMinutes;
+const calendarTimelineHeight = calendarTimelineHours.length * calendarTimelineHourHeight;
 
 const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: string }[] = [
   { id: "default", name: "Default", desc: "Editorial blue-grey with soft study accents.", swatch: "oklch(0.70 0.10 245)" },
@@ -684,10 +730,36 @@ function formatUnitAmount(amount: number) {
   return `${Number.isInteger(amount) ? amount : amount.toFixed(2)} units`;
 }
 
-function formatUnitsLeft(amount: number) {
-  const safeAmount = Math.max(0, amount);
-  if (Number.isInteger(safeAmount)) return safeAmount.toString();
-  return safeAmount.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+function timeToMinutes(time: string) {
+  const [hours, minutes] = time.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0;
+  return hours * 60 + minutes;
+}
+
+function isValidCalendarTime(time: string) {
+  if (!/^\d{2}:\d{2}$/.test(time)) return false;
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
+function snapCalendarMinutes(minutes: number) {
+  return Math.round(minutes / calendarTimeStepMinutes) * calendarTimeStepMinutes;
+}
+
+function minutesToTime(totalMinutes: number) {
+  const safeTotal = clamp(totalMinutes, 0, 23 * 60 + 59);
+  const hours = Math.floor(safeTotal / 60);
+  const minutes = safeTotal % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function addMinutesToTime(time: string, minutes: number) {
+  return minutesToTime(clamp(timeToMinutes(time) + minutes, 0, 23 * 60 + 59));
+}
+
+function formatTimeRange(entry: CalendarEntry) {
+  if (!entry.startTime) return "Unscheduled";
+  return entry.endTime ? `${entry.startTime} - ${entry.endTime}` : entry.startTime;
 }
 
 function getTimeGreeting(date = new Date()) {
@@ -1181,7 +1253,26 @@ function App() {
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
-  const [calendarUnitAmount, setCalendarUnitAmount] = useState<CalendarUnitAmount>(1);
+  const [calendarAddOpen, setCalendarAddOpen] = useState(false);
+  const [calendarAddDraft, setCalendarAddDraft] = useState<CalendarAddDraft>({
+    semesterId: "",
+    courseId: "",
+    source: "planner",
+    taskId: "",
+    title: "",
+    unitAmount: 1,
+    startTime: "09:00",
+    durationMinutes: "60",
+    noTime: false,
+  });
+  const [calendarEditEntryId, setCalendarEditEntryId] = useState<string | null>(null);
+  const [calendarEditDraft, setCalendarEditDraft] = useState<CalendarEditDraft>({ startTime: "09:00", endTime: "10:00" });
+  const [calendarDragEntryId, setCalendarDragEntryId] = useState<string | null>(null);
+  const [calendarMovePreview, setCalendarMovePreview] = useState<CalendarMovePreview | null>(null);
+  const [calendarResizeEntryId, setCalendarResizeEntryId] = useState<string | null>(null);
+  const calendarTimelineRef = useRef<HTMLDivElement | null>(null);
+  const calendarMoveDragRef = useRef<CalendarMoveDragState | null>(null);
+  const calendarResizeRef = useRef<CalendarResizeState | null>(null);
   const [calendarToday, setCalendarToday] = useState(localIsoDate);
   const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
   const [personalDailyGoalHoursDraft, setPersonalDailyGoalHoursDraft] = useState(() => String((state.settings.dailyGoalMinutes ?? 120) / 60));
@@ -1416,6 +1507,104 @@ function App() {
   }, [selectedTaskId, state.tasks]);
 
   useEffect(() => {
+    if (!calendarAddDraft.semesterId && state.semesters[0]?.id) {
+      setCalendarAddDraft((current) => ({ ...current, semesterId: state.semesters[0].id }));
+    }
+  }, [calendarAddDraft.semesterId, state.semesters]);
+
+  useEffect(() => {
+    function handleMoveDrag(event: globalThis.MouseEvent) {
+      const drag = calendarMoveDragRef.current;
+      const timeline = calendarTimelineRef.current;
+      if (!drag || !timeline) return;
+
+      const movedEnough = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+      if (!movedEnough && !drag.moved) return;
+      drag.moved = true;
+
+      const target = getTimelineTimeFromClientY(timeline, event.clientY);
+      setCalendarMovePreview({ entryId: drag.entryId, x: event.clientX, y: event.clientY, top: target.top, time: target.time });
+    }
+
+    function handleMoveEnd(event: globalThis.MouseEvent) {
+      const drag = calendarMoveDragRef.current;
+      const timeline = calendarTimelineRef.current;
+      if (!drag || !timeline) return;
+
+      if (!drag.moved) {
+        calendarMoveDragRef.current = null;
+        setCalendarDragEntryId(null);
+        setCalendarMovePreview(null);
+        return;
+      }
+
+      const target = getTimelineTimeFromClientY(timeline, event.clientY);
+      updateCalendarEntryTime(drag.entryId, target.time, addMinutesToTime(target.time, drag.durationMinutes));
+      calendarMoveDragRef.current = null;
+      setCalendarDragEntryId(null);
+      setCalendarMovePreview(null);
+    }
+
+    function handleResizeMove(event: globalThis.MouseEvent) {
+      const resize = calendarResizeRef.current;
+      if (!resize) return;
+
+      const minuteDelta = snapCalendarMinutes(((event.clientY - resize.startY) / 72) * 60);
+      const endMinutes = clamp(resize.endMinutes + minuteDelta, resize.startMinutes + calendarTimeStepMinutes, 23 * 60 + 59);
+      const endTime = minutesToTime(endMinutes);
+      setState((current) => ({
+        ...current,
+        calendarEntries: current.calendarEntries.map((entry) =>
+          entry.id === resize.entryId ? { ...entry, endTime } : entry,
+        ),
+      }));
+    }
+
+    function handleResizeEnd() {
+      calendarResizeRef.current = null;
+      setCalendarResizeEntryId(null);
+    }
+
+    window.addEventListener("mousemove", handleResizeMove);
+    window.addEventListener("mouseup", handleResizeEnd);
+    window.addEventListener("mousemove", handleMoveDrag);
+    window.addEventListener("mouseup", handleMoveEnd);
+    return () => {
+      window.removeEventListener("mousemove", handleResizeMove);
+      window.removeEventListener("mouseup", handleResizeEnd);
+      window.removeEventListener("mousemove", handleMoveDrag);
+      window.removeEventListener("mouseup", handleMoveEnd);
+    };
+  }, []);
+
+  useEffect(() => {
+    setCalendarAddDraft((current) => {
+      if (!current.semesterId) return current;
+      if (current.courseId && state.courses.some((course) => course.id === current.courseId && course.semesterId === current.semesterId)) return current;
+      return { ...current, courseId: "", taskId: "" };
+    });
+  }, [calendarAddDraft.semesterId, state.courses]);
+
+  useEffect(() => {
+    setCalendarAddDraft((current) => {
+      if (current.source !== "planner") return current;
+      const taskMatches = current.taskId && state.tasks.some((task) => {
+        if (task.id !== current.taskId) return false;
+        if (current.courseId) return task.courseId === current.courseId;
+        if (current.semesterId) return task.semesterId === current.semesterId;
+        return true;
+      });
+      if (taskMatches) return current;
+      const nextTask = state.tasks.find((task) => {
+        if (current.courseId) return task.courseId === current.courseId;
+        if (current.semesterId) return task.semesterId === current.semesterId;
+        return true;
+      });
+      return { ...current, taskId: nextTask?.id ?? "" };
+    });
+  }, [calendarAddDraft.courseId, calendarAddDraft.semesterId, state.tasks]);
+
+  useEffect(() => {
     const firstSemester = state.semesters[0]?.id ?? "";
     if (!courseDraft.semesterId && firstSemester) {
       setCourseDraft((current) => ({ ...current, semesterId: firstSemester }));
@@ -1461,6 +1650,18 @@ function App() {
   const selectedSummaryFile = summaryFiles.find((file) => file.path === selectedSummaryPath) ?? summaryFiles[0] ?? null;
   const selectedSummaryUrl = selectedSummaryFile ? convertFileSrc(selectedSummaryFile.path) : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
+  const calendarAddCourses = useMemo(
+    () => calendarAddDraft.semesterId ? state.courses.filter((course) => course.semesterId === calendarAddDraft.semesterId) : [],
+    [calendarAddDraft.semesterId, state.courses],
+  );
+  const calendarAddTasks = useMemo(
+    () => state.tasks.filter((task) => {
+      if (calendarAddDraft.courseId) return task.courseId === calendarAddDraft.courseId;
+      if (calendarAddDraft.semesterId) return task.semesterId === calendarAddDraft.semesterId;
+      return true;
+    }),
+    [calendarAddDraft.courseId, calendarAddDraft.semesterId, state.tasks],
+  );
 
   useEffect(() => {
     const firstSemester = state.semesters[0]?.id ?? "";
@@ -1724,32 +1925,13 @@ function App() {
     totals.forEach((amount, taskId) => remainders.set(taskId, amount - Math.floor(amount + 0.0001)));
     return remainders;
   }, [state.calendarEntries]);
-  const calendarFillTasks = useMemo(
-    () =>
-      [...state.tasks]
-        .map((task) => ({
-          task,
-          unscheduledUnits: Math.max(
-            0,
-            getRemainingUnits(task) - (scheduledIncompleteByTask.get(task.id) ?? 0) - (completedCalendarRemainderByTask.get(task.id) ?? 0),
-          ),
-        }))
-        .filter((item) => item.unscheduledUnits >= 0.25)
-        .sort((a, b) => {
-          const aDue = a.task.dueDate ? daysUntil(a.task.dueDate) : 999;
-          const bDue = b.task.dueDate ? daysUntil(b.task.dueDate) : 999;
-          if (aDue !== bDue) return aDue - bDue;
-          return a.task.title.localeCompare(b.task.title);
-        }),
-    [completedCalendarRemainderByTask, scheduledIncompleteByTask, state.tasks],
-  );
   const todayCalendarEntries = useMemo(
     () =>
       state.calendarEntries
-        .filter((entry) => entry.date === calendarToday && taskLookup.has(entry.taskId))
+        .filter((entry) => entry.date === calendarToday && (taskLookup.has(entry.taskId) || entry.adHocTitle))
         .sort((a, b) => {
           if (a.completed !== b.completed) return a.completed ? 1 : -1;
-          return a.createdAt.localeCompare(b.createdAt);
+          return (a.startTime ?? a.createdAt).localeCompare(b.startTime ?? b.createdAt);
         }),
     [calendarToday, state.calendarEntries, taskLookup],
   );
@@ -2691,32 +2873,76 @@ function App() {
   const [stretchIndex, setStretchIndex] = useState(() => Math.floor(Math.random() * stretchIdeas.length));
   const stretch = stretchIdeas[stretchIndex];
 
-  function addCalendarEntry(task: Task, date: string) {
-    if (task.dueDate && date > task.dueDate) {
-      setMessage(`"${task.title}" cannot be scheduled after ${formatDate(task.dueDate)}.`);
+  function addCalendarEntryFromDrawer() {
+    if (!selectedCalendarDate) return;
+
+    const durationMinutes = Number(calendarAddDraft.durationMinutes);
+    const startTime = calendarAddDraft.startTime;
+    if (!calendarAddDraft.noTime && !isValidCalendarTime(startTime)) {
+      setMessage("Use 24-hour time like 09:00 or 17:30.");
+      return;
+    }
+    const endTime = addMinutesToTime(startTime, Number.isFinite(durationMinutes) ? durationMinutes : 60);
+    const timeOptions = calendarAddDraft.noTime ? {} : { startTime, endTime };
+
+    if (calendarAddDraft.source === "planner") {
+      const task = taskLookup.get(calendarAddDraft.taskId);
+      if (!task) {
+        setMessage("Pick a planner task first.");
+        return;
+      }
+      if (task.dueDate && selectedCalendarDate > task.dueDate) {
+        setMessage(`"${task.title}" cannot be scheduled after ${formatDate(task.dueDate)}.`);
+        return;
+      }
+
+      const unscheduledUnits = Math.max(
+        0,
+        getRemainingUnits(task) - (scheduledIncompleteByTask.get(task.id) ?? 0) - (completedCalendarRemainderByTask.get(task.id) ?? 0),
+      );
+      if (unscheduledUnits < calendarAddDraft.unitAmount) {
+        setMessage(`All remaining units for "${task.title}" are already planned.`);
+        return;
+      }
+
+      const entry: CalendarEntry = {
+        id: makeId(),
+        taskId: task.id,
+        date: selectedCalendarDate,
+        unitAmount: calendarAddDraft.unitAmount,
+        completed: false,
+        completedAt: null,
+        createdAt: new Date().toISOString(),
+        ...timeOptions,
+      };
+      setState((current) => ({ ...current, calendarEntries: [...current.calendarEntries, entry] }));
+      setCalendarAddOpen(false);
       return;
     }
 
-    const unscheduledUnits = Math.max(
-      0,
-      getRemainingUnits(task) - (scheduledIncompleteByTask.get(task.id) ?? 0) - (completedCalendarRemainderByTask.get(task.id) ?? 0),
-    );
-    if (unscheduledUnits < calendarUnitAmount) {
-      setMessage(`All remaining units for "${task.title}" are already planned.`);
+    const title = calendarAddDraft.title.trim();
+    if (!title) {
+      setMessage("Type a task title first.");
       return;
     }
 
     const entry: CalendarEntry = {
       id: makeId(),
-      taskId: task.id,
-      date,
-      unitAmount: calendarUnitAmount,
+      taskId: "",
+      date: selectedCalendarDate,
+      unitAmount: calendarAddDraft.unitAmount,
       completed: false,
       completedAt: null,
       createdAt: new Date().toISOString(),
+      adHocTitle: title,
+      adHocSemesterId: calendarAddDraft.semesterId || undefined,
+      adHocCourseId: calendarAddDraft.courseId || undefined,
+      ...timeOptions,
     };
 
     setState((current) => ({ ...current, calendarEntries: [...current.calendarEntries, entry] }));
+    setCalendarAddDraft((current) => ({ ...current, title: "" }));
+    setCalendarAddOpen(false);
   }
 
   function toggleCalendarEntry(entryId: string) {
@@ -2753,6 +2979,84 @@ function App() {
     }));
   }
 
+  function updateCalendarEntryTime(entryId: string, startTime: string, endTime: string) {
+    setState((current) => ({
+      ...current,
+      calendarEntries: current.calendarEntries.map((entry) =>
+        entry.id === entryId ? { ...entry, startTime, endTime } : entry,
+      ),
+    }));
+  }
+
+  function unscheduleCalendarEntry(entryId: string) {
+    setState((current) => ({
+      ...current,
+      calendarEntries: current.calendarEntries.map((entry) =>
+        entry.id === entryId ? { ...entry, startTime: undefined, endTime: undefined } : entry,
+      ),
+    }));
+    setCalendarEditEntryId(null);
+  }
+
+  function getEntryDurationMinutes(entry: CalendarEntry) {
+    if (!entry.startTime || !entry.endTime) return 60;
+    return Math.max(calendarTimeStepMinutes, timeToMinutes(entry.endTime) - timeToMinutes(entry.startTime));
+  }
+
+  function getTimelineTimeFromClientY(timeline: HTMLDivElement, clientY: number) {
+    const rect = timeline.getBoundingClientRect();
+    const ratio = clamp((clientY - rect.top) / Math.max(1, rect.height), 0, 0.99);
+    const minuteOffset = snapCalendarMinutes(ratio * calendarTimelineTotalMinutes);
+    const minutes = clamp(calendarTimelineStartMinutes + minuteOffset, calendarTimelineStartMinutes, calendarTimelineEndMinutes - calendarTimeStepMinutes);
+    return {
+      minutes,
+      time: minutesToTime(minutes),
+      top: ((minutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight,
+    };
+  }
+
+  function startCalendarEntryMove(event: MouseEvent<HTMLDivElement>, entry: CalendarEntry) {
+    if (calendarEditEntryId || calendarResizeRef.current) return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,.calendar-resize-handle")) return;
+    event.preventDefault();
+    setCalendarEditEntryId(null);
+    calendarMoveDragRef.current = { entryId: entry.id, durationMinutes: getEntryDurationMinutes(entry), startX: event.clientX, startY: event.clientY, moved: false };
+    setCalendarDragEntryId(entry.id);
+  }
+
+  function startCalendarEntryEdit(entry: CalendarEntry) {
+    const startTime = entry.startTime ?? "09:00";
+    setCalendarEditEntryId(entry.id);
+    setCalendarEditDraft({ startTime, endTime: entry.endTime ?? addMinutesToTime(startTime, 60) });
+  }
+
+  function saveCalendarEntryEdit(entryId: string) {
+    if (!isValidCalendarTime(calendarEditDraft.startTime) || !isValidCalendarTime(calendarEditDraft.endTime)) {
+      setMessage("Use 24-hour time like 09:00 or 17:30.");
+      return;
+    }
+    const startMinutes = timeToMinutes(calendarEditDraft.startTime);
+    const endMinutes = timeToMinutes(calendarEditDraft.endTime);
+    if (endMinutes <= startMinutes) {
+      setMessage("End time must be after start time.");
+      return;
+    }
+
+    updateCalendarEntryTime(entryId, calendarEditDraft.startTime, calendarEditDraft.endTime);
+    setCalendarEditEntryId(null);
+  }
+
+  function startCalendarEntryResize(event: MouseEvent<HTMLDivElement>, entry: CalendarEntry) {
+    if (!entry.startTime) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startMinutes = timeToMinutes(entry.startTime);
+    const endMinutes = timeToMinutes(entry.endTime ?? addMinutesToTime(entry.startTime, 60));
+    calendarResizeRef.current = { entryId: entry.id, startY: event.clientY, startMinutes, endMinutes };
+    setCalendarResizeEntryId(entry.id);
+  }
+
   function shiftCalendar(direction: -1 | 1) {
     setCalendarCursorDate((current) => {
       if (calendarView === "month") {
@@ -2777,16 +3081,32 @@ function App() {
 
   function openCalendarDrawer(date: string) {
     setSelectedCalendarDate(date);
+    setCalendarAddOpen(false);
+    setCalendarEditEntryId(null);
   }
 
   function closeCalendarDrawer() {
     setSelectedCalendarDate(null);
+    setCalendarAddOpen(false);
+    setCalendarEditEntryId(null);
+    setCalendarDragEntryId(null);
+    calendarMoveDragRef.current = null;
+    setCalendarMovePreview(null);
+  }
+
+  function openCalendarAddDrawer() {
+    setCalendarAddOpen(true);
+  }
+
+  function closeCalendarAddDrawer() {
+    setCalendarAddOpen(false);
   }
 
   function openNextCalendarDay() {
     setSelectedCalendarDate((current) => {
       const nextDate = addCalendarDays(current ? parseCalendarDate(current) : new Date(), 1);
       setCalendarCursorDate(nextDate);
+      setCalendarAddOpen(false);
       return localIsoDate(nextDate);
     });
   }
@@ -3226,6 +3546,102 @@ function App() {
     const selectedEntries = selectedCalendarDate ? (calendarEntriesByDate.get(selectedCalendarDate) ?? []) : [];
     const selectedExams = selectedCalendarDate ? (examsByDate.get(selectedCalendarDate) ?? []) : [];
     const selectedDeadlines = selectedCalendarDate ? (deadlinesByDate.get(selectedCalendarDate) ?? []) : [];
+    const timedEntries = selectedEntries
+      .filter((entry) => entry.startTime)
+      .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
+    const unscheduledEntries = selectedEntries.filter((entry) => !entry.startTime);
+
+    const getEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
+    const getEntryTitle = (entry: CalendarEntry) => getEntryTask(entry)?.title ?? entry.adHocTitle ?? "Calendar task";
+    const getEntryCourse = (entry: CalendarEntry) => {
+      const task = getEntryTask(entry);
+      return task ? courseLookup.get(task.courseId) ?? null : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) ?? null : null;
+    };
+    const getEntrySemester = (entry: CalendarEntry) => {
+      const task = getEntryTask(entry);
+      return task ? semesterLookup.get(task.semesterId) ?? null : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) ?? null : null;
+    };
+
+    function renderTimelineEntry(entry: CalendarEntry) {
+      const task = getEntryTask(entry);
+      const course = getEntryCourse(entry);
+      const semester = getEntrySemester(entry);
+      const isEditing = calendarEditEntryId === entry.id;
+      const isDragging = calendarDragEntryId === entry.id;
+      const isResizing = calendarResizeEntryId === entry.id;
+      const entryStartMinutes = entry.startTime ? timeToMinutes(entry.startTime) : calendarTimelineStartMinutes;
+      const entryEndMinutes = entry.endTime ? timeToMinutes(entry.endTime) : entryStartMinutes + 60;
+      const entryTop = ((entryStartMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
+      const entryHeight = Math.max(58, ((entryEndMinutes - entryStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+      const entryStyle = {
+        "--entry-color": course?.color ?? "var(--accent)",
+        ...(entry.startTime ? { top: `${Math.max(4, entryTop + 4)}px`, height: `${entryHeight}px` } : {}),
+      } as CSSProperties;
+      return (
+        <div
+          key={entry.id}
+          className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""}`}
+          onMouseDown={(event) => !isEditing && startCalendarEntryMove(event, entry)}
+          style={entryStyle}
+        >
+          {isEditing ? (
+            <div className="calendar-edit-inline">
+              <label>
+                <span>Start</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-2][0-9]:[0-5][0-9]"
+                  placeholder="09:00"
+                  value={calendarEditDraft.startTime}
+                  onChange={(event) => setCalendarEditDraft((current) => ({ ...current, startTime: event.target.value }))}
+                />
+              </label>
+              <label>
+                <span>End</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-2][0-9]:[0-5][0-9]"
+                  placeholder="10:00"
+                  value={calendarEditDraft.endTime}
+                  onChange={(event) => setCalendarEditDraft((current) => ({ ...current, endTime: event.target.value }))}
+                />
+              </label>
+              <button type="button" className="calendar-primary-button" onClick={() => saveCalendarEntryEdit(entry.id)}>
+                Save
+              </button>
+              <button type="button" className="ghost-button small-button" onClick={() => setCalendarEditEntryId(null)}>
+                Cancel
+              </button>
+              <button type="button" className="ghost-button small-button" onClick={() => unscheduleCalendarEntry(entry.id)}>
+                Unschedule
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="calendar-timeline-entry-copy">
+                <strong>{getEntryTitle(entry)}</strong>
+                <span>{course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
+                <small>{formatTimeRange(entry)} · {formatUnitAmount(getCalendarEntryAmount(entry))}{task ? "" : " · calendar only"}</small>
+              </div>
+              <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
+              <div className="calendar-timeline-entry-actions">
+                <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
+                  Edit
+                </button>
+                <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
+                  Remove
+                </button>
+              </div>
+              {entry.startTime ? (
+                <div className="calendar-resize-handle" onMouseDown={(event) => startCalendarEntryResize(event, entry)} title="Drag to change duration" />
+              ) : null}
+            </>
+          )}
+        </div>
+      );
+    }
 
     return (
       <article className="panel-card planner-calendar-card">
@@ -3281,22 +3697,25 @@ function App() {
             return (
               <section
                 key={day.iso}
+                role="button"
+                tabIndex={0}
                 className={`calendar-day-card ${day.inCurrentMonth ? "" : "muted-month"} ${isToday ? "today" : ""} ${isSelected ? "selected" : ""}`}
+                onClick={() => openCalendarDrawer(day.iso)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openCalendarDrawer(day.iso);
+                  }
+                }}
               >
-                <button
-                  type="button"
-                  className="calendar-day-top"
-                  onClick={() => openCalendarDrawer(day.iso)}
-                >
+                <div className="calendar-day-top">
                   <span>{day.date.getDate()}</span>
                   <small>{new Intl.DateTimeFormat("en", { month: "short", year: "numeric" }).format(day.date)}</small>
-                </button>
+                </div>
 
                 <div className="calendar-day-items">
                   {entries.slice(0, 3).map((entry) => {
-                    const task = taskLookup.get(entry.taskId);
-                    if (!task) return null;
-                    const course = courseLookup.get(task.courseId);
+                    const course = getEntryCourse(entry);
                     return (
                       <div key={entry.id} className={`calendar-pill task-pill ${entry.completed ? "completed" : ""}`} style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}>
                         <input
@@ -3307,7 +3726,7 @@ function App() {
                           onClick={(event) => event.stopPropagation()}
                         />
                         <span className="calendar-task-copy">
-                          <span className="calendar-task-title">{task.title}</span>
+                          <span className="calendar-task-title">{getEntryTitle(entry)}</span>
                           <span className="calendar-task-course">{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</span>
                         </span>
                       </div>
@@ -3339,129 +3758,250 @@ function App() {
         </div>
 
         {selectedCalendarDate && selectedDate ? (
-          <div className="calendar-drawer-backdrop" onMouseDown={closeCalendarDrawer}>
-            <aside className="calendar-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day planner">
-              <div className="calendar-drawer-head">
+          <div className="calendar-drawer-backdrop calendar-day-view-backdrop" onMouseDown={closeCalendarDrawer}>
+            <aside className="calendar-day-view" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day view">
+              <div className="calendar-day-view-head">
                 <div>
-                  <p className="eyebrow">Plan day</p>
+                  <p className="eyebrow">Day view</p>
                   <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
+                  <p className="section-note">Click + to assign planner tasks or create calendar-only tasks.</p>
                 </div>
-                <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
-                  Done
-                </button>
+                <div className="calendar-day-view-actions">
+                  <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
+                    + Add task
+                  </button>
+                  <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
+                    Done
+                  </button>
+                </div>
               </div>
 
-              <div className="calendar-drawer-section">
-                <div>
-                  <strong>Scheduled units</strong>
-                  <small>Click an unfinished unit to remove it. Use the checkbox to mark work done.</small>
+              <div className="calendar-day-view-body">
+                <div className="calendar-timeline">
+                  <div
+                    ref={calendarTimelineRef}
+                    className={`calendar-timeline-canvas ${calendarMovePreview ? "drag-over" : ""}`}
+                    style={{ height: `${calendarTimelineHeight}px` }}
+                  >
+                    {calendarTimelineHours.map((hour) => (
+                      <div key={hour} className="calendar-timeline-hour" style={{ height: `${calendarTimelineHourHeight}px` }}>
+                        <div className="calendar-timeline-time">{String(hour).padStart(2, "0")}:00</div>
+                      </div>
+                    ))}
+                    {calendarMovePreview ? (
+                      <div className="calendar-drop-guide" style={{ top: `${calendarMovePreview.top}px` }}>
+                        <span>{calendarMovePreview.time}</span>
+                      </div>
+                    ) : null}
+                    {timedEntries.map(renderTimelineEntry)}
+                  </div>
                 </div>
-                <div className="calendar-expanded-list drawer-list">
-                  {selectedEntries.length ? (
-                    selectedEntries.map((entry) => {
-                      const task = taskLookup.get(entry.taskId);
-                      if (!task) return null;
-                      const course = courseLookup.get(task.courseId);
-                      return (
-                        <div key={entry.id} className={`calendar-entry-row ${entry.completed ? "done" : ""}`}>
-                          <div className="calendar-entry-main">
-                            <input type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} />
-                            <button
-                              type="button"
-                              className="calendar-unit-button"
-                              disabled={entry.completed}
-                              onClick={() => removeCalendarEntry(entry.id)}
-                              style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}
-                            >
-                              <span>{task.title}</span>
-                              <small>{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</small>
-                            </button>
+
+                <div className="calendar-day-side-panel">
+                  <section className="calendar-drawer-section">
+                    <div>
+                      <strong>Unscheduled</strong>
+                      <small>Entries without a time stay here.</small>
+                    </div>
+                    <div className="calendar-expanded-list drawer-list">
+                      {unscheduledEntries.length ? unscheduledEntries.map(renderTimelineEntry) : (
+                        <p className="empty-copy compact-empty">No unscheduled calendar tasks.</p>
+                      )}
+                    </div>
+                  </section>
+
+                  {selectedExams.length || selectedDeadlines.length ? (
+                    <section className="calendar-drawer-section">
+                      <div>
+                        <strong>Fixed markers</strong>
+                        <small>Exams and deadlines are pulled from the planner.</small>
+                      </div>
+                      <div className="calendar-expanded-list drawer-list">
+                        {selectedExams.map((exam) => (
+                          <div key={exam.id} className="calendar-marker-row exam-marker">
+                            <strong>Exam</strong>
+                            <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
                           </div>
-                        </div>
-                      );
-                    })
-                  ) : (
-                    <p className="empty-copy compact-empty">No task units scheduled yet.</p>
-                  )}
-                </div>
-              </div>
-
-              {selectedExams.length || selectedDeadlines.length ? (
-                <div className="calendar-drawer-section">
-                  <div>
-                    <strong>Fixed markers</strong>
-                    <small>Exams and deadlines are pulled from the planner.</small>
-                  </div>
-                  <div className="calendar-expanded-list drawer-list">
-                    {selectedExams.map((exam) => (
-                      <div key={exam.id} className="calendar-marker-row exam-marker">
-                        <strong>Exam</strong>
-                        <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
+                        ))}
+                        {selectedDeadlines.map((task) => (
+                          <div key={task.id} className="calendar-marker-row deadline-marker">
+                            <strong>Deadline</strong>
+                            <span>{task.title} · {courseLookup.get(task.courseId)?.name ?? "No course"}</span>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                    {selectedDeadlines.map((task) => (
-                      <div key={task.id} className="calendar-marker-row deadline-marker">
-                        <strong>Deadline</strong>
-                        <span>{task.title} · {courseLookup.get(task.courseId)?.name ?? "No course"}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                    </section>
+                  ) : null}
 
-              <div className="calendar-fill-panel drawer-fill-panel">
-                <div>
-                  <strong>Add task units</strong>
-                  <small>Each click schedules the selected amount for this day.</small>
+                  <section className="calendar-drawer-section">
+                    <div>
+                      <strong>Day controls</strong>
+                      <small>Move through days or add a new calendar block.</small>
+                    </div>
+                    <div className="calendar-day-side-actions">
+                      <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
+                        Next day
+                      </button>
+                      <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
+                        + Add task
+                      </button>
+                    </div>
+                  </section>
                 </div>
-                <div className="calendar-unit-toggle" aria-label="Calendar unit amount">
-                  {([1, 0.5, 0.25] as CalendarUnitAmount[]).map((amount) => (
-                    <button
-                      key={amount}
-                      type="button"
-                      className={calendarUnitAmount === amount ? "active" : ""}
-                      onClick={() => setCalendarUnitAmount(amount)}
-                    >
-                      {amount === 1 ? "1" : amount === 0.5 ? "1/2" : "1/4"}
-                    </button>
-                  ))}
-                </div>
-                <div className="calendar-fill-list">
-                  {calendarFillTasks.length ? (
-                    calendarFillTasks.map(({ task, unscheduledUnits }) => {
-                      const course = courseLookup.get(task.courseId);
-                      const pastDeadline = Boolean(task.dueDate && selectedCalendarDate > task.dueDate);
-                      const notEnoughUnits = unscheduledUnits < calendarUnitAmount;
-                      return (
-                        <button
-                          key={task.id}
-                          type="button"
-                          className="calendar-fill-task"
-                          disabled={pastDeadline || notEnoughUnits}
-                          onClick={() => addCalendarEntry(task, selectedCalendarDate)}
-                          style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}
+
+                {calendarAddOpen ? (
+                  <aside className="calendar-drawer calendar-add-drawer" aria-label="Add calendar task">
+                    <div className="calendar-drawer-head">
+                      <div>
+                        <p className="eyebrow">Add task</p>
+                        <h3>Plan a time block</h3>
+                      </div>
+                      <button type="button" className="ghost-button small-button" onClick={closeCalendarAddDrawer}>
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="calendar-add-form">
+                      <label>
+                        <span>Semester</span>
+                        <select
+                          value={calendarAddDraft.semesterId}
+                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, semesterId: event.target.value, courseId: "", taskId: "" }))}
                         >
-                          <span className="calendar-fill-task-title">{task.title}</span>
-                          <span className="calendar-fill-task-course">{course?.name ?? "No course"}</span>
-                          <small>
-                            {formatUnitsLeft(unscheduledUnits)} left{task.dueDate ? ` · due ${formatDate(task.dueDate)}` : " · no due date"}
-                          </small>
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <p className="empty-copy compact-empty">Every remaining task unit is already planned.</p>
-                  )}
-                </div>
-              </div>
+                          <option value="">No semester</option>
+                          {state.semesters.map((semester) => (
+                            <option key={semester.id} value={semester.id}>{semester.name}</option>
+                          ))}
+                        </select>
+                      </label>
 
-              <div className="calendar-drawer-actions">
-                <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
-                  Next day
-                </button>
-                <button type="button" className="calendar-primary-button" onClick={closeCalendarDrawer}>
-                  Done
-                </button>
+                      <label>
+                        <span>Subject</span>
+                        <select
+                          value={calendarAddDraft.courseId}
+                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, courseId: event.target.value, taskId: "" }))}
+                        >
+                          <option value="">General</option>
+                          {calendarAddCourses.map((course) => (
+                            <option key={course.id} value={course.id}>{course.name}</option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <div className="calendar-source-toggle" aria-label="Task source">
+                        {(["planner", "new"] as CalendarTaskSource[]).map((source) => (
+                          <button
+                            key={source}
+                            type="button"
+                            className={calendarAddDraft.source === source ? "active" : ""}
+                            onClick={() => setCalendarAddDraft((current) => ({ ...current, source }))}
+                          >
+                            {source === "planner" ? "From planner" : "New task"}
+                          </button>
+                        ))}
+                      </div>
+
+                      {calendarAddDraft.source === "planner" ? (
+                        <label>
+                          <span>Planner task</span>
+                          <select
+                            value={calendarAddDraft.taskId}
+                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, taskId: event.target.value }))}
+                          >
+                            <option value="">Pick a task</option>
+                            {calendarAddTasks.map((task) => (
+                              <option key={task.id} value={task.id}>{task.title}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <label>
+                          <span>New calendar task</span>
+                          <input
+                            value={calendarAddDraft.title}
+                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, title: event.target.value }))}
+                            placeholder="Watch Youtube video"
+                          />
+                        </label>
+                      )}
+
+                      <div className="calendar-unit-toggle" aria-label="Calendar unit amount">
+                        {([1, 0.5, 0.25] as CalendarUnitAmount[]).map((amount) => (
+                          <button
+                            key={amount}
+                            type="button"
+                            className={calendarAddDraft.unitAmount === amount ? "active" : ""}
+                            onClick={() => setCalendarAddDraft((current) => ({ ...current, unitAmount: amount }))}
+                          >
+                            {amount === 1 ? "1" : amount === 0.5 ? "1/2" : "1/4"}
+                          </button>
+                        ))}
+                      </div>
+
+                      <label className="calendar-checkbox-label">
+                        <input
+                          type="checkbox"
+                          checked={calendarAddDraft.noTime}
+                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, noTime: event.target.checked }))}
+                        />
+                        <span>No time yet (keep unscheduled)</span>
+                      </label>
+
+                      {!calendarAddDraft.noTime ? (
+                        <>
+                          <div className="calendar-time-form-grid">
+                            <label>
+                              <span>Start</span>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-2][0-9]:[0-5][0-9]"
+                                placeholder="09:00"
+                                value={calendarAddDraft.startTime}
+                                onChange={(event) => setCalendarAddDraft((current) => ({ ...current, startTime: event.target.value }))}
+                              />
+                            </label>
+                            <label>
+                              <span>Duration</span>
+                              <select
+                                value={calendarAddDraft.durationMinutes}
+                                onChange={(event) => setCalendarAddDraft((current) => ({ ...current, durationMinutes: event.target.value }))}
+                              >
+                                {calendarDurationOptions.map((minutes) => (
+                                  <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+
+                          <p className="calendar-time-preview">
+                            {calendarAddDraft.startTime} - {addMinutesToTime(calendarAddDraft.startTime, Number(calendarAddDraft.durationMinutes) || 60)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="calendar-time-preview">This task will appear in Unscheduled.</p>
+                      )}
+                    </div>
+
+                    <div className="calendar-drawer-actions">
+                      <button type="button" className="ghost-button" onClick={closeCalendarAddDrawer}>
+                        Cancel
+                      </button>
+                      <button type="button" className="calendar-primary-button" onClick={addCalendarEntryFromDrawer}>
+                        Add to calendar
+                      </button>
+                    </div>
+                  </aside>
+                ) : null}
+                {calendarMovePreview ? (() => {
+                  const previewEntry = selectedEntries.find((entry) => entry.id === calendarMovePreview.entryId);
+                  return (
+                    <div className="calendar-drag-preview" style={{ left: calendarMovePreview.x + 14, top: calendarMovePreview.y + 14 }}>
+                      <strong>{previewEntry ? getEntryTitle(previewEntry) : "Calendar task"}</strong>
+                      <span>{calendarMovePreview.time}</span>
+                    </div>
+                  );
+                })() : null}
               </div>
             </aside>
           </div>
@@ -3469,7 +4009,6 @@ function App() {
       </article>
     );
   }
-
   function renderTodayCard() {
     const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
     const todayMinutes = getTodayMinutes(state);
@@ -3865,22 +4404,22 @@ function App() {
           {entries.length ? (
             entries.map((entry) => {
               const task = taskLookup.get(entry.taskId);
-              if (!task) return null;
-              const course = courseLookup.get(task.courseId);
-              const semester = semesterLookup.get(task.semesterId);
+              const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
+              const semester = task ? semesterLookup.get(task.semesterId) : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) : null;
+              const title = task?.title ?? entry.adHocTitle ?? "Calendar task";
               return (
-                <div key={entry.id} className={`design-task-item ${selectedTaskId === task.id ? "selected" : ""}`}>
-                  <button type="button" className="design-task-main" onClick={() => setSelectedTaskId(task.id)}>
+                <div key={entry.id} className={`design-task-item ${task && selectedTaskId === task.id ? "selected" : ""}`}>
+                  <button type="button" className="design-task-main" onClick={() => task ? setSelectedTaskId(task.id) : openCalendarDrawer(entry.date)}>
                     <span className="design-course-stripe" style={{ background: course?.color ?? "var(--accent)" }} />
                     <span className="design-task-copy">
                       <span className="design-task-title-line">
-                        <strong>{task.title}</strong>
-                        <em className={`priority-chip ${entry.completed ? "low" : task.priority}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
+                        <strong>{title}</strong>
+                        <em className={`priority-chip ${entry.completed ? "low" : task?.priority ?? "medium"}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
                       </span>
                       <span className="design-task-meta">
-                        <span>{course?.name ?? "No course"}</span>
+                        <span>{course?.name ?? "General"}</span>
                         <span>{semester?.name ?? "No semester"}</span>
-                        <span>{task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}</span>
+                        <span>{task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</span>
                       </span>
                     </span>
                   </button>
@@ -3892,9 +4431,11 @@ function App() {
                       onChange={() => toggleCalendarEntry(entry.id)}
                       title="Mark scheduled unit done"
                     />
-                    <button type="button" className="ghost-button small-button" onClick={() => focusTaskFromDashboard(task)}>
-                      Focus
-                    </button>
+                    {task ? (
+                      <button type="button" className="ghost-button small-button" onClick={() => focusTaskFromDashboard(task)}>
+                        Focus
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               );
