@@ -12,6 +12,7 @@ jobs:
   release:
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -59,6 +60,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_SOCIAL_API_URL: "https://study-tracker-social.danil-poluyanov13.workers.dev"
           STUDY_TRACKER_OFFICIAL_RELEASE: "1"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
