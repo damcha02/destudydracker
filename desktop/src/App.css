@@ -1,4 +1,7 @@
 .window-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   height: 38px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -3965,7 +3968,7 @@ input[type="color"] {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  align-items: stretch;
+  align-items: start;
 }
 
 .dashboard-half-row {
@@ -6801,6 +6804,10 @@ input[type="color"] {
 .design-stats-widget .section-head {
   margin-bottom: 14px;
   min-height: 0;
+}
+
+.design-exam-runway .section-head {
+  margin-bottom: 24px;
 }
 
 /* Dashboard card titles: 19px serif, matches design's CardHead */
