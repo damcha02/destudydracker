@@ -4564,7 +4564,15 @@ function App() {
     const hasData = totalAllTimeMinutes > 0;
     const hoveredDay = focusTip ? days[focusTip.idx] : null;
     const columnGap = focusRange === 365 ? 0 : focusRange === "week" || focusRange === 7 ? 4 : focusRange <= 14 ? 3 : focusRange <= 30 ? 2 : 1;
-    const maxHeight = heightClass.includes("short-weekly") ? 105 : 124;
+    const chartHeightByRange: Record<FocusRange, number> = {
+      week: 128,
+      7: 128,
+      14: 120,
+      30: 116,
+      60: 124,
+      365: 124,
+    };
+    const maxHeight = heightClass.includes("short-weekly") ? 105 : chartHeightByRange[focusRange];
     const columnMaxHeight = maxHeight - 5;
     const rangeDensityClass = focusRange === "week" ? "range-week" : focusRange <= 14 ? "range-short" : focusRange <= 30 ? "range-medium" : focusRange === 365 ? "range-year" : "range-long";
     const rangeLabel = focusRange === "week" ? "this week" : focusRange === 365 ? "past year" : `last ${focusRange} days`;

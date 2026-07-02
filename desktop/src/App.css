@@ -8260,8 +8260,8 @@ input[type="color"] {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: clamp(4px, 1cqw, 10px);
   overflow: visible;
-  margin: 14px -2px -2px;
-  padding: 14px 2px 0;
+  margin: 10px -2px -2px;
+  padding: 10px 2px 0;
   border-top: 1px solid var(--line-soft);
 }
 
@@ -8272,12 +8272,13 @@ input[type="color"] {
 
 .fossil-stats span {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   color: var(--fossil-clay);
   font-family: var(--font-mono);
   font-size: clamp(0.48rem, 1.2cqw, 0.58rem);
   font-weight: 800;
   letter-spacing: clamp(0.04em, 0.4cqw, 0.1em);
+  line-height: 1.1;
   text-transform: uppercase;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -8291,6 +8292,7 @@ input[type="color"] {
   font-family: var(--font-mono);
   font-size: clamp(0.72rem, 2.3cqw, 0.98rem);
   letter-spacing: -0.01em;
+  line-height: 1.05;
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: baseline;
@@ -8300,15 +8302,78 @@ input[type="color"] {
 .fossil-stats em {
   display: block;
   max-width: 100%;
-  margin-top: 3px;
+  margin-top: 1px;
   margin-left: 0;
   color: var(--fossil-clay);
   font-size: clamp(0.52rem, 1.35cqw, 0.64rem);
   font-style: normal;
+  line-height: 1.12;
   vertical-align: baseline;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.range-medium .fossil-stats,
+.range-long .fossil-stats,
+.range-year .fossil-stats {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.range-long .fossil-strata-shell,
+.range-year .fossil-strata-shell {
+  margin-top: 8px;
+  padding-block: 4px 4px;
+}
+
+.range-long .fossil-legend,
+.range-year .fossil-legend {
+  gap: 4px 10px;
+  padding-top: 8px;
+}
+
+.range-long .fossil-discovered,
+.range-year .fossil-discovered {
+  gap: 4px 8px;
+  padding-top: 5px;
+}
+
+.range-long .fossil-stats,
+.range-year .fossil-stats {
+  margin-top: 5px;
+  padding-top: 5px;
+}
+
+.range-long .fossil-legend div,
+.range-year .fossil-legend div,
+.range-long .fossil-discovered div,
+.range-year .fossil-discovered div {
+  font-size: clamp(0.5rem, 1.15cqw, 0.62rem);
+}
+
+.range-long .fossil-discovered div,
+.range-year .fossil-discovered div {
+  padding: 2px 7px;
+}
+
+.range-medium .fossil-stats span,
+.range-long .fossil-stats span,
+.range-year .fossil-stats span {
+  margin-bottom: 1px;
+}
+
+.range-medium .fossil-stats strong,
+.range-long .fossil-stats strong,
+.range-year .fossil-stats strong {
+  font-size: clamp(0.68rem, 2cqw, 0.9rem);
+}
+
+.range-medium .fossil-stats em,
+.range-long .fossil-stats em,
+.range-year .fossil-stats em {
+  margin-top: 0;
+  font-size: clamp(0.48rem, 1.2cqw, 0.58rem);
 }
 
 @container (max-width: 420px) {
@@ -8387,12 +8452,12 @@ input[type="color"] {
   .fossil-stats {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 5px;
-    margin-top: 12px;
-    padding-top: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
   }
 
   .fossil-stats span {
-    margin-bottom: 3px;
+    margin-bottom: 1px;
     font-size: 0.46rem;
     letter-spacing: 0.04em;
   }
@@ -8403,6 +8468,7 @@ input[type="color"] {
 
   .fossil-stats em {
     display: block;
+    margin-top: 0;
     margin-left: 0;
     font-size: 0.48rem;
   }
