@@ -361,6 +361,36 @@ async function handleFeedReaction(request: Request, env: Env) {
   return json({ ok: true });
 }
 
+async function handleFeedUpdate(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string; note: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+
+  const postId = cleanText(payload.postId, 80);
+  const existing = await env.DB.prepare("SELECT user_id AS userId FROM feed_posts WHERE id = ?").bind(postId).first<{ userId: string }>();
+  if (!existing) return text("Feed post not found.", 404);
+  if (existing.userId !== userId) return text("You can only edit your own posts.", 403);
+
+  await env.DB.prepare("UPDATE feed_posts SET note = ? WHERE id = ? AND user_id = ?")
+    .bind(cleanText(payload.note, 220), postId, userId)
+    .run();
+  return json({ ok: true });
+}
+
+async function handleFeedDelete(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+
+  const postId = cleanText(payload.postId, 80);
+  const existing = await env.DB.prepare("SELECT user_id AS userId FROM feed_posts WHERE id = ?").bind(postId).first<{ userId: string }>();
+  if (!existing) return text("Feed post not found.", 404);
+  if (existing.userId !== userId) return text("You can only delete your own posts.", 403);
+
+  await env.DB.prepare("DELETE FROM feed_posts WHERE id = ? AND user_id = ?").bind(postId, userId).run();
+  return json({ ok: true });
+}
+
 async function handleFriendRequest(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string; friendCode: string }>(request);
   const fromUserId = String(payload.userId ?? "").trim();
@@ -387,6 +417,15 @@ async function handlePresence(request: Request, env: Env) {
   await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
   return json({ ok: true });
+}
+
+async function handleFriendStatus(request: Request, env: Env) {
+  const url = new URL(request.url);
+  const userId = String(url.searchParams.get("userId") ?? "").trim();
+  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
+  await verifyUser(env, userId, deviceSecret);
+  await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
+  return json(await getSocialSnapshot(env, userId));
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
@@ -464,8 +503,11 @@ export default {
       if (request.method === "GET" && url.pathname === "/feed") return handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return handleFeedReaction(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/update") return handleFeedUpdate(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/delete") return handleFeedDelete(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return handleFriendResponse(request, env);
+      if (request.method === "GET" && url.pathname === "/friends/status") return handleFriendStatus(request, env);
       if (request.method === "POST" && url.pathname === "/presence") return handlePresence(request, env);
       if (request.method === "GET" && url.pathname === "/player-stats") return handlePlayerStats(request, env);
       return text("Not found.", 404);

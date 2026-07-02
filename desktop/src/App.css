@@ -1152,9 +1152,53 @@
   padding: 16px 18px 10px;
 }
 
-.feed-card__head > div:last-child {
+.feed-card__head > div {
   display: grid;
   gap: 2px;
+}
+
+.feed-edit-button {
+  margin-left: auto;
+}
+
+.social-name-button {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.social-name-button:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.social-name-button--strong {
+  color: var(--text);
+  font-weight: 900;
+}
+
+.feed-edit-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.feed-edit-textarea {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+}
+
+.feed-edit-actions,
+.profile-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .feed-card__head strong,

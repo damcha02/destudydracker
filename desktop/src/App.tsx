@@ -34,10 +34,12 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { createFriendRequest, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState } from "./lib/social";
+import { createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
 import type { PlayerStatsResponse } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+
+type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode"> & { lastSeenAt?: string | null };
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -1411,9 +1413,12 @@ function App() {
   const [socialSyncing, setSocialSyncing] = useState(false);
   const [socialNameEditing, setSocialNameEditing] = useState(false);
   const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
-  const [viewingFriend, setViewingFriend] = useState<SocialFriend | null>(null);
+  const [viewingFriend, setViewingFriend] = useState<SocialProfileTarget | null>(null);
   const [viewingFriendStats, setViewingFriendStats] = useState<PlayerStatsResponse | null>(null);
   const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
+  const [editingFeedPostId, setEditingFeedPostId] = useState<string | null>(null);
+  const [editingFeedPostNote, setEditingFeedPostNote] = useState("");
+  const [feedPostSaving, setFeedPostSaving] = useState(false);
 
   useEffect(() => {
     saveAppState(state);
@@ -1944,6 +1949,11 @@ function App() {
     .slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
+  const socialFriendIds = new Set(state.social.friends.map((friend) => friend.userId));
+  const outgoingFriendRequestCodes = new Set(state.social.outgoingFriendRequests.map((request) => request.toFriendCode));
+  const viewingIsSelf = viewingFriend?.userId === state.social.userId;
+  const viewingIsFriend = viewingFriend ? socialFriendIds.has(viewingFriend.userId) : false;
+  const viewingRequestPending = viewingFriend ? outgoingFriendRequestCodes.has(viewingFriend.friendCode) : false;
   const rockStage = state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
     : state.petRockPats >= 500 ? { plant: "\u{1F451}", label: "Royal Rock" }
     : state.petRockPats >= 250 ? { plant: "\u{1F98B}", label: "Blooming Rock" }
@@ -2342,29 +2352,109 @@ function App() {
     }
   }
 
-  async function submitFriendRequest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const friendCode = friendCodeDraft.trim().toUpperCase();
+  async function sendFriendRequestToCode(friendCodeValue: string) {
+    const friendCode = friendCodeValue.trim().toUpperCase();
     if (!friendCode) {
       setMessage("Enter a friend code first.");
-      return;
+      return false;
     }
     if (friendCode === state.social.friendCode) {
       setMessage("That is your own friend code.");
-      return;
+      return false;
+    }
+    if (state.social.friends.some((friend) => friend.friendCode === friendCode)) {
+      setMessage("You are already friends.");
+      return false;
+    }
+    if (state.social.outgoingFriendRequests.some((request) => request.toFriendCode === friendCode)) {
+      setMessage("Friend request already pending.");
+      return false;
     }
 
     setSocialSyncing(true);
     try {
       await createFriendRequest(state.social, friendCode);
-      setFriendCodeDraft("");
       await runSocialSync({ silent: true });
       setMessage("Friend request sent.");
+      return true;
     } catch (error: unknown) {
       console.warn("Could not send friend request.", error);
       setMessage(getErrorMessage(error, "Could not send friend request."));
+      return false;
     } finally {
       setSocialSyncing(false);
+    }
+  }
+
+  async function submitFriendRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const sent = await sendFriendRequestToCode(friendCodeDraft);
+    if (sent) setFriendCodeDraft("");
+  }
+
+  function startEditingFeedPost(post: SocialFeedPost) {
+    setEditingFeedPostId(post.id);
+    setEditingFeedPostNote(post.note ?? "");
+  }
+
+  function cancelEditingFeedPost() {
+    setEditingFeedPostId(null);
+    setEditingFeedPostNote("");
+  }
+
+  async function saveFeedPostEdit(postId: string) {
+    const note = editingFeedPostNote.trim();
+    setFeedPostSaving(true);
+    const updatePost = (post: SocialFeedPost) => (post.id === postId ? { ...post, note } : post);
+    try {
+      if (socialConfigured && !state.social.pendingFeedPosts.some((post) => post.id === postId)) {
+        await updateFeedPost(state.social, postId, note);
+      }
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.map(updatePost),
+            friends: current.social.cachedFeeds.friends.map(updatePost),
+          },
+          pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost),
+        },
+      }));
+      cancelEditingFeedPost();
+      setMessage("Post updated.");
+    } catch (error: unknown) {
+      console.warn("Could not update feed post.", error);
+      setMessage(getErrorMessage(error, "Could not update feed post."));
+    } finally {
+      setFeedPostSaving(false);
+    }
+  }
+
+  async function deleteOwnFeedPost(postId: string) {
+    setFeedPostSaving(true);
+    try {
+      if (socialConfigured && !state.social.pendingFeedPosts.some((post) => post.id === postId)) {
+        await deleteFeedPost(state.social, postId);
+      }
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.filter((post) => post.id !== postId),
+            friends: current.social.cachedFeeds.friends.filter((post) => post.id !== postId),
+          },
+          pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => post.id !== postId),
+        },
+      }));
+      cancelEditingFeedPost();
+      setMessage("Post deleted. You can repost that session now.");
+    } catch (error: unknown) {
+      console.warn("Could not delete feed post.", error);
+      setMessage(getErrorMessage(error, "Could not delete feed post."));
+    } finally {
+      setFeedPostSaving(false);
     }
   }
 
@@ -2510,7 +2600,27 @@ function App() {
     if (socialConfigured) void presencePing(state.social).catch(() => {});
   });
 
-  async function openFriendProfile(friend: SocialFriend) {
+  const refreshFriendStatus = useEffectEvent(async () => {
+    if (!socialConfigured || state.activeTab !== "friends") return;
+    try {
+      const result = await getFriendStatus(state.social);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          friends: result.social.friends,
+          incomingFriendRequests: result.social.incomingFriendRequests,
+          outgoingFriendRequests: result.social.outgoingFriendRequests,
+          pendingFeedPosts: current.social.pendingFeedPosts,
+          lastSyncError: null,
+        },
+      }));
+    } catch (error: unknown) {
+      console.warn("Could not refresh friend status.", error);
+    }
+  });
+
+  async function openFriendProfile(friend: SocialProfileTarget) {
     setViewingFriend(friend);
     setViewingFriendStats(null);
     setViewingFriendLoading(true);
@@ -2519,6 +2629,7 @@ function App() {
       setViewingFriendStats(stats);
     } catch (error: unknown) {
       console.warn("Could not load friend stats.", error);
+      setMessage(getErrorMessage(error, "Could not load profile."));
     } finally {
       setViewingFriendLoading(false);
     }
@@ -2572,12 +2683,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (state.activeTab !== "friends") return undefined;
+    void refreshFriendStatus();
+    const interval = window.setInterval(() => void refreshFriendStatus(), 2 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [state.activeTab]);
+
+  useEffect(() => {
     void refreshSocialFeed();
   }, [feedScope, socialSubtab, state.activeTab]);
 
   useEffect(() => {
     if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile")) {
       presencePingEffect();
+      void refreshFriendStatus();
     }
   }, [state.activeTab, socialSubtab]);
 
@@ -6922,23 +7041,26 @@ function App() {
               </form>
 
               <div className="section-label">Activity {feedLoading ? "· Refreshing" : ""}</div>
-              {socialFeed.length ? socialFeed.map((item) => (
-                item.type === "milestone" ? (
+              {socialFeed.length ? socialFeed.map((item) => {
+                const isOwnPost = item.userId === state.social.userId || item.isSelf;
+                const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode };
+                return item.type === "milestone" ? (
                   <article key={item.id} className="milestone">
                     <div className="milestone__icon">{item.icon || "🏆"}</div>
                     <div>
-                      <h3>{item.displayName} hit a milestone</h3>
+                      <h3><button type="button" className="social-name-button" onClick={() => void openFriendProfile(profileTarget)}>{item.displayName}</button> hit a milestone</h3>
                       <p>{item.note || item.detail}</p>
                     </div>
                   </article>
                 ) : (
                   <article key={item.id} className="feed-card">
                     <div className="feed-card__head">
-                      <ArenaAvatar name={item.displayName} self={item.userId === state.social.userId || item.isSelf} />
+                      <ArenaAvatar name={item.displayName} self={isOwnPost} />
                       <div>
-                        <strong>{item.displayName}{item.userId === state.social.userId || item.isSelf ? " (You)" : ""}</strong>
+                        <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(profileTarget)}>{item.displayName}{isOwnPost ? " (You)" : ""}</button>
                         <span>{formatDate(item.createdAt)}</span>
                       </div>
+                      {isOwnPost ? <button type="button" className="arena-icon-button feed-edit-button" onClick={() => startEditingFeedPost(item)} title="Edit post">✎</button> : null}
                     </div>
                     <div className="feed-card__body">
                       <div className="feed-card__session">
@@ -6948,7 +7070,16 @@ function App() {
                           <small>{item.detail || `${formatMinutes(item.minutes)} · ${item.presetLabel || "Focus"}`}</small>
                         </div>
                       </div>
-                      {item.note ? <p>"{item.note}"</p> : null}
+                      {editingFeedPostId === item.id ? (
+                        <div className="feed-edit-panel">
+                          <textarea className="arena-input feed-edit-textarea" value={editingFeedPostNote} onChange={(event) => setEditingFeedPostNote(event.target.value)} maxLength={220} autoFocus />
+                          <div className="feed-edit-actions">
+                            <button type="button" className="arena-btn arena-btn--send" onClick={() => void saveFeedPostEdit(item.id)} disabled={feedPostSaving}>Save</button>
+                            <button type="button" className="ghost-button small-button" onClick={cancelEditingFeedPost} disabled={feedPostSaving}>Cancel</button>
+                            <button type="button" className="arena-btn arena-btn--decline" onClick={() => void deleteOwnFeedPost(item.id)} disabled={feedPostSaving}>Delete</button>
+                          </div>
+                        </div>
+                      ) : item.note ? <p>"{item.note}"</p> : null}
                     </div>
                     <div className="feed-card__reactions">
                       {(["fire", "brain", "clap"] as const).map((emoji) => (
@@ -6958,8 +7089,8 @@ function App() {
                       ))}
                     </div>
                   </article>
-                )
-              )) : (
+                );
+              }) : (
                 <div className="arena-empty"><strong>No feed posts yet</strong><span>Post a session or sync to pull the latest arena activity.</span></div>
               )}
 
@@ -7153,9 +7284,9 @@ function App() {
               {socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
-                    const friend = state.social.friends.find((f) => f.userId === entry.userId);
+                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode };
                     return (
-                      <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={friend ? () => void openFriendProfile(friend) : undefined} role={friend ? "button" : undefined} tabIndex={friend ? 0 : undefined} onKeyDown={friend ? (e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); } : undefined}>
+                      <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(profileTarget); }}>
                         <ArenaAvatar name={entry.displayName} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
                         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                         <span>{formatMinutes(entry.minutes)}</span>
@@ -7171,8 +7302,8 @@ function App() {
 
               <div className="arena-lb-rows">
                 {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
-                  const friend = state.social.friends.find((f) => f.userId === entry.userId);
-                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={friend ? () => void openFriendProfile(friend) : undefined} />;
+                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode };
+                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
                 })}
                 {!socialLeaderboard.length ? (
                   <div className="arena-empty">
@@ -7199,6 +7330,12 @@ function App() {
                     <button type="button" className="arena-icon-button" onClick={() => setViewingFriend(null)} title="Close" style={{ marginLeft: "auto" }}>×</button>
                   </div>
                   {viewingFriend.lastSeenAt ? <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>Seen {formatDate(viewingFriend.lastSeenAt)}</span> : null}
+                  <div className="profile-action-row">
+                    <span className="arena-pending-badge">{viewingIsSelf ? "Your profile" : viewingIsFriend ? "Friend" : viewingRequestPending ? "Request pending" : "Not friends"}</span>
+                    {!viewingIsSelf && !viewingIsFriend && !viewingRequestPending ? (
+                      <button type="button" className="arena-btn arena-btn--send" onClick={() => void sendFriendRequestToCode(viewingFriend.friendCode)} disabled={socialSyncing || !socialConfigured}>Send friend request</button>
+                    ) : null}
+                  </div>
                 </div>
               </div>
               {viewingFriendLoading ? (

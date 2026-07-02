@@ -15,6 +15,10 @@ interface SocialSyncResponse {
   social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
 }
 
+interface SocialStatusResponse {
+  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
+}
+
 interface SocialFeedResponse {
   feed: SocialFeedPost[];
 }
@@ -151,6 +155,29 @@ export async function reactToFeedPost(social: SocialState, postId: string, emoji
   });
 }
 
+export async function updateFeedPost(social: SocialState, postId: string, note: string) {
+  return requestSocialApi<{ ok: boolean }>("/feed/update", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+      note,
+    }),
+  });
+}
+
+export async function deleteFeedPost(social: SocialState, postId: string) {
+  return requestSocialApi<{ ok: boolean }>("/feed/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+    }),
+  });
+}
+
 export async function createFriendRequest(social: SocialState, friendCode: string) {
   return requestSocialApi<{ request: SocialFriendRequest }>("/friends/request", {
     method: "POST",
@@ -172,6 +199,14 @@ export async function respondToFriendRequest(social: SocialState, requestId: str
       response,
     }),
   });
+}
+
+export async function getFriendStatus(social: SocialState) {
+  const params = new URLSearchParams({
+    userId: social.userId,
+    deviceSecret: social.deviceSecret,
+  });
+  return requestSocialApi<SocialStatusResponse>(`/friends/status?${params.toString()}`, { method: "GET" });
 }
 
 export function getNextAutoSyncAt() {
