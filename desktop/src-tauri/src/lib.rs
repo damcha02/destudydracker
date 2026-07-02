@@ -312,6 +312,24 @@ fn import_summary_files(
 }
 
 #[tauri::command]
+fn read_summary_pdf(path: String) -> Result<Vec<u8>, String> {
+    let file_path = PathBuf::from(&path);
+    if !file_path.is_file() {
+        return Err("Selected summary file does not exist.".into());
+    }
+    if file_path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_lowercase())
+        .as_deref()
+        != Some("pdf")
+    {
+        return Err("Only PDF summary files can be opened in the PDF viewer.".into());
+    }
+
+    fs::read(file_path).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn export_daily_note(
     vault_path: String,
     note_date: String,
@@ -555,6 +573,7 @@ pub fn run() {
             write_reference_note,
             list_summary_files,
             import_summary_files,
+            read_summary_pdf,
             export_daily_note,
             get_update_install_support,
             download_linux_update_package

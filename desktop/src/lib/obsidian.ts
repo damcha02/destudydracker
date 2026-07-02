@@ -111,6 +111,10 @@ export async function importSummaryFiles(vaultPath: string, semesterName: string
   });
 }
 
+export async function readSummaryPdf(path: string) {
+  return invoke<number[]>("read_summary_pdf", { path });
+}
+
 export async function exportDailyNote(vaultPath: string, noteDate: string, content: string) {
   return invoke<string>("export_daily_note", {
     vaultPath,

@@ -7,6 +7,7 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
+import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
@@ -32,12 +33,14 @@ import {
   getWeeklyActivity,
   isoDate,
 } from "./lib/metrics";
-import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
+import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
 import { createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
 import type { PlayerStatsResponse } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+
+type PdfJsModule = typeof import("pdfjs-dist");
 
 type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode"> & { lastSeenAt?: string | null };
 
@@ -1268,6 +1271,128 @@ function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEnt
   );
 }
 
+function SummaryPdfViewer({ path, title }: { path: string; title: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
+  const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
+  const [scale, setScale] = useState(1.25);
+  const [loading, setLoading] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadingTask: ReturnType<PdfJsModule["getDocument"]> | null = null;
+    setLoading(true);
+    setError(null);
+    setDocumentProxy(null);
+    setPageNumber(1);
+    setPageCount(0);
+
+    void Promise.all([
+      import("pdfjs-dist"),
+      import("pdfjs-dist/build/pdf.worker.mjs?url"),
+      readSummaryPdf(path),
+    ])
+      .then(([pdfjsLib, workerModule, bytes]) => {
+        if (cancelled) return null;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+        loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(bytes) });
+        return loadingTask.promise;
+      })
+      .then((pdf) => {
+        if (!pdf) return;
+        return pdf;
+      })
+      .then((pdf) => {
+        if (!pdf) return;
+        if (cancelled) {
+          void pdf.cleanup();
+          return;
+        }
+        setDocumentProxy(pdf);
+        setPageCount(pdf.numPages);
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setError(getErrorMessage(loadError, "Could not load this PDF."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      renderTaskRef.current = null;
+      void loadingTask?.destroy();
+    };
+  }, [path]);
+
+  useEffect(() => {
+    if (!documentProxy || !canvasRef.current) return undefined;
+    let cancelled = false;
+    setRendering(true);
+    setError(null);
+    renderTaskRef.current?.cancel();
+
+    void documentProxy.getPage(pageNumber)
+      .then((page) => {
+        if (cancelled || !canvasRef.current) return;
+        const canvas = canvasRef.current;
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("Could not prepare PDF canvas.");
+
+        const viewport = page.getViewport({ scale });
+        const pixelRatio = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * pixelRatio);
+        canvas.height = Math.floor(viewport.height * pixelRatio);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.clearRect(0, 0, viewport.width, viewport.height);
+
+        const renderTask = page.render({ canvas, canvasContext: context, viewport });
+        renderTaskRef.current = renderTask;
+        return renderTask.promise;
+      })
+      .catch((renderError: unknown) => {
+        if (cancelled) return;
+        if (renderError instanceof Error && renderError.name === "RenderingCancelledException") return;
+        setError(getErrorMessage(renderError, "Could not render this PDF page."));
+      })
+      .finally(() => {
+        if (!cancelled) setRendering(false);
+      });
+
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel();
+      renderTaskRef.current = null;
+    };
+  }, [documentProxy, pageNumber, scale]);
+
+  return (
+    <div className="summary-pdf-viewer">
+      <div className="summary-pdf-controls">
+        <button type="button" className="ghost-button small-button" onClick={() => setPageNumber((current) => Math.max(1, current - 1))} disabled={!documentProxy || pageNumber <= 1}>Prev</button>
+        <span>Page {pageCount ? pageNumber : "-"} / {pageCount || "-"}</span>
+        <button type="button" className="ghost-button small-button" onClick={() => setPageNumber((current) => Math.min(pageCount, current + 1))} disabled={!documentProxy || pageNumber >= pageCount}>Next</button>
+        <button type="button" className="ghost-button small-button" onClick={() => setScale((current) => Math.max(0.7, Number((current - 0.15).toFixed(2))))} disabled={!documentProxy}>-</button>
+        <span>{Math.round(scale * 100)}%</span>
+        <button type="button" className="ghost-button small-button" onClick={() => setScale((current) => Math.min(2.5, Number((current + 0.15).toFixed(2))))} disabled={!documentProxy}>+</button>
+      </div>
+      <div className="summary-pdf-canvas-wrap" aria-busy={loading || rendering}>
+        {loading ? <p className="summary-pdf-status">Loading PDF...</p> : null}
+        {error ? <p className="summary-pdf-error">{error}</p> : null}
+        <canvas ref={canvasRef} aria-label={title} />
+        {rendering && !loading ? <p className="summary-pdf-status floating">Rendering page...</p> : null}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -1933,7 +2058,7 @@ function App() {
     if (session.kind !== "study" && session.kind !== "exam") return false;
     return new Date(session.endedAt) >= monthStartAnchor;
   }).reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
-  const myGlobalRank = state.social.cachedLeaderboards.global.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
+  const myGlobalRank = state.social.isPrivate ? undefined : state.social.cachedLeaderboards.global.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = state.social.cachedLeaderboards.friends.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
@@ -6950,7 +7075,7 @@ function App() {
                               <button type="button" className="ghost-button small-button" onClick={() => revealItemInDir(selectedSummaryFile.path)}>Show file</button>
                             </div>
                             {selectedSummaryFile.kind === "pdf" ? (
-                              <iframe className="summary-pdf-viewer" src={selectedSummaryUrl} title={selectedSummaryFile.name} />
+                              <SummaryPdfViewer path={selectedSummaryFile.path} title={selectedSummaryFile.name} />
                             ) : (
                               <div className="summary-image-viewer">
                                 <img src={selectedSummaryUrl} alt={selectedSummaryFile.name} />
@@ -7148,7 +7273,7 @@ function App() {
                     <div className="arena-mini-stat arena-mini-stat--weekly"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(localSocialWeekly.minutes)}</strong><span>This Week · {localSocialWeekly.sessions} ses.</span></div></div>
                     <div className="arena-mini-stat arena-mini-stat--overall"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(localSocialOverall.minutes)}</strong><span>All Time · {localSocialOverall.sessions} ses.</span></div></div>
                     <div className="arena-mini-stat"><span className="arena-mini-stat__icon">📅</span><div><strong>{formatMinutes(localSocialMonthly.minutes)}</strong><span>This Month · {localSocialMonthly.sessions} ses.</span></div></div>
-                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">⚔</span><div><strong>{myGlobalRank ? `#${myGlobalRank}` : "—"}</strong><span>Global Rank</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">⚔</span><div><strong>{state.social.isPrivate ? "Hidden" : myGlobalRank ? `#${myGlobalRank}` : "—"}</strong><span>Global Rank</span></div></div>
                     <div className="arena-mini-stat"><span className="arena-mini-stat__icon">👥</span><div><strong>{myFriendRank ? `#${myFriendRank}` : "—"}</strong><span>Friends Rank</span></div></div>
                   </div>
                 </div>
@@ -7280,6 +7405,13 @@ function App() {
                   </button>
                 ))}
               </div>
+
+              {socialScope === "global" && state.social.isPrivate ? (
+                <div className="arena-empty small arena-private-notice">
+                  <strong>Private profile enabled</strong>
+                  <span>You are hidden from the global leaderboard. Switch to Friends Arena to compare with friends.</span>
+                </div>
+              ) : null}
 
               {socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">

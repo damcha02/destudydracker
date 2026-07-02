@@ -75,8 +75,9 @@ export function getLocalLeaderboardEntry(state: AppState, period: SocialLeaderbo
 
 export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeaderboardScope, period: SocialLeaderboardPeriod) {
   const self = getLocalLeaderboardEntry(state, period);
+  const includeSelf = scope !== "global" || !state.social.isPrivate;
   const remote = state.social.cachedLeaderboards[scope][period].filter((entry) => entry.userId !== self.userId);
-  const combined = [self, ...remote]
+  const combined = [...(includeSelf ? [self] : []), ...remote]
     .filter((entry) => (scope === "global" && !state.social.isPrivate) || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
 
