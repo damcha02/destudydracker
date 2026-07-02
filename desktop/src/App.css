@@ -760,6 +760,10 @@
 }
 
 .arena-leaderboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 20px 22px 14px;
 }
 
@@ -808,6 +812,11 @@
 
 .arena-scope-btn {
   flex: 1;
+}
+
+.social-refresh-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .arena-scope-btn--active,

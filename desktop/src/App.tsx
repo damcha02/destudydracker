@@ -1062,6 +1062,13 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
   };
 }
 
+function parseSocialTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(" ", "T")}Z` : value;
+  const timestamp = new Date(normalized).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
 function pickFeedFallbackNote(seed: string) {
   const total = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return feedFallbackNotes[total % feedFallbackNotes.length];
@@ -2066,8 +2073,8 @@ function App() {
     ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
     : false;
   const liveFriends = state.social.friends.filter((friend) => {
-    if (!friend.lastSeenAt) return false;
-    return Date.now() - new Date(friend.lastSeenAt).getTime() < 45 * 60 * 1000;
+    const lastSeen = parseSocialTimestamp(friend.lastSeenAt);
+    return lastSeen !== null && Date.now() - lastSeen < 45 * 60 * 1000;
   });
   const weekCompareEntries = [localSocialWeekly, ...state.social.cachedLeaderboards.friends.weekly.filter((entry) => entry.userId !== state.social.userId)]
     .sort((a, b) => b.minutes - a.minutes)
@@ -2470,7 +2477,7 @@ function App() {
     if (!socialConfigured || state.social.pendingFeedPosts.some((post) => post.id === postId)) return;
     try {
       await reactToFeedPost(state.social, postId, emoji);
-      await refreshSocialFeed();
+      await refreshSocialFeedNow();
     } catch (error: unknown) {
       console.warn("Could not sync feed reaction.", error);
       setMessage(getErrorMessage(error, "Could not sync reaction."));
@@ -2725,7 +2732,7 @@ function App() {
     if (socialConfigured) void presencePing(state.social).catch(() => {});
   });
 
-  const refreshFriendStatus = useEffectEvent(async () => {
+  async function refreshFriendStatusNow() {
     if (!socialConfigured || state.activeTab !== "friends") return;
     try {
       const result = await getFriendStatus(state.social);
@@ -2743,6 +2750,10 @@ function App() {
     } catch (error: unknown) {
       console.warn("Could not refresh friend status.", error);
     }
+  }
+
+  const refreshFriendStatus = useEffectEvent(async () => {
+    await refreshFriendStatusNow();
   });
 
   async function openFriendProfile(friend: SocialProfileTarget) {
@@ -2760,7 +2771,7 @@ function App() {
     }
   }
 
-  const refreshSocialFeed = useEffectEvent(async () => {
+  async function refreshSocialFeedNow() {
     if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return;
     setFeedLoading(true);
     try {
@@ -2788,7 +2799,21 @@ function App() {
     } finally {
       setFeedLoading(false);
     }
+  }
+
+  const refreshSocialFeed = useEffectEvent(async () => {
+    await refreshSocialFeedNow();
   });
+
+  async function refreshFeedSubtab() {
+    if (!socialConfigured) {
+      setMessage("Social sync is not configured yet. Add the Cloudflare Worker URL first.");
+      return;
+    }
+
+    await Promise.all([refreshFriendStatusNow(), refreshSocialFeedNow()]);
+    setMessage("Feed refreshed.");
+  }
 
   useEffect(() => {
     if (!isTauriApp()) return undefined;
@@ -2817,6 +2842,12 @@ function App() {
   useEffect(() => {
     void refreshSocialFeed();
   }, [feedScope, socialSubtab, state.activeTab]);
+
+  useEffect(() => {
+    if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return undefined;
+    const interval = window.setInterval(() => void refreshSocialFeed(), 2 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [socialConfigured, socialSubtab, state.activeTab]);
 
   useEffect(() => {
     if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile")) {
@@ -7141,6 +7172,9 @@ function App() {
                     {scope === "global" ? "Global Feed" : "Friends Feed"}
                   </button>
                 ))}
+                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void refreshFeedSubtab()} disabled={feedLoading || !socialConfigured}>
+                  {feedLoading ? "Refreshing..." : "Refresh"}
+                </button>
               </div>
 
               <div className="stories" aria-label="Study circle stories">
@@ -7159,7 +7193,7 @@ function App() {
               <div className="live-bar">
                 <span className="live-dot" />
                 <strong>{liveFriends.length ? `${liveFriends.length} friends` : "No friends"}</strong>
-                <span>{liveFriends.length ? "studying or recently active" : "studying right now"}</span>
+                <span>recently active</span>
                 <small>{liveFriends.slice(0, 3).map((friend) => friend.displayName).join(" · ") || "Sync to update live status"}</small>
               </div>
 
@@ -7396,6 +7430,9 @@ function App() {
                     <p>{socialPeriod === "daily" ? "Daily Sprint" : socialPeriod === "weekly" ? "Weekly League" : "Hall of Focus"}</p>
                   </div>
                 </div>
+                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                  {socialSyncing ? "Syncing..." : "Refresh"}
+                </button>
               </div>
 
               <div className="arena-scope-toggle" aria-label="Leaderboard scope">
