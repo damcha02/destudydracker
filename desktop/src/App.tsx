@@ -7,6 +7,7 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
 import {
@@ -214,6 +215,26 @@ async function prepareBellSound(): Promise<BellResult> {
     console.warn("Bell sound could not be prepared.", error);
     return bellFailure("context-suspended", bellErrorDetail(error), "web-audio");
   }
+}
+
+async function sendTimerNotification(title: string, body: string) {
+  if (!isTauriApp()) return;
+
+  try {
+    const permissionGranted = await ensureTimerNotificationPermission();
+    if (permissionGranted) sendNotification({ title, body });
+  } catch (error: unknown) {
+    console.warn("Timer notification could not be sent.", error);
+  }
+}
+
+async function ensureTimerNotificationPermission() {
+  if (!isTauriApp()) return false;
+  let permissionGranted = await isPermissionGranted();
+  if (!permissionGranted) {
+    permissionGranted = await requestPermission() === "granted";
+  }
+  return permissionGranted;
 }
 
 const focusPresets = [
@@ -1069,6 +1090,18 @@ function parseSocialTimestamp(value: string | null | undefined) {
   return Number.isNaN(timestamp) ? null : timestamp;
 }
 
+function formatProfileSeenAt(value: string) {
+  const timestamp = parseSocialTimestamp(value);
+  if (timestamp === null) return formatDate(value);
+
+  const recent = Date.now() - timestamp < 2 * 24 * 60 * 60 * 1000;
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    ...(recent ? { hour: "numeric", minute: "2-digit" } : {}),
+  }).format(new Date(timestamp));
+}
+
 function pickFeedFallbackNote(seed: string) {
   const total = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return feedFallbackNotes[total % feedFallbackNotes.length];
@@ -1680,6 +1713,7 @@ function App() {
           const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
             ringBell();
+            void sendTimerNotification("Focus session finished", "Nice work. Time for a break.");
             return {
               ...socialState,
               sessions: pruneSessionHistory([session, ...socialState.sessions]),
@@ -1695,6 +1729,7 @@ function App() {
           }
 
           ringBell();
+          void sendTimerNotification("Focus session finished", "Your study timer is complete.");
           return {
             ...socialState,
             sessions: pruneSessionHistory([session, ...socialState.sessions]),
@@ -1706,6 +1741,7 @@ function App() {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
           const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
           ringBell();
+          void sendTimerNotification("Exam timer finished", "Your exam timer is complete.");
           return {
             ...socialState,
             sessions: pruneSessionHistory([session, ...socialState.sessions]),
@@ -1714,6 +1750,9 @@ function App() {
         }
 
         ringBell();
+        if (timer.phase === "break") {
+          void sendTimerNotification("Break finished", "Break is over. Ready for the next focus session?");
+        }
         return {
           ...current,
           timer: { ...defaultTimer, ...keepTimerContext(timer) },
@@ -3685,6 +3724,9 @@ function App() {
     void prepareBellSound().then((result) => {
       if (!result.ok) console.warn("Bell sound could not be prepared.", result);
     });
+    void ensureTimerNotificationPermission().catch((error: unknown) => {
+      console.warn("Timer notification permission could not be prepared.", error);
+    });
 
     if (isEndless) {
       setState((current) => ({
@@ -4596,9 +4638,9 @@ function App() {
     const hoveredDay = focusTip ? days[focusTip.idx] : null;
     const columnGap = focusRange === 365 ? 0 : focusRange === "week" || focusRange === 7 ? 4 : focusRange <= 14 ? 3 : focusRange <= 30 ? 2 : 1;
     const chartHeightByRange: Record<FocusRange, number> = {
-      week: 128,
-      7: 128,
-      14: 120,
+      week: 132,
+      7: 132,
+      14: 124,
       30: 116,
       60: 124,
       365: 124,
@@ -7506,7 +7548,7 @@ function App() {
                     <h3 style={{ margin: 0 }}>{viewingFriend.displayName}</h3>
                     <button type="button" className="arena-icon-button" onClick={() => setViewingFriend(null)} title="Close" style={{ marginLeft: "auto" }}>×</button>
                   </div>
-                  {viewingFriend.lastSeenAt ? <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>Seen {formatDate(viewingFriend.lastSeenAt)}</span> : null}
+                  {viewingFriend.lastSeenAt ? <span style={{ color: "var(--muted)", fontSize: "0.82rem" }}>Seen {formatProfileSeenAt(viewingFriend.lastSeenAt)}</span> : null}
                   <div className="profile-action-row">
                     <span className="arena-pending-badge">{viewingIsSelf ? "Your profile" : viewingIsFriend ? "Friend" : viewingRequestPending ? "Request pending" : "Not friends"}</span>
                     {!viewingIsSelf && !viewingIsFriend && !viewingRequestPending ? (

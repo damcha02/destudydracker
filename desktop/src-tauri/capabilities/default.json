@@ -10,6 +10,7 @@
     "dialog:allow-open",
     "opener:default",
     "process:default",
+    "notification:default",
     "updater:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
