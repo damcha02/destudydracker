@@ -93,6 +93,7 @@ export interface Settings {
   themeFamily: "normal";
   vaultPath: string | null;
   vaultName: string;
+  visibleTabs: Record<TabKey, boolean>;
 }
 
 export interface SocialLeaderboardEntry {

@@ -294,6 +294,39 @@ fn sanitize_segment(value: &str) -> String {
         .to_string()
 }
 
+fn canonical_existing_dir(path: &Path, label: &str) -> Result<PathBuf, String> {
+    if !path.is_dir() {
+        return Err(format!("{label} does not exist or is not a folder."));
+    }
+    path.canonicalize()
+        .map_err(|error| format!("Could not resolve {label}: {error}"))
+}
+
+fn ensure_path_inside(root: &Path, path: &Path) -> Result<(), String> {
+    let root = canonical_existing_dir(root, "Vault folder")?;
+    let candidate = if path.exists() {
+        path.canonicalize()
+            .map_err(|error| format!("Could not resolve file path: {error}"))?
+    } else {
+        let parent = path
+            .parent()
+            .ok_or("Could not resolve file parent folder.")?;
+        let parent = parent
+            .canonicalize()
+            .map_err(|error| format!("Could not resolve file parent folder: {error}"))?;
+        parent.join(
+            path.file_name()
+                .ok_or("Could not resolve file name.")?,
+        )
+    };
+
+    if candidate.starts_with(&root) {
+        Ok(())
+    } else {
+        Err("Requested file is outside the selected vault.".into())
+    }
+}
+
 #[tauri::command]
 fn create_obsidian_vault(base_path: String, vault_name: String) -> Result<String, String> {
     let vault_name = sanitize_segment(&vault_name);
@@ -417,7 +450,9 @@ fn link_obsidian_vault(vault_path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn read_daily_note(vault_path: String, note_date: String) -> Result<Option<String>, String> {
+    let root = PathBuf::from(&vault_path);
     let note_path = daily_note_path(&vault_path, &note_date);
+    ensure_path_inside(&root, &note_path)?;
     if !note_path.exists() {
         return Ok(None);
     }
@@ -438,6 +473,7 @@ fn write_daily_note(
     fs::create_dir_all(&daily_dir).map_err(|error| error.to_string())?;
 
     let note_path = daily_dir.join(format!("{}.md", sanitize_segment(&note_date)));
+    ensure_path_inside(&root, &note_path)?;
     fs::write(&note_path, content).map_err(|error| error.to_string())?;
 
     Ok(note_path.to_string_lossy().to_string())
@@ -449,7 +485,12 @@ fn read_reference_note(
     semester_name: String,
     course_name: String,
 ) -> Result<Option<String>, String> {
+    let root = PathBuf::from(&vault_path);
     let note_path = reference_note_path(&vault_path, &semester_name, &course_name)?;
+    if let Some(parent) = note_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    ensure_path_inside(&root, &note_path)?;
     if !note_path.exists() {
         return Ok(None);
     }
@@ -466,11 +507,13 @@ fn write_reference_note(
     course_name: String,
     content: String,
 ) -> Result<String, String> {
+    let root = PathBuf::from(&vault_path);
     let note_path = reference_note_path(&vault_path, &semester_name, &course_name)?;
     let reference_dir = note_path
         .parent()
         .ok_or("Could not resolve reference folder.")?;
     fs::create_dir_all(reference_dir).map_err(|error| error.to_string())?;
+    ensure_path_inside(&root, &note_path)?;
     fs::write(&note_path, content).map_err(|error| error.to_string())?;
 
     Ok(note_path.to_string_lossy().to_string())
@@ -482,7 +525,10 @@ fn list_summary_files(
     semester_name: String,
     course_name: String,
 ) -> Result<Vec<SummaryFile>, String> {
+    let root = PathBuf::from(&vault_path);
     let summaries_dir = summaries_dir_path(&vault_path, &semester_name, &course_name)?;
+    fs::create_dir_all(&summaries_dir).map_err(|error| error.to_string())?;
+    ensure_path_inside(&root, &summaries_dir)?;
     if !summaries_dir.exists() {
         return Ok(Vec::new());
     }
@@ -524,8 +570,10 @@ fn import_summary_files(
     course_name: String,
     file_paths: Vec<String>,
 ) -> Result<Vec<SummaryFile>, String> {
+    let root = PathBuf::from(&vault_path);
     let summaries_dir = summaries_dir_path(&vault_path, &semester_name, &course_name)?;
     fs::create_dir_all(&summaries_dir).map_err(|error| error.to_string())?;
+    ensure_path_inside(&root, &summaries_dir)?;
 
     for source in file_paths {
         let source_path = PathBuf::from(&source);
@@ -551,8 +599,10 @@ fn import_summary_files(
 }
 
 #[tauri::command]
-fn read_summary_pdf(path: String) -> Result<Vec<u8>, String> {
+fn read_summary_pdf(vault_path: String, path: String) -> Result<Vec<u8>, String> {
+    let summaries_root = PathBuf::from(&vault_path).join("Summaries");
     let file_path = PathBuf::from(&path);
+    ensure_path_inside(&summaries_root, &file_path)?;
     if !file_path.is_file() {
         return Err("Selected summary file does not exist.".into());
     }
@@ -580,6 +630,7 @@ fn export_daily_note(
 
     let file_name = format!("{}.md", sanitize_segment(&note_date));
     let note_path = daily_dir.join(file_name);
+    ensure_path_inside(&root, &note_path)?;
     fs::write(&note_path, content).map_err(|error| error.to_string())?;
 
     Ok(note_path.to_string_lossy().to_string())

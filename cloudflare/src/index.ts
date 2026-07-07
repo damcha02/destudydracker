@@ -37,6 +37,13 @@ const corsHeaders = {
   "access-control-allow-headers": "content-type",
 };
 
+const MAX_JSON_BODY_BYTES = 256 * 1024;
+const MAX_SYNC_STAT_ROWS = 370;
+const MAX_DAILY_MINUTES = 24 * 60;
+const MAX_DAILY_SESSIONS = 200;
+const MAX_ID_LENGTH = 80;
+const MAX_SECRET_LENGTH = 120;
+
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -52,7 +59,26 @@ function text(message: string, status = 400) {
 }
 
 async function readJson<T>(request: Request): Promise<T> {
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_JSON_BODY_BYTES) {
+    throw new Response("Request body is too large.", { status: 413, headers: corsHeaders });
+  }
   return request.json() as Promise<T>;
+}
+
+function requiredText(value: unknown, label: string, maxLength: number) {
+  const text = String(value ?? "").trim();
+  if (!text) throw new Response(`Missing ${label}.`, { status: 400, headers: corsHeaders });
+  if (text.length > maxLength) throw new Response(`${label} is too long.`, { status: 400, headers: corsHeaders });
+  return text;
+}
+
+function cleanUserId(value: unknown) {
+  return requiredText(value, "userId", MAX_ID_LENGTH);
+}
+
+function cleanDeviceSecret(value: unknown) {
+  return requiredText(value, "deviceSecret", MAX_SECRET_LENGTH);
 }
 
 function cleanCode(value: unknown) {
@@ -81,14 +107,16 @@ function friendPair(a: string, b: string) {
 }
 
 async function verifyUser(env: Env, userId: string, deviceSecret: string) {
+  userId = cleanUserId(userId);
+  deviceSecret = cleanDeviceSecret(deviceSecret);
   const user = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
   if (!user) throw new Response("User has not synced a profile yet.", { status: 404, headers: corsHeaders });
   if (user.device_secret !== deviceSecret) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
 }
 
 async function upsertUser(env: Env, payload: SyncPayload["user"]) {
-  const userId = String(payload.userId ?? "").trim();
-  const deviceSecret = String(payload.deviceSecret ?? "").trim();
+  const userId = cleanUserId(payload.userId);
+  const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const friendCode = cleanCode(payload.friendCode);
   const displayName = cleanName(payload.displayName);
   const isPrivate = payload.isPrivate ? 1 : 0;
@@ -135,7 +163,7 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
     cleanText(post.detail, 80),
     cleanText(post.note, 220),
     cleanText(post.icon, 8),
-    Math.max(0, Math.round(Number(post.minutes ?? 0))),
+    Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(post.minutes ?? 0)))),
     cleanText(post.presetLabel, 60),
     /^\d{4}-\d{2}-\d{2}T/.test(String(post.createdAt ?? "")) ? String(post.createdAt) : new Date().toISOString(),
   ));
@@ -144,10 +172,16 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
 
 async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]) {
   const statements = stats
+    .slice(0, MAX_SYNC_STAT_ROWS)
     .filter((stat) => /^\d{4}-\d{2}-\d{2}$/.test(stat.date))
     .map((stat) => env.DB.prepare(
       "INSERT INTO daily_stats (user_id, date, minutes, sessions, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(user_id, date) DO UPDATE SET minutes = excluded.minutes, sessions = excluded.sessions, updated_at = CURRENT_TIMESTAMP",
-    ).bind(userId, stat.date, Math.max(0, Math.round(stat.minutes)), Math.max(0, Math.round(stat.sessions))));
+    ).bind(
+      userId,
+      stat.date,
+      Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(stat.minutes ?? 0)))),
+      Math.min(MAX_DAILY_SESSIONS, Math.max(0, Math.round(Number(stat.sessions ?? 0)))),
+    ));
 
   if (statements.length) await env.DB.batch(statements);
 }
@@ -330,17 +364,19 @@ async function getSocialSnapshot(env: Env, userId: string) {
 
 async function handleSync(request: Request, env: Env) {
   const payload = await readJson<SyncPayload>(request);
+  if (!payload.user || typeof payload.user !== "object") return text("Missing user identity.", 400);
   await upsertUser(env, payload.user);
-  await upsertStats(env, payload.user.userId, Array.isArray(payload.stats) ? payload.stats : []);
-  await upsertFeedPosts(env, payload.user.userId, payload.feedPosts);
-  return json(await getSocialSnapshot(env, payload.user.userId));
+  const userId = cleanUserId(payload.user.userId);
+  await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
+  await upsertFeedPosts(env, userId, payload.feedPosts);
+  return json(await getSocialSnapshot(env, userId));
 }
 
 async function handleFeed(request: Request, env: Env) {
-  const url = new URL(request.url);
-  const userId = String(url.searchParams.get("userId") ?? "").trim();
-  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
-  const scope = url.searchParams.get("scope") === "friends" ? "friends" : "global";
+  const payload = await readJson<{ userId: string; deviceSecret: string; scope?: LeaderboardScope }>(request);
+  const userId = cleanUserId(payload.userId);
+  const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
+  const scope = payload.scope === "friends" ? "friends" : "global";
   await verifyUser(env, userId, deviceSecret);
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
   return json({ feed: await getFeed(env, userId, scope) });
@@ -420,21 +456,20 @@ async function handlePresence(request: Request, env: Env) {
 }
 
 async function handleFriendStatus(request: Request, env: Env) {
-  const url = new URL(request.url);
-  const userId = String(url.searchParams.get("userId") ?? "").trim();
-  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
+  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   await verifyUser(env, userId, deviceSecret);
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
   return json(await getSocialSnapshot(env, userId));
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
-  const url = new URL(request.url);
-  const userId = String(url.searchParams.get("userId") ?? "").trim();
-  const deviceSecret = String(url.searchParams.get("deviceSecret") ?? "").trim();
-  const targetUserId = String(url.searchParams.get("targetUserId") ?? "").trim();
+  const payload = await readJson<{ userId: string; deviceSecret: string; targetUserId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
+  const targetUserId = cleanUserId(payload.targetUserId);
   await verifyUser(env, userId, deviceSecret);
-  if (!targetUserId) return text("Missing targetUserId.", 400);
 
   const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt FROM users WHERE id = ?")
     .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; lastSeenAt: string | null }>();
@@ -500,16 +535,16 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
-      if (request.method === "GET" && url.pathname === "/feed") return handleFeed(request, env);
+      if (request.method === "POST" && url.pathname === "/feed") return handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/update") return handleFeedUpdate(request, env);
       if (request.method === "POST" && url.pathname === "/feed/delete") return handleFeedDelete(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return handleFriendResponse(request, env);
-      if (request.method === "GET" && url.pathname === "/friends/status") return handleFriendStatus(request, env);
+      if (request.method === "POST" && url.pathname === "/friends/status") return handleFriendStatus(request, env);
       if (request.method === "POST" && url.pathname === "/presence") return handlePresence(request, env);
-      if (request.method === "GET" && url.pathname === "/player-stats") return handlePlayerStats(request, env);
+      if (request.method === "POST" && url.pathname === "/player-stats") return handlePlayerStats(request, env);
       return text("Not found.", 404);
     } catch (error: unknown) {
       if (error instanceof Response) return error;

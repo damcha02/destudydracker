@@ -151,12 +151,14 @@ export async function syncSocialState(state: AppState) {
 }
 
 export async function getSocialFeed(social: SocialState, scope: SocialFeedScope) {
-  const params = new URLSearchParams({
-    scope,
-    userId: social.userId,
-    deviceSecret: social.deviceSecret,
+  return requestSocialApi<SocialFeedResponse>("/feed", {
+    method: "POST",
+    body: JSON.stringify({
+      scope,
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+    }),
   });
-  return requestSocialApi<SocialFeedResponse>(`/feed?${params.toString()}`, { method: "GET" });
 }
 
 export async function reactToFeedPost(social: SocialState, postId: string, emoji: string) {
@@ -218,11 +220,13 @@ export async function respondToFriendRequest(social: SocialState, requestId: str
 }
 
 export async function getFriendStatus(social: SocialState) {
-  const params = new URLSearchParams({
-    userId: social.userId,
-    deviceSecret: social.deviceSecret,
+  return requestSocialApi<SocialStatusResponse>("/friends/status", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+    }),
   });
-  return requestSocialApi<SocialStatusResponse>(`/friends/status?${params.toString()}`, { method: "GET" });
 }
 
 export function getNextAutoSyncAt() {
@@ -251,10 +255,12 @@ export interface PlayerStatsResponse {
 }
 
 export async function getPlayerStats(social: SocialState, targetUserId: string) {
-  const params = new URLSearchParams({
-    userId: social.userId,
-    deviceSecret: social.deviceSecret,
-    targetUserId,
+  return requestSocialApi<PlayerStatsResponse>("/player-stats", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      targetUserId,
+    }),
   });
-  return requestSocialApi<PlayerStatsResponse>(`/player-stats?${params.toString()}`, { method: "GET" });
 }

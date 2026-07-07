@@ -449,8 +449,17 @@ type DashboardWidgetLayout = {
 };
 
 type CalendarView = "month" | "week";
-type MenuPanel = "theme" | "personal" | "settings" | null;
+type MenuPanel = "theme" | "personal" | "settings" | "options" | null;
 type VaultSpace = "daily" | "references" | "summaries";
+
+const primaryTabs: Array<{ id: TabKey; label: string }> = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "planner", label: "Planner" },
+  { id: "timer", label: "Timer" },
+  { id: "vault", label: "Vault" },
+  { id: "break", label: "Break Room" },
+  { id: "friends", label: "Social" },
+];
 
 const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
   { id: "daily", label: "Daily" },
@@ -1342,7 +1351,7 @@ function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEnt
   );
 }
 
-function SummaryPdfViewer({ path, title }: { path: string; title: string }) {
+function SummaryPdfViewer({ vaultPath, path, title }: { vaultPath: string; path: string; title: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
   const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
@@ -1365,7 +1374,7 @@ function SummaryPdfViewer({ path, title }: { path: string; title: string }) {
     void Promise.all([
       import("pdfjs-dist"),
       import("pdfjs-dist/build/pdf.worker.mjs?url"),
-      readSummaryPdf(path),
+      readSummaryPdf(vaultPath, path),
     ])
       .then(([pdfjsLib, workerModule, bytes]) => {
         if (cancelled) return null;
@@ -1399,7 +1408,7 @@ function SummaryPdfViewer({ path, title }: { path: string; title: string }) {
       renderTaskRef.current = null;
       void loadingTask?.destroy();
     };
-  }, [path]);
+  }, [path, vaultPath]);
 
   useEffect(() => {
     if (!documentProxy || !canvasRef.current) return undefined;
@@ -1738,7 +1747,7 @@ function App() {
           return { ...current, timer: { ...timer, remainingSeconds: diff } };
         }
 
-        const endedAt = new Date().toISOString();
+        const endedAt = new Date(new Date(endsAt).getTime()).toISOString();
         if (timer.phase === "study") {
           const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
           const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
@@ -2396,6 +2405,30 @@ function App() {
 
   function setActiveTab(activeTab: TabKey) {
     setState((current) => ({ ...current, activeTab }));
+  }
+
+  function toggleTabVisibility(tab: TabKey) {
+    setState((current) => {
+      const visibleTabs = current.settings.visibleTabs ?? defaultState.settings.visibleTabs;
+      const isVisible = visibleTabs[tab] !== false;
+      const visibleCount = primaryTabs.filter(({ id }) => visibleTabs[id] !== false).length;
+
+      if (isVisible && visibleCount <= 1) return current;
+
+      const nextVisibleTabs = { ...visibleTabs, [tab]: !isVisible };
+      const nextActiveTab = nextVisibleTabs[current.activeTab] !== false
+        ? current.activeTab
+        : primaryTabs.find(({ id }) => nextVisibleTabs[id] !== false)?.id ?? "dashboard";
+
+      return {
+        ...current,
+        activeTab: nextActiveTab,
+        settings: {
+          ...current.settings,
+          visibleTabs: nextVisibleTabs,
+        },
+      };
+    });
   }
 
   async function copyFriendCode() {
@@ -5349,7 +5382,7 @@ function App() {
           <div className="settings-panel-head">
             <div>
               <p className="eyebrow">Menu</p>
-              <h2>{activeMenuPanel === "theme" ? "Theme" : activeMenuPanel === "personal" ? "Personal" : "Settings"}</h2>
+              <h2>{activeMenuPanel === "theme" ? "Theme" : activeMenuPanel === "personal" ? "Personal" : activeMenuPanel === "options" ? "Options" : "Settings"}</h2>
             </div>
             <button type="button" className="ghost-button small-button" onClick={closeMenuPanel}>Close</button>
           </div>
@@ -5417,6 +5450,39 @@ function App() {
                 <button type="button" className="ghost-button" onClick={() => setPersonalNameDraft("")}>Clear name</button>
               </div>
             </form>
+          ) : null}
+
+          {activeMenuPanel === "options" ? (
+            <div className="settings-panel-body options-panel-body">
+              <div className="options-intro-card">
+                <strong>Choose visible tabs</strong>
+                <span>Turn off any tab you do not want in the main navigation. The app adapts as if it was never there.</span>
+              </div>
+              <div className="tab-toggle-list">
+                {primaryTabs.map((tab) => {
+                  const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
+                  const checked = visibleTabs[tab.id] !== false;
+                  const visibleCount = primaryTabs.filter(({ id }) => visibleTabs[id] !== false).length;
+                  const disabled = checked && visibleCount <= 1;
+
+                  return (
+                    <label key={tab.id} className={`tab-toggle-row ${disabled ? "disabled" : ""}`}>
+                      <span>
+                        <strong>{tab.label}</strong>
+                        <small>{checked ? "Shown in tabs" : "Hidden from tabs"}</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={disabled}
+                        onChange={() => toggleTabVisibility(tab.id)}
+                      />
+                      <span className="ios-switch" aria-hidden="true" />
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
 
           {activeMenuPanel === "settings" ? (
@@ -5615,6 +5681,7 @@ function App() {
                 </button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
               </div>
             ) : null}
@@ -5639,14 +5706,7 @@ function App() {
       ) : null}
 
       <nav className="tab-row" aria-label="Primary navigation">
-        {([
-          ["dashboard", "Dashboard"],
-          ["planner", "Planner"],
-          ["timer", "Timer"],
-          ["vault", "Vault"],
-          ["break", "Break Room"],
-          ["friends", "Social"],
-        ] as [TabKey, string][]).map(([key, label]) => (
+        {primaryTabs.filter(({ id }) => (state.settings.visibleTabs ?? defaultState.settings.visibleTabs)[id] !== false).map(({ id: key, label }) => (
           <button
             key={key}
             className={`tab-button ${state.activeTab === key ? "active" : ""}`}
@@ -6590,6 +6650,10 @@ function App() {
                   type="button"
                   className="timer-break-switch"
                   onClick={() => {
+                    if (state.timer.phase === "study" && getTimerMinutes(state.timer) > 0) {
+                      setMessage("Save or reset the current study session before switching to break.");
+                      return;
+                    }
                     setState((current) => ({
                       ...current,
                       timer: {
@@ -7195,7 +7259,7 @@ function App() {
                               <button type="button" className="ghost-button small-button" onClick={() => revealItemInDir(selectedSummaryFile.path)}>Show file</button>
                             </div>
                             {selectedSummaryFile.kind === "pdf" ? (
-                              <SummaryPdfViewer path={selectedSummaryFile.path} title={selectedSummaryFile.name} />
+                              <SummaryPdfViewer vaultPath={state.settings.vaultPath} path={selectedSummaryFile.path} title={selectedSummaryFile.name} />
                             ) : (
                               <div className="summary-image-viewer">
                                 <img src={selectedSummaryUrl} alt={selectedSummaryFile.name} />

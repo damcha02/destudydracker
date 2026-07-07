@@ -1,6 +1,15 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialState, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
+
+const defaultVisibleTabs: Record<TabKey, boolean> = {
+  dashboard: true,
+  planner: true,
+  timer: true,
+  vault: true,
+  friends: true,
+  break: true,
+};
 
 export function makeId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -91,6 +100,7 @@ export const defaultState: AppState = {
     themeFamily: "normal",
     vaultPath: null,
     vaultName: "StudyTrackerVault",
+    visibleTabs: defaultVisibleTabs,
   },
   social: makeDefaultSocialState(),
   timer: defaultTimer,
@@ -133,6 +143,73 @@ function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
   return {
     ...merged,
     remainingSeconds: diff,
+  };
+}
+
+function keepTimerContext(timer: TimerState) {
+  return {
+    studyMinutes: timer.studyMinutes,
+    breakMinutes: timer.breakMinutes,
+    examMinutes: timer.examMinutes,
+    semesterId: timer.semesterId,
+    courseId: timer.courseId,
+    taskId: timer.taskId,
+    goal: timer.goal,
+    learned: timer.learned,
+    blocker: timer.blocker,
+    nextStep: timer.nextStep,
+    confidence: timer.confidence,
+    mode: timer.mode,
+    presetLabel: timer.presetLabel,
+  };
+}
+
+function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
+  if (!timer.running || !timer.endsAt || (timer.phase !== "study" && timer.phase !== "exam")) {
+    return { timer: rehydrateTimer(timer), sessions };
+  }
+
+  const endsAtTime = new Date(timer.endsAt).getTime();
+  if (!Number.isFinite(endsAtTime) || endsAtTime > Date.now()) {
+    return { timer: rehydrateTimer(timer), sessions };
+  }
+
+  const endedAt = new Date(endsAtTime).toISOString();
+  const startedAt = timer.startedAt ?? endedAt;
+  const minutes = Math.max(1, timer.phase === "exam" ? Math.round(timer.examMinutes) : Math.round(timer.studyMinutes));
+  const recoveredId = `recovered-${timer.phase}-${startedAt}-${endedAt}`;
+  if (sessions.some((session) => session.id === recoveredId)) {
+    return { timer: rehydrateTimer(timer), sessions };
+  }
+
+  const recoveredSession: StudySession = {
+    id: recoveredId,
+    semesterId: timer.semesterId,
+    courseId: timer.courseId,
+    taskId: timer.taskId,
+    kind: timer.phase === "exam" ? "exam" : "study",
+    goal: timer.goal.trim(),
+    learned: timer.learned.trim(),
+    blocker: timer.blocker.trim(),
+    nextStep: timer.nextStep.trim(),
+    confidence: timer.confidence,
+    startedAt,
+    endedAt,
+    minutes,
+    presetLabel: timer.presetLabel,
+  };
+
+  return {
+    sessions: [recoveredSession, ...sessions],
+    timer: {
+      ...defaultTimer,
+      ...keepTimerContext(timer),
+      running: false,
+      phase: "idle" as const,
+      startedAt: null,
+      endsAt: null,
+      remainingSeconds: timer.mode === "exam" ? timer.examMinutes * 60 : timer.mode === "endless" ? 0 : timer.studyMinutes * 60,
+    },
   };
 }
 
@@ -262,6 +339,32 @@ function normalizeCalendarEntries(entries: unknown): CalendarEntry[] {
   });
 }
 
+function normalizeVisibleTabs(visibleTabs: unknown): Record<TabKey, boolean> {
+  if (!visibleTabs || typeof visibleTabs !== "object") return defaultVisibleTabs;
+
+  const record = visibleTabs as Partial<Record<TabKey, unknown>>;
+  const normalized = {
+    ...defaultVisibleTabs,
+    dashboard: record.dashboard !== false,
+    planner: record.planner !== false,
+    timer: record.timer !== false,
+    vault: record.vault !== false,
+    friends: record.friends !== false,
+    break: record.break !== false,
+  };
+
+  return Object.values(normalized).some(Boolean) ? normalized : defaultVisibleTabs;
+}
+
+function normalizeActiveTab(activeTab: unknown, visibleTabs: Record<TabKey, boolean>): TabKey {
+  if (typeof activeTab === "string" && activeTab in defaultVisibleTabs) {
+    const tab = activeTab as TabKey;
+    if (visibleTabs[tab] !== false) return tab;
+  }
+
+  return (Object.keys(defaultVisibleTabs) as TabKey[]).find((tab) => visibleTabs[tab] !== false) ?? "dashboard";
+}
+
 export function loadAppState(): AppState {
   const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("study-tracker-desktop-v1");
   if (!raw) return defaultState;
@@ -269,10 +372,15 @@ export function loadAppState(): AppState {
   try {
     const parsed = JSON.parse(raw) as Partial<AppState> & Record<string, unknown>;
     const migrated = migrateSemesters(parsed);
+    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
+    const parsedTimer = parsed.timer && typeof parsed.timer === "object" ? parsed.timer : {};
+    const timerRecovery = recoverExpiredTimer({ ...defaultTimer, ...parsedTimer }, sessions);
+    const visibleTabs = normalizeVisibleTabs(parsed.settings?.visibleTabs);
 
     return {
       ...defaultState,
       ...parsed,
+      activeTab: normalizeActiveTab(parsed.activeTab, visibleTabs),
       semesters: migrated.semesters,
       courses: Array.isArray(migrated.courses)
         ? migrated.courses.map((course) => ({
@@ -286,10 +394,11 @@ export function loadAppState(): AppState {
       settings: {
         ...defaultState.settings,
         ...parsed.settings,
+        visibleTabs,
       },
       social: normalizeSocialState(parsed.social),
-      timer: rehydrateTimer(parsed.timer),
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      timer: timerRecovery.timer,
+      sessions: timerRecovery.sessions,
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],
     };
   } catch {
@@ -298,7 +407,11 @@ export function loadAppState(): AppState {
 }
 
 export function saveAppState(state: AppState) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (error) {
+    console.warn("Study Tracker state could not be saved.", error);
+  }
 }
 
 export function downloadBackup(state: AppState) {
