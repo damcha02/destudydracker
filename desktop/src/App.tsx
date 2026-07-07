@@ -237,6 +237,37 @@ async function ensureTimerNotificationPermission() {
   return permissionGranted;
 }
 
+function timerBrandPhase(timer: TimerState) {
+  if (timer.phase === "stopwatch") return "study";
+  if (timer.phase === "study" || timer.phase === "break" || timer.phase === "exam") return timer.phase;
+  return "idle";
+}
+
+function TimerBrandMark({ phase }: { phase: ReturnType<typeof timerBrandPhase> }) {
+  return (
+    <div className={`brand-mark brand-mark--${phase}`} aria-hidden="true">
+      {phase === "study" ? (
+        <svg className="brand-mark-symbol brand-mark-symbol--snake" viewBox="0 0 32 32" fill="none">
+          <path d="M22.7 7.8C19.5 5.8 13.3 5.7 10.4 8.9C7.3 12.3 10.5 15.3 15.7 16.5C21.6 17.9 23.5 21.5 19.5 24.2C16.4 26.3 10.9 25.5 8.9 22.2" />
+          <circle cx="23.4" cy="7.6" r="1.15" />
+        </svg>
+      ) : phase === "break" ? (
+        <svg className="brand-mark-symbol brand-mark-symbol--break" viewBox="0 0 32 32" fill="none">
+          <path d="M11 8.5v15" />
+          <path d="M21 8.5v15" />
+        </svg>
+      ) : phase === "exam" ? (
+        <span className="brand-mark-letter">E</span>
+      ) : (
+        <svg className="brand-mark-symbol brand-mark-symbol--leaf" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 20A7 7 0 0 1 4 13c0-5 5-9 16-9 0 9-4 16-9 16z" />
+          <path d="M11 20c0-5 2-9 7-13" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
 const focusPresets = [
   { label: "Pomodoro 25/5", study: 25, breakMinutes: 5, mode: "focus" as const },
   { label: "Deep Work 52/17", study: 52, breakMinutes: 17, mode: "focus" as const },
@@ -1764,6 +1795,17 @@ function App() {
   }, [state.timer.running]);
 
   useEffect(() => {
+    if (!isTauriApp()) return;
+    void invoke("set_timer_tray_state", {
+      phase: state.timer.phase,
+      running: state.timer.running,
+      remainingSeconds: Math.max(0, Math.floor(state.timer.remainingSeconds)),
+    }).catch((error: unknown) => {
+      console.warn("Timer tray state could not be updated.", error);
+    });
+  }, [state.timer.phase, state.timer.remainingSeconds, state.timer.running]);
+
+  useEffect(() => {
     if (state.timer.phase === "idle") {
       setFullscreen(false);
     }
@@ -2094,6 +2136,8 @@ function App() {
   const badgeVeteran = state.totalUnlocks >= 10;
   const badgeRockMaster = state.petRockPats >= 1000;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
+  const socialGlobalWeekly = getLeaderboardWithLocalSelf(state, "global", "weekly");
+  const socialFriendsWeekly = getLeaderboardWithLocalSelf(state, "friends", "weekly");
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
   const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
   const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
@@ -2104,8 +2148,8 @@ function App() {
     if (session.kind !== "study" && session.kind !== "exam") return false;
     return new Date(session.endedAt) >= monthStartAnchor;
   }).reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
-  const myGlobalRank = state.social.isPrivate ? undefined : state.social.cachedLeaderboards.global.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
-  const myFriendRank = state.social.cachedLeaderboards.friends.weekly.find((entry) => entry.userId === state.social.userId)?.rank;
+  const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
+  const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
   const latestFeedSessionPosted = latestFeedSession
@@ -2115,9 +2159,7 @@ function App() {
     const lastSeen = parseSocialTimestamp(friend.lastSeenAt);
     return lastSeen !== null && Date.now() - lastSeen < 45 * 60 * 1000;
   });
-  const weekCompareEntries = [localSocialWeekly, ...state.social.cachedLeaderboards.friends.weekly.filter((entry) => entry.userId !== state.social.userId)]
-    .sort((a, b) => b.minutes - a.minutes)
-    .slice(0, 6);
+  const weekCompareEntries = socialFriendsWeekly.slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const socialFriendIds = new Set(state.social.friends.map((friend) => friend.userId));
@@ -2782,6 +2824,8 @@ function App() {
           friends: result.social.friends,
           incomingFriendRequests: result.social.incomingFriendRequests,
           outgoingFriendRequests: result.social.outgoingFriendRequests,
+          cachedLeaderboards: result.social.cachedLeaderboards,
+          cachedFeeds: result.social.cachedFeeds,
           pendingFeedPosts: current.social.pendingFeedPosts,
           lastSyncError: null,
         },
@@ -5491,12 +5535,7 @@ function App() {
       <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
-          <div className="brand-mark" aria-hidden="true">
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 20A7 7 0 0 1 4 13c0-5 5-9 16-9 0 9-4 16-9 16z"/>
-              <path d="M11 20c0-5 2-9 7-13"/>
-            </svg>
-          </div>
+          <TimerBrandMark phase={timerBrandPhase(state.timer)} />
           <div>
             <h1>Study Tracker</h1>
             <p className="subtitle">Semester planning, focus tracking, workload clarity, and study notes.</p>

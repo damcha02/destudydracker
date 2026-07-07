@@ -3214,6 +3214,60 @@ textarea {
   box-shadow: var(--shadow-md);
 }
 
+.brand-mark--study {
+  background: linear-gradient(145deg, #5ad5ac, #2f7aff);
+}
+
+.brand-mark--break {
+  background: linear-gradient(145deg, #ffcf68, #ff6b6b);
+}
+
+.brand-mark--exam {
+  background: linear-gradient(145deg, #ff8181, #9648ff);
+}
+
+.brand-mark-symbol {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.brand-mark-symbol--snake {
+  width: 27px;
+  height: 27px;
+  stroke: #081018;
+  stroke-width: 4.1;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.26));
+}
+
+.brand-mark-symbol--snake circle {
+  fill: #f6fff8;
+  stroke: none;
+}
+
+.brand-mark-symbol--break {
+  width: 25px;
+  height: 25px;
+  stroke: #1d1218;
+  stroke-width: 4.4;
+}
+
+.brand-mark-symbol--leaf {
+  width: 21px;
+  height: 21px;
+}
+
+.brand-mark-letter {
+  color: #fffceb;
+  font-family: var(--font-mono);
+  font-size: 1.22rem;
+  font-weight: 900;
+  line-height: 1;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+}
+
 .topbar h1 {
   margin: 0;
   color: var(--ink);

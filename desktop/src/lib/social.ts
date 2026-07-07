@@ -35,6 +35,18 @@ function startOfWeek(date: Date) {
   return copy;
 }
 
+function nextWeekStart(date = new Date()) {
+  const next = startOfWeek(date);
+  next.setDate(next.getDate() + 7);
+  return next;
+}
+
+function isCurrentWeekEntry(entry: SocialLeaderboardEntry, weekStart: Date) {
+  if (!entry.lastActiveDate) return false;
+  const activeAt = new Date(`${entry.lastActiveDate}T00:00:00`);
+  return activeAt >= weekStart;
+}
+
 export function getLocalSocialStats(sessions: StudySession[]) {
   const daily = new Map<string, SocialDailyStat>();
   sessions
@@ -76,7 +88,10 @@ export function getLocalLeaderboardEntry(state: AppState, period: SocialLeaderbo
 export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeaderboardScope, period: SocialLeaderboardPeriod) {
   const self = getLocalLeaderboardEntry(state, period);
   const includeSelf = scope !== "global" || !state.social.isPrivate;
-  const remote = state.social.cachedLeaderboards[scope][period].filter((entry) => entry.userId !== self.userId);
+  const weekStart = startOfWeek(new Date());
+  const remote = state.social.cachedLeaderboards[scope][period]
+    .filter((entry) => entry.userId !== self.userId)
+    .filter((entry) => period !== "weekly" || isCurrentWeekEntry(entry, weekStart));
   const combined = [...(includeSelf ? [self] : []), ...remote]
     .filter((entry) => (scope === "global" && !state.social.isPrivate) || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
@@ -211,7 +226,9 @@ export async function getFriendStatus(social: SocialState) {
 }
 
 export function getNextAutoSyncAt() {
-  return new Date(Date.now() + SOCIAL_SYNC_INTERVAL_MS).toISOString();
+  const intervalSyncAt = new Date(Date.now() + SOCIAL_SYNC_INTERVAL_MS);
+  const weeklyResetAt = nextWeekStart();
+  return new Date(Math.min(intervalSyncAt.getTime(), weeklyResetAt.getTime())).toISOString();
 }
 
 export async function presencePing(social: SocialState) {

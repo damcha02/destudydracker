@@ -1,9 +1,16 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tauri::{
+    image::Image,
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager,
+};
 
 const LATEST_UPDATE_JSON_URL: &str =
     "https://github.com/damcha02/destudydracker/releases/latest/download/latest.json";
+const TIMER_TRAY_ID: &str = "study-tracker-timer";
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -43,6 +50,236 @@ struct SummaryFile {
     extension: String,
     kind: String,
     size_bytes: u64,
+}
+
+fn tray_icon_for_phase(phase: &str) -> Image<'static> {
+    const SIZE: usize = 32;
+    let mut pixels = vec![0; SIZE * SIZE * 4];
+
+    let (top, bottom, glyph) = match phase {
+        "study" => ([90, 213, 172, 255], [47, 122, 255, 255], Some('s')),
+        "break" => ([255, 207, 104, 255], [255, 107, 107, 255], Some('b')),
+        "exam" => ([255, 129, 129, 255], [150, 72, 255, 255], Some('e')),
+        "stopwatch" => ([90, 213, 172, 255], [47, 122, 255, 255], Some('s')),
+        _ => ([143, 180, 255, 255], [222, 83, 128, 255], None),
+    };
+
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let index = (y * SIZE + x) * 4;
+            let dx = x as f32 - 15.5;
+            let dy = y as f32 - 15.5;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > 15.5 {
+                continue;
+            }
+
+            let t = y as f32 / (SIZE - 1) as f32;
+            let edge_alpha = if distance > 14.0 {
+                ((15.5 - distance) / 1.5).clamp(0.0, 1.0)
+            } else {
+                1.0
+            };
+            for channel in 0..3 {
+                pixels[index + channel] =
+                    ((top[channel] as f32 * (1.0 - t)) + (bottom[channel] as f32 * t)) as u8;
+            }
+            pixels[index + 3] = (255.0 * edge_alpha) as u8;
+        }
+    }
+
+    match glyph {
+        Some('s') => draw_snake_s(&mut pixels, SIZE),
+        Some('b') => draw_break_mark(&mut pixels, SIZE),
+        Some('e') => draw_exam_e(&mut pixels, SIZE),
+        _ => draw_leaf(&mut pixels, SIZE),
+    }
+
+    Image::new_owned(pixels, SIZE as u32, SIZE as u32)
+}
+
+fn put_pixel(pixels: &mut [u8], size: usize, x: i32, y: i32, color: [u8; 4]) {
+    if x < 0 || y < 0 || x >= size as i32 || y >= size as i32 {
+        return;
+    }
+    let index = ((y as usize * size) + x as usize) * 4;
+    let alpha = color[3] as f32 / 255.0;
+    for channel in 0..3 {
+        pixels[index + channel] =
+            (color[channel] as f32 * alpha + pixels[index + channel] as f32 * (1.0 - alpha)) as u8;
+    }
+    pixels[index + 3] = 255;
+}
+
+fn draw_disc(pixels: &mut [u8], size: usize, cx: f32, cy: f32, radius: f32, color: [u8; 4]) {
+    let min_x = (cx - radius - 1.0).floor() as i32;
+    let max_x = (cx + radius + 1.0).ceil() as i32;
+    let min_y = (cy - radius - 1.0).floor() as i32;
+    let max_y = (cy + radius + 1.0).ceil() as i32;
+
+    for y in min_y..=max_y {
+        for x in min_x..=max_x {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            if (dx * dx + dy * dy).sqrt() <= radius {
+                put_pixel(pixels, size, x, y, color);
+            }
+        }
+    }
+}
+
+fn draw_line(
+    pixels: &mut [u8],
+    size: usize,
+    from: (f32, f32),
+    to: (f32, f32),
+    width: f32,
+    color: [u8; 4],
+) {
+    let steps = ((to.0 - from.0).abs().max((to.1 - from.1).abs()) * 2.0).ceil() as i32;
+    for step in 0..=steps.max(1) {
+        let t = step as f32 / steps.max(1) as f32;
+        draw_disc(
+            pixels,
+            size,
+            from.0 + (to.0 - from.0) * t,
+            from.1 + (to.1 - from.1) * t,
+            width / 2.0,
+            color,
+        );
+    }
+}
+
+fn draw_snake_s(pixels: &mut [u8], size: usize) {
+    let color = [8, 16, 24, 245];
+    let points = [
+        (21.5, 9.0),
+        (16.0, 7.0),
+        (10.5, 9.0),
+        (10.0, 13.0),
+        (15.8, 15.5),
+        (21.2, 18.0),
+        (20.0, 22.4),
+        (14.0, 24.0),
+        (9.8, 21.5),
+    ];
+    for pair in points.windows(2) {
+        draw_line(pixels, size, pair[0], pair[1], 4.3, color);
+    }
+    draw_disc(pixels, size, 22.2, 8.5, 1.4, [250, 255, 255, 255]);
+}
+
+fn draw_break_mark(pixels: &mut [u8], size: usize) {
+    let color = [29, 18, 24, 245];
+    draw_line(pixels, size, (11.0, 9.0), (11.0, 23.0), 4.5, color);
+    draw_line(pixels, size, (21.0, 9.0), (21.0, 23.0), 4.5, color);
+}
+
+fn draw_exam_e(pixels: &mut [u8], size: usize) {
+    let color = [255, 250, 235, 250];
+    draw_line(pixels, size, (10.0, 8.0), (10.0, 24.0), 4.0, color);
+    draw_line(pixels, size, (10.0, 8.5), (22.5, 8.5), 4.0, color);
+    draw_line(pixels, size, (10.0, 16.0), (20.0, 16.0), 4.0, color);
+    draw_line(pixels, size, (10.0, 23.5), (22.5, 23.5), 4.0, color);
+}
+
+fn draw_leaf(pixels: &mut [u8], size: usize) {
+    let color = [8, 16, 24, 230];
+    draw_line(pixels, size, (10.0, 21.0), (22.0, 9.0), 2.5, color);
+    draw_line(pixels, size, (11.0, 20.0), (9.5, 13.0), 3.2, color);
+    draw_line(pixels, size, (9.5, 13.0), (16.5, 9.5), 3.2, color);
+    draw_line(pixels, size, (16.5, 9.5), (22.5, 9.2), 3.2, color);
+    draw_line(pixels, size, (22.5, 9.2), (20.0, 16.5), 3.2, color);
+    draw_line(pixels, size, (20.0, 16.5), (11.0, 20.0), 3.2, color);
+}
+
+fn timer_tray_title(phase: &str, running: bool, remaining_seconds: u32) -> String {
+    if phase == "idle" {
+        return "Idle".into();
+    }
+
+    let minutes = remaining_seconds / 60;
+    let seconds = remaining_seconds % 60;
+    let label = match phase {
+        "study" => "Study",
+        "break" => "Break",
+        "exam" => "Exam",
+        "stopwatch" => "Endless",
+        _ => "Timer",
+    };
+    if !running {
+        return format!("Paused {label} {minutes:02}:{seconds:02}");
+    }
+    format!("{label} {minutes:02}:{seconds:02}")
+}
+
+fn timer_tray_tooltip(phase: &str, running: bool, remaining_seconds: u32) -> String {
+    format!(
+        "Study Tracker - {}",
+        timer_tray_title(phase, running, remaining_seconds)
+    )
+}
+
+fn setup_timer_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show", "Show Study Tracker", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    TrayIconBuilder::with_id(TIMER_TRAY_ID)
+        .icon(tray_icon_for_phase("idle"))
+        .tooltip("Study Tracker - Idle")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Some(window) = tray.app_handle().get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        })
+        .build(app)?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn set_timer_tray_state(
+    app: AppHandle,
+    phase: String,
+    running: bool,
+    remaining_seconds: u32,
+) -> Result<(), String> {
+    let Some(tray) = app.tray_by_id(TIMER_TRAY_ID) else {
+        return Ok(());
+    };
+    let icon_phase = if phase == "idle" {
+        "idle"
+    } else {
+        phase.as_str()
+    };
+    tray.set_icon(Some(tray_icon_for_phase(icon_phase)))
+        .map_err(|error| error.to_string())?;
+    tray.set_tooltip(Some(timer_tray_tooltip(&phase, running, remaining_seconds)))
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn sanitize_segment(value: &str) -> String {
@@ -296,7 +533,9 @@ fn import_summary_files(
             return Err(format!("{} is not a file.", source));
         }
         if supported_summary_extension(&source_path).is_none() {
-            return Err("Only PDF, PNG, JPG, JPEG, and WEBP files can be added to summaries.".into());
+            return Err(
+                "Only PDF, PNG, JPG, JPEG, and WEBP files can be added to summaries.".into(),
+            );
         }
 
         let file_name = source_path
@@ -565,6 +804,10 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            setup_timer_tray(app.handle())?;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             create_obsidian_vault,
             link_obsidian_vault,
@@ -577,7 +820,8 @@ pub fn run() {
             read_summary_pdf,
             export_daily_note,
             get_update_install_support,
-            download_linux_update_package
+            download_linux_update_package,
+            set_timer_tray_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
