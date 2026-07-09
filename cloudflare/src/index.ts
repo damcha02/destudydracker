@@ -279,6 +279,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const ids = posts.results.map((post) => post.id);
   const reactionCounts = new Map<string, Record<string, number>>();
   const reacted = new Map<string, Record<string, boolean>>();
+  const reactedBy = new Map<string, Record<string, string[]>>();
   if (ids.length) {
     const countRows = await env.DB.prepare(`
       SELECT post_id AS postId, emoji, COUNT(*) AS count
@@ -297,6 +298,20 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     reactedRows.results.forEach((row) => {
       reacted.set(row.postId, { ...(reacted.get(row.postId) ?? {}), [row.emoji]: true });
     });
+    const namesRows = await env.DB.prepare(`
+      SELECT r.post_id AS postId, r.emoji, u.display_name AS displayName
+      FROM feed_reactions r
+      JOIN users u ON u.id = r.user_id
+      WHERE r.post_id IN (${ids.map(() => "?").join(",")})
+      ORDER BY r.post_id, r.emoji, u.display_name
+    `).bind(...ids).all<{ postId: string; emoji: string; displayName: string }>();
+    namesRows.results.forEach((row) => {
+      const existing = reactedBy.get(row.postId) ?? {};
+      const names = existing[row.emoji] ?? [];
+      names.push(row.displayName);
+      existing[row.emoji] = names;
+      reactedBy.set(row.postId, existing);
+    });
   }
 
   return posts.results.map((post) => ({
@@ -305,6 +320,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     isSelf: post.userId === userId,
     reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
     reacted: reacted.get(post.id) ?? {},
+    reactedBy: reactedBy.get(post.id) ?? {},
   }));
 }
 
@@ -394,7 +410,7 @@ async function handleFeedReaction(request: Request, env: Env) {
   const userId = String(payload.userId ?? "").trim();
   await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
   const postId = cleanText(payload.postId, 80);
-  const emoji = ["fire", "brain", "clap"].includes(payload.emoji) ? payload.emoji : "fire";
+  const emoji = payload.emoji?.length <= 4 ? payload.emoji : "fire";
   const existing = await env.DB.prepare("SELECT 1 FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).first();
   if (existing) {
     await env.DB.prepare("DELETE FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).run();

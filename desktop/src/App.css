@@ -1109,6 +1109,7 @@
   border-radius: 20px;
   background: var(--surface);
   box-shadow: var(--shadow);
+  overflow: visible;
 }
 
 .feed-composer {
@@ -1257,7 +1258,10 @@
 
 .feed-card__reactions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+  position: relative;
+  overflow: visible;
   border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   padding: 10px 18px 14px;
 }
@@ -1271,6 +1275,31 @@
   font: inherit;
   font-size: 0.8rem;
   font-weight: 850;
+  position: relative;
+}
+
+.reaction-tooltip {
+  pointer-events: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.7rem;
+  font-weight: 400;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  z-index: 50;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.reaction-btn:hover .reaction-tooltip {
+  opacity: 1;
 }
 
 .reaction-btn:hover,
@@ -8659,4 +8688,68 @@ input[type="color"] {
 
 .long-now.dim {
   opacity: 0.5;
+}
+
+.reaction-btn--add {
+  font-size: 1rem;
+  font-weight: 400;
+  padding: 6px 10px;
+  line-height: 1;
+}
+
+.emoji-picker {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 3px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+  z-index: 100;
+  max-width: 210px;
+  isolation: isolate;
+}
+
+.emoji-picker::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+  border-radius: 9px;
+  z-index: -1;
+}
+
+.emoji-picker__item {
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 2px;
+  font-size: 1.15rem;
+  cursor: pointer;
+  transition: background 0.1s;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.emoji-picker__item:hover {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+.emoji-picker__item--active {
+  background: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+
+.nav-badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
 }
