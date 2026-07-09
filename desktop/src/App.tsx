@@ -1608,6 +1608,8 @@ function App() {
     releaseUrl: RELEASES_PAGE_URL,
     message: "Check whether a newer release is available.",
   });
+  const [hasUnreadSocial, setHasUnreadSocial] = useState(false);
+  const [emojiPickerPostId, setEmojiPickerPostId] = useState<string | null>(null);
   const [socialSubtab, setSocialSubtab] = useState<SocialSubtab>("feed");
   const [feedScope, setFeedScope] = useState<SocialFeedScope>("global");
   const [feedNoteDraft, setFeedNoteDraft] = useState("");
@@ -2404,6 +2406,7 @@ function App() {
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
   function setActiveTab(activeTab: TabKey) {
+    if (activeTab === "friends") setHasUnreadSocial(false);
     setState((current) => ({ ...current, activeTab }));
   }
 
@@ -2441,6 +2444,18 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (!emojiPickerPostId) return;
+    function handleClick(event: globalThis.MouseEvent) {
+      const target = event.target as HTMLElement;
+      if (!target.closest(".emoji-picker") && !target.closest(".reaction-btn--add")) {
+        setEmojiPickerPostId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [emojiPickerPostId]);
+
   async function runSocialSync(options: { silent?: boolean; stateOverride?: AppState } = {}) {
     const { silent = false, stateOverride } = options;
     const syncState = stateOverride ?? state;
@@ -2471,6 +2486,7 @@ function App() {
           nextAutoSyncAt: getNextAutoSyncAt(),
         },
       }));
+      setHasUnreadSocial(true);
       if (!silent) setMessage("Social leaderboards updated.");
     } catch (error: unknown) {
       console.warn("Social sync failed.", error);
@@ -2559,11 +2575,14 @@ function App() {
     setMessage(state.social.autoPostSessions ? "Auto-post disabled." : "Auto-post enabled.");
   }
 
-  async function toggleLocalFeedReaction(postId: string, emoji: "fire" | "brain" | "clap") {
+  async function toggleLocalFeedReaction(postId: string, emoji: string) {
     setState((current) => {
+      const myName = current.social.displayName;
       const updatePost = (post: SocialFeedPost) => {
         if (post.id !== postId) return post;
         const reacted = Boolean(post.reacted?.[emoji]);
+        const prevNames = post.reactedBy?.[emoji] ?? [];
+        const nextNames = reacted ? prevNames.filter((n) => n !== myName) : [...prevNames, myName];
         return {
           ...post,
           reactions: {
@@ -2573,6 +2592,10 @@ function App() {
           reacted: {
             ...post.reacted,
             [emoji]: !reacted,
+          },
+          reactedBy: {
+            ...post.reactedBy,
+            [emoji]: nextNames,
           },
         };
       };
@@ -2591,7 +2614,6 @@ function App() {
     if (!socialConfigured || state.social.pendingFeedPosts.some((post) => post.id === postId)) return;
     try {
       await reactToFeedPost(state.social, postId, emoji);
-      await refreshSocialFeedNow();
     } catch (error: unknown) {
       console.warn("Could not sync feed reaction.", error);
       setMessage(getErrorMessage(error, "Could not sync reaction."));
@@ -2944,6 +2966,12 @@ function App() {
     const interval = window.setInterval(() => void refreshFriendStatus(), 2 * 60 * 1000);
     return () => window.clearInterval(interval);
   }, [state.activeTab]);
+
+  useEffect(() => {
+    if (!socialConfigured || !state.sessions.length) return;
+    const timeout = window.setTimeout(() => void runSocialSync({ silent: true }), 2000);
+    return () => window.clearTimeout(timeout);
+  }, [state.sessions.length]);
 
   useEffect(() => {
     void refreshSocialFeed();
@@ -5711,7 +5739,7 @@ function App() {
               {key === "friends" && <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.4 3-5 6-5s5.2 1.6 6 5" /><path d="M16 11a2.5 2.5 0 1 0 0-5" /><path d="M17 15c2.1.5 3.4 2 4 5" /></>}
               {key === "break" && <><path d="M6 12h4M14 12h4M8 10V8M16 10V8" /><rect x="2" y="7" width="20" height="12" rx="3" /></>}
             </svg>
-            {label}
+            {label}{key === "friends" && hasUnreadSocial ? <span className="nav-badge" /> : null}
           </button>
         ))}
       </nav>
@@ -7384,11 +7412,31 @@ function App() {
                       ) : item.note ? <p>"{item.note}"</p> : null}
                     </div>
                     <div className="feed-card__reactions">
-                      {(["fire", "brain", "clap"] as const).map((emoji) => (
-                        <button key={emoji} type="button" className={`reaction-btn ${item.reacted?.[emoji] ? "reaction-btn--active" : ""}`} onClick={() => void toggleLocalFeedReaction(item.id, emoji)}>
-                          {emoji === "fire" ? "🔥" : emoji === "brain" ? "🧠" : "👏"} {item.reactions?.[emoji] ?? 0}
-                        </button>
-                      ))}
+                      {(() => {
+                        const emojiKeys = ["fire", "brain", "clap", ...Object.keys(item.reactions ?? {}).filter((k) => k !== "fire" && k !== "brain" && k !== "clap" && (item.reactions?.[k] ?? 0) > 0)];
+                        const seen = new Set<string>();
+                        return emojiKeys.filter((k) => { if (seen.has(k)) return false; seen.add(k); return true; }).map((emojiKey) => {
+                          const count = item.reactions?.[emojiKey] ?? 0;
+                          if (count === 0 && emojiKey !== "fire" && emojiKey !== "brain" && emojiKey !== "clap") return null;
+                          const display = emojiKey === "fire" ? "🔥" : emojiKey === "brain" ? "🧠" : emojiKey === "clap" ? "👏" : emojiKey;
+                          const names = item.reactedBy?.[emojiKey];
+                          const label = names?.length ? (names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} +${names.length - 3} more`) : "";
+                          return (
+                            <button key={emojiKey} type="button" className={`reaction-btn ${item.reacted?.[emojiKey] ? "reaction-btn--active" : ""}`} onClick={() => void toggleLocalFeedReaction(item.id, emojiKey)}>
+                              {display} {count}
+                              {label ? <span className="reaction-tooltip">{label}</span> : null}
+                            </button>
+                          );
+                        });
+                      })()}
+                      <button type="button" className="reaction-btn reaction-btn--add" onClick={() => setEmojiPickerPostId(emojiPickerPostId === item.id ? null : item.id)} title="Add reaction">+</button>
+                      {emojiPickerPostId === item.id ? (
+                        <div className="emoji-picker">
+                          {["🔥", "🧠", "👏", "⭐", "🎯", "💪", "📚", "⚡", "🎉", "🏆", "✨", "💡", "🎓", "🚀", "💎", "🌟", "📖", "🕐", "💯", "🙌", "🤯", "😤", "👑", "🌊"].map((emj) => (
+                            <button key={emj} type="button" className={`emoji-picker__item ${item.reacted?.[emj] ? "emoji-picker__item--active" : ""}`} onClick={() => { void toggleLocalFeedReaction(item.id, emj); setEmojiPickerPostId(null); }}>{emj}</button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   </article>
                 );

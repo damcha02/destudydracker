@@ -143,6 +143,7 @@ export interface SocialFeedPost {
   isSelf?: boolean;
   reactions: Record<string, number>;
   reacted?: Record<string, boolean>;
+  reactedBy?: Record<string, string[]>;
 }
 
 export interface SocialState {
