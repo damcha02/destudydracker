@@ -200,6 +200,23 @@ async function getFriendIds(env: Env, userId: string) {
   return rows.results.map((row) => row.id);
 }
 
+async function canViewFeedPost(env: Env, userId: string, postId: string) {
+  const post = await env.DB.prepare(`
+    SELECT p.user_id AS userId, u.is_private AS isPrivate
+    FROM feed_posts p
+    JOIN users u ON u.id = p.user_id
+    WHERE p.id = ?
+  `).bind(postId).first<{ userId: string; isPrivate: number }>();
+  if (!post) return { allowed: false, missing: true };
+  if (post.userId === userId || !post.isPrivate) return { allowed: true, missing: false };
+
+  const [userLow, userHigh] = friendPair(userId, post.userId);
+  const friendship = await env.DB.prepare("SELECT 1 FROM friendships WHERE user_low = ? AND user_high = ?")
+    .bind(userLow, userHigh)
+    .first();
+  return { allowed: Boolean(friendship), missing: false };
+}
+
 function leaderboardWhere(period: LeaderboardPeriod) {
   if (period === "daily") return { clause: "WHERE ds.date = ?", params: [todayIso()] };
   if (period === "weekly") return { clause: "WHERE ds.date >= ?", params: [weekStartIso()] };
@@ -250,6 +267,8 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
 
 async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
+  const viewerFriendIds = scope === "friends" ? friendIds : await getFriendIds(env, userId);
+  const visibleReactorIds = new Set([userId, ...viewerFriendIds]);
   const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
   const clauses = scope === "global" ? ["u.is_private = 0"] : [`p.user_id IN (${allowedIds.map(() => "?").join(",") || "?"})`];
   const params = scope === "friends" ? (allowedIds.length ? allowedIds : [userId]) : [];
@@ -299,13 +318,14 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
       reacted.set(row.postId, { ...(reacted.get(row.postId) ?? {}), [row.emoji]: true });
     });
     const namesRows = await env.DB.prepare(`
-      SELECT r.post_id AS postId, r.emoji, u.display_name AS displayName
+      SELECT r.post_id AS postId, r.user_id AS userId, r.emoji, u.display_name AS displayName, u.is_private AS isPrivate
       FROM feed_reactions r
       JOIN users u ON u.id = r.user_id
       WHERE r.post_id IN (${ids.map(() => "?").join(",")})
       ORDER BY r.post_id, r.emoji, u.display_name
-    `).bind(...ids).all<{ postId: string; emoji: string; displayName: string }>();
+    `).bind(...ids).all<{ postId: string; userId: string; emoji: string; displayName: string; isPrivate: number }>();
     namesRows.results.forEach((row) => {
+      if (row.isPrivate && !visibleReactorIds.has(row.userId)) return;
       const existing = reactedBy.get(row.postId) ?? {};
       const names = existing[row.emoji] ?? [];
       names.push(row.displayName);
@@ -410,7 +430,12 @@ async function handleFeedReaction(request: Request, env: Env) {
   const userId = String(payload.userId ?? "").trim();
   await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
   const postId = cleanText(payload.postId, 80);
-  const emoji = payload.emoji?.length <= 4 ? payload.emoji : "fire";
+  const visibility = await canViewFeedPost(env, userId, postId);
+  if (visibility.missing) return text("Feed post not found.", 404);
+  if (!visibility.allowed) return text("You cannot react to this feed post.", 403);
+
+  const requestedEmoji = cleanText(payload.emoji, 8);
+  const emoji = requestedEmoji && [...requestedEmoji].length <= 4 ? requestedEmoji : "fire";
   const existing = await env.DB.prepare("SELECT 1 FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).first();
   if (existing) {
     await env.DB.prepare("DELETE FROM feed_reactions WHERE post_id = ? AND user_id = ? AND emoji = ?").bind(postId, userId, emoji).run();

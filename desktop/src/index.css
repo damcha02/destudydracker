@@ -371,6 +371,7 @@ html,
 body {
   margin: 0;
   padding: 0;
+  overflow-x: hidden;
 }
 
 body {
@@ -406,6 +407,7 @@ body::before {
 
 #root {
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 ::selection {

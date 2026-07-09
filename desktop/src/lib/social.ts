@@ -1,4 +1,4 @@
-import type { AppState, SocialFeedPost, SocialFeedScope, SocialFriendRequest, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
+import type { AppState, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -105,7 +105,7 @@ export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeader
     .filter((entry) => period !== "daily" || isCurrentDayEntry(entry, today))
     .filter((entry) => period !== "weekly" || isCurrentWeekEntry(entry, weekStart));
   const combined = [...(includeSelf ? [self] : []), ...remote]
-    .filter((entry) => (scope === "global" && !state.social.isPrivate) || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
+    .filter((entry) => scope === "global" || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
 
   return combined.map((entry, index) => ({ ...entry, rank: index + 1, isSelf: entry.userId === self.userId }));
@@ -209,7 +209,7 @@ export async function deleteFeedPost(social: SocialState, postId: string) {
 }
 
 export async function createFriendRequest(social: SocialState, friendCode: string) {
-  return requestSocialApi<{ request: SocialFriendRequest }>("/friends/request", {
+  return requestSocialApi<SocialSyncResponse>("/friends/request", {
     method: "POST",
     body: JSON.stringify({
       userId: social.userId,

@@ -1142,6 +1142,11 @@ function formatProfileSeenAt(value: string) {
   }).format(new Date(timestamp));
 }
 
+function isRecentlyActive(value: string | null | undefined, maxAgeMs = 45 * 60 * 1000) {
+  const timestamp = parseSocialTimestamp(value);
+  return timestamp !== null && Date.now() - timestamp < maxAgeMs;
+}
+
 function pickFeedFallbackNote(seed: string) {
   const total = [...seed].reduce((sum, char) => sum + char.charCodeAt(0), 0);
   return feedFallbackNotes[total % feedFallbackNotes.length];
@@ -2167,8 +2172,7 @@ function App() {
     ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
     : false;
   const liveFriends = state.social.friends.filter((friend) => {
-    const lastSeen = parseSocialTimestamp(friend.lastSeenAt);
-    return lastSeen !== null && Date.now() - lastSeen < 45 * 60 * 1000;
+    return isRecentlyActive(friend.lastSeenAt);
   });
   const weekCompareEntries = socialFriendsWeekly.slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
@@ -2582,7 +2586,12 @@ function App() {
         if (post.id !== postId) return post;
         const reacted = Boolean(post.reacted?.[emoji]);
         const prevNames = post.reactedBy?.[emoji] ?? [];
-        const nextNames = reacted ? prevNames.filter((n) => n !== myName) : [...prevNames, myName];
+        const ownNameIndex = prevNames.indexOf(myName);
+        const nextNames = reacted && ownNameIndex >= 0
+          ? [...prevNames.slice(0, ownNameIndex), ...prevNames.slice(ownNameIndex + 1)]
+          : reacted
+            ? prevNames
+            : [...prevNames, myName];
         return {
           ...post,
           reactions: {
@@ -2864,6 +2873,10 @@ function App() {
     if (shouldAutoSyncSocial(state.social)) void runSocialSync({ silent: true });
   });
 
+  const syncAfterSessionChange = useEffectEvent(() => {
+    if (socialConfigured) void runSocialSync({ silent: true });
+  });
+
   const presencePingEffect = useEffectEvent(() => {
     if (socialConfigured) void presencePing(state.social).catch(() => {});
   });
@@ -2969,9 +2982,9 @@ function App() {
 
   useEffect(() => {
     if (!socialConfigured || !state.sessions.length) return;
-    const timeout = window.setTimeout(() => void runSocialSync({ silent: true }), 2000);
+    const timeout = window.setTimeout(syncAfterSessionChange, 2000);
     return () => window.clearTimeout(timeout);
-  }, [state.sessions.length]);
+  }, [socialConfigured, state.sessions.length]);
 
   useEffect(() => {
     void refreshSocialFeed();
@@ -7347,7 +7360,7 @@ function App() {
                 </div>
                 {state.social.friends.slice(0, 10).map((friend) => (
                   <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
-                    <div className={`story__ring ${friend.lastSeenAt ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} size="md" /></div>
+                    <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} size="md" /></div>
                     <span>{friend.displayName}</span>
                   </div>
                 ))}
@@ -7592,7 +7605,7 @@ function App() {
                       {state.social.friends.map((friend) => (
                         <div key={friend.userId} className="arena-friend-card" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
                           <ArenaAvatar name={friend.displayName} size="sm" />
-                          <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatDate(friend.lastSeenAt)}` : ""}</span></div>
+                          <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatProfileSeenAt(friend.lastSeenAt)}` : ""}</span></div>
                         </div>
                       ))}
                     </div>
