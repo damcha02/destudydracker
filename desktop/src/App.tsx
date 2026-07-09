@@ -2921,16 +2921,6 @@ function App() {
     await refreshSocialFeedNow();
   });
 
-  async function refreshFeedSubtab() {
-    if (!socialConfigured) {
-      setMessage("Social sync is not configured yet. Add the Cloudflare Worker URL first.");
-      return;
-    }
-
-    await Promise.all([refreshFriendStatusNow(), refreshSocialFeedNow()]);
-    setMessage("Feed refreshed.");
-  }
-
   useEffect(() => {
     if (!isTauriApp()) return undefined;
     if (updateInstallSupport.packageHint === "unknown" && updateInstallSupport.runtimeChannel === "unknown") return undefined;
@@ -7317,8 +7307,8 @@ function App() {
                     {scope === "global" ? "Global Feed" : "Friends Feed"}
                   </button>
                 ))}
-                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void refreshFeedSubtab()} disabled={feedLoading || !socialConfigured}>
-                  {feedLoading ? "Refreshing..." : "Refresh"}
+                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                  {socialSyncing ? "Syncing..." : "Refresh"}
                 </button>
               </div>
 
