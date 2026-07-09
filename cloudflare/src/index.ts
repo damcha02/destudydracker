@@ -66,6 +66,13 @@ async function readJson<T>(request: Request): Promise<T> {
   return request.json() as Promise<T>;
 }
 
+async function readParamsOrJson<T extends Record<string, unknown>>(request: Request): Promise<T> {
+  if (request.method === "GET") {
+    return Object.fromEntries(new URL(request.url).searchParams.entries()) as T;
+  }
+  return readJson<T>(request);
+}
+
 function requiredText(value: unknown, label: string, maxLength: number) {
   const text = String(value ?? "").trim();
   if (!text) throw new Response(`Missing ${label}.`, { status: 400, headers: corsHeaders });
@@ -373,7 +380,7 @@ async function handleSync(request: Request, env: Env) {
 }
 
 async function handleFeed(request: Request, env: Env) {
-  const payload = await readJson<{ userId: string; deviceSecret: string; scope?: LeaderboardScope }>(request);
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; scope?: LeaderboardScope }>(request);
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const scope = payload.scope === "friends" ? "friends" : "global";
@@ -456,7 +463,7 @@ async function handlePresence(request: Request, env: Env) {
 }
 
 async function handleFriendStatus(request: Request, env: Env) {
-  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string }>(request);
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   await verifyUser(env, userId, deviceSecret);
@@ -465,7 +472,7 @@ async function handleFriendStatus(request: Request, env: Env) {
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
-  const payload = await readJson<{ userId: string; deviceSecret: string; targetUserId: string }>(request);
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; targetUserId: string }>(request);
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const targetUserId = cleanUserId(payload.targetUserId);
@@ -535,16 +542,16 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
-      if (request.method === "POST" && url.pathname === "/feed") return handleFeed(request, env);
-      if (request.method === "POST" && url.pathname === "/sync") return handleSync(request, env);
-      if (request.method === "POST" && url.pathname === "/feed/react") return handleFeedReaction(request, env);
-      if (request.method === "POST" && url.pathname === "/feed/update") return handleFeedUpdate(request, env);
-      if (request.method === "POST" && url.pathname === "/feed/delete") return handleFeedDelete(request, env);
-      if (request.method === "POST" && url.pathname === "/friends/request") return handleFriendRequest(request, env);
-      if (request.method === "POST" && url.pathname === "/friends/respond") return handleFriendResponse(request, env);
-      if (request.method === "POST" && url.pathname === "/friends/status") return handleFriendStatus(request, env);
-      if (request.method === "POST" && url.pathname === "/presence") return handlePresence(request, env);
-      if (request.method === "POST" && url.pathname === "/player-stats") return handlePlayerStats(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
+      if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/update") return await handleFeedUpdate(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/delete") return await handleFeedDelete(request, env);
+      if (request.method === "POST" && url.pathname === "/friends/request") return await handleFriendRequest(request, env);
+      if (request.method === "POST" && url.pathname === "/friends/respond") return await handleFriendResponse(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
+      if (request.method === "POST" && url.pathname === "/presence") return await handlePresence(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/player-stats") return await handlePlayerStats(request, env);
       return text("Not found.", 404);
     } catch (error: unknown) {
       if (error instanceof Response) return error;
