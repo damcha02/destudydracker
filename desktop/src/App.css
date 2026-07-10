@@ -1009,7 +1009,7 @@
   white-space: nowrap;
 }
 
-.social-nav-item span {
+.social-nav-item-badge {
   border-radius: 999px;
   padding: 2px 6px;
   background: color-mix(in oklch, var(--watch) 15%, transparent);
@@ -1017,6 +1017,21 @@
   font-size: 0.62rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.social-nav-request-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  padding: 0 4px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 0.64rem;
+  font-weight: 950;
+  line-height: 1;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent);
 }
 
 .social-nav-item.active {

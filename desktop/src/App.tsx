@@ -862,7 +862,7 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
   };
 
   return (
-    <div ref={wrapRef} className="garden-stage gk-stage" aria-label={`Knowledge Garden: ${gardenStageNames[stage]}, ${formatMinutes(weeklyMinutes)} this week`}>
+    <div ref={wrapRef} className="garden-stage gk-stage" aria-label={`Knowledge Garden: ${gardenStageNames[stage]}, ${formatMinutes(weeklyMinutes)} last 7 days`}>
       <div className="gk-sun" aria-hidden="true" />
       <div className="gk-ground" aria-hidden="true">
         <svg preserveAspectRatio="none" viewBox="0 0 100 8"><path d="M0 8 Q 14 2.5 32 4.8 T 64 3.6 T 100 5.2 L 100 8 Z" /></svg>
@@ -909,7 +909,7 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
       {stage >= 4 ? <div className="gk-butterfly" aria-hidden="true"><svg viewBox="0 0 20 16"><ellipse className="gk-wing-l" cx="6" cy="7" rx="5" ry="4" /><ellipse className="gk-wing-r" cx="14" cy="7" rx="5" ry="4" /><rect x="9.3" y="3.5" width="1.4" height="9" rx="0.7" /></svg></div> : null}
 
       <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 5 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
-      <div className="gk-stats"><span className="serif">{gardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} this week</span></div>
+      <div className="gk-stats"><span className="serif">{gardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
       {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to plant your first sprout</p> : null}
       {tip ? <div className="gk-tooltip" style={{ left: tip.x, top: tip.y - 14 }}><strong>{tip.label}</strong>{tip.sub ? <span>{tip.sub}</span> : null}</div> : null}
     </div>
@@ -1469,6 +1469,18 @@ function formatProfileSeenAt(value: string) {
     month: "short",
     day: "numeric",
     ...(recent ? { hour: "numeric", minute: "2-digit" } : {}),
+  }).format(new Date(timestamp));
+}
+
+function formatFeedPostedAt(value: string) {
+  const timestamp = parseSocialTimestamp(value);
+  if (timestamp === null) return formatDate(value);
+
+  return new Intl.DateTimeFormat("en", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(new Date(timestamp));
 }
 
@@ -2503,6 +2515,7 @@ function App() {
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
   const friendInviteLink = makeFriendInviteLink(state.social.friendCode);
+  const incomingFriendRequestCount = state.social.incomingFriendRequests.length;
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
   const latestFeedSessionPosted = latestFeedSession
     ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
@@ -7602,7 +7615,12 @@ function App() {
               return (
                 <button key={space.id} type="button" className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
                   {space.label}
-                  {space.badge ? <span>{space.badge}</span> : null}
+                  {space.id === "friends" && incomingFriendRequestCount > 0 ? (
+                    <span className="social-nav-request-badge" aria-label={`${incomingFriendRequestCount} incoming friend request${incomingFriendRequestCount === 1 ? "" : "s"}`}>
+                      {incomingFriendRequestCount > 9 ? "9+" : incomingFriendRequestCount}
+                    </span>
+                  ) : null}
+                  {space.badge ? <span className="social-nav-item-badge">{space.badge}</span> : null}
                 </button>
               );
             })}
@@ -7669,7 +7687,7 @@ function App() {
                       <ArenaAvatar name={item.displayName} self={isOwnPost} />
                       <div>
                         <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(profileTarget)}>{item.displayName}{isOwnPost ? " (You)" : ""}</button>
-                        <span>{formatDate(item.createdAt)}</span>
+                        <span>{formatFeedPostedAt(item.createdAt)}</span>
                       </div>
                       {isOwnPost ? <button type="button" className="arena-icon-button feed-edit-button" onClick={() => startEditingFeedPost(item)} title="Edit post">✎</button> : null}
                     </div>
