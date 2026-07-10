@@ -1,6 +1,8 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
+const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
+const avatarIcons = ["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"];
 
 const defaultVisibleTabs: Record<TabKey, boolean> = {
   dashboard: true,
@@ -29,14 +31,34 @@ function makeFriendCode() {
   return `${randomToken(4)}-${randomToken(4)}`;
 }
 
+function firstAvatarLetter(name: string) {
+  return (name.trim()[0] || "S").toUpperCase();
+}
+
+function normalizeAvatar(avatar: unknown, displayName: string): SocialAvatar {
+  if (!avatar || typeof avatar !== "object") return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+  const record = avatar as Partial<SocialAvatar> & Record<string, unknown>;
+  if (record.kind === "icon" && typeof record.icon === "string" && avatarIcons.includes(record.icon)) {
+    return { kind: "icon", icon: record.icon };
+  }
+  if (record.kind === "letter") {
+    const letter = typeof record.letter === "string" && /^[A-Z]$/i.test(record.letter) ? record.letter.toUpperCase() : firstAvatarLetter(displayName);
+    const style = typeof record.style === "string" && avatarStyles.includes(record.style as SocialAvatarStyle) ? record.style as SocialAvatarStyle : "classic";
+    return { kind: "letter", letter, style };
+  }
+  return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+}
+
 function makeDefaultSocialState(): SocialState {
   const friendCode = makeFriendCode();
   const displaySuffix = friendCode.slice(-4).replace(/[^A-Z0-9]/g, "");
+  const displayName = `Student ${displaySuffix}`;
   return {
     userId: makeId(),
     deviceSecret: makeId(),
     friendCode,
-    displayName: `Student ${displaySuffix}`,
+    displayName,
+    avatar: { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" },
     lastSyncedAt: null,
     lastSyncError: null,
     nextAutoSyncAt: null,
@@ -219,13 +241,15 @@ function normalizeSocialState(social: unknown): SocialState {
   if (!social || typeof social !== "object") return fallback;
 
   const record = social as Partial<SocialState>;
+  const displayName = typeof record.displayName === "string" && record.displayName.trim() ? record.displayName : fallback.displayName;
   return {
     ...fallback,
     ...record,
     userId: typeof record.userId === "string" && record.userId ? record.userId : fallback.userId,
     deviceSecret: typeof record.deviceSecret === "string" && record.deviceSecret ? record.deviceSecret : fallback.deviceSecret,
     friendCode: typeof record.friendCode === "string" && record.friendCode ? record.friendCode : fallback.friendCode,
-    displayName: typeof record.displayName === "string" && record.displayName.trim() ? record.displayName : fallback.displayName,
+    displayName,
+    avatar: normalizeAvatar(record.avatar, displayName),
     lastSyncedAt: typeof record.lastSyncedAt === "string" ? record.lastSyncedAt : null,
     lastSyncError: typeof record.lastSyncError === "string" ? record.lastSyncError : null,
     nextAutoSyncAt: typeof record.nextAutoSyncAt === "string" ? record.nextAutoSyncAt : null,

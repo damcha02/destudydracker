@@ -8,6 +8,10 @@ export type SocialLeaderboardPeriod = "daily" | "weekly" | "overall";
 export type SocialFeedScope = "global" | "friends";
 export type SocialSubtab = "feed" | "leaderboard" | "friends" | "squad" | "profile";
 export type SocialFriendRequestStatus = "pending" | "accepted" | "declined";
+export type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
+export type SocialAvatar =
+  | { kind: "letter"; letter: string; style: SocialAvatarStyle }
+  | { kind: "icon"; icon: string };
 
 export interface Semester {
   id: string;
@@ -101,6 +105,7 @@ export interface SocialLeaderboardEntry {
   userId: string;
   displayName: string;
   friendCode: string;
+  avatar?: SocialAvatar;
   minutes: number;
   sessions: number;
   rank: number;
@@ -116,6 +121,8 @@ export interface SocialFriendRequest {
   toDisplayName: string;
   fromFriendCode: string;
   toFriendCode: string;
+  fromAvatar?: SocialAvatar;
+  toAvatar?: SocialAvatar;
   status: SocialFriendRequestStatus;
   createdAt: string;
 }
@@ -124,6 +131,7 @@ export interface SocialFriend {
   userId: string;
   displayName: string;
   friendCode: string;
+  avatar?: SocialAvatar;
   friendsSince: string;
   lastSeenAt: string | null;
 }
@@ -133,6 +141,7 @@ export interface SocialFeedPost {
   userId: string;
   displayName: string;
   friendCode: string;
+  avatar?: SocialAvatar;
   type: "session" | "milestone";
   subject: string;
   detail: string;
@@ -152,6 +161,7 @@ export interface SocialState {
   deviceSecret: string;
   friendCode: string;
   displayName: string;
+  avatar: SocialAvatar;
   lastSyncedAt: string | null;
   lastSyncError: string | null;
   nextAutoSyncAt: string | null;

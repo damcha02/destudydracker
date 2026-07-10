@@ -39,11 +39,11 @@ import type { SummaryFile } from "./lib/obsidian";
 import { createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
 import type { PlayerStatsResponse } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
-type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode"> & { lastSeenAt?: string | null };
+type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode" | "avatar"> & { lastSeenAt?: string | null };
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -511,6 +511,17 @@ const feedFallbackNotes = [
   "segfault in real life",
   "stack overflow of assignments",
 ];
+
+const avatarStyles: Array<{ id: SocialAvatarStyle; label: string }> = [
+  { id: "classic", label: "Classic" },
+  { id: "serif", label: "Serif" },
+  { id: "cursive", label: "Cursive" },
+  { id: "graffiti", label: "Graffiti" },
+  { id: "pixel", label: "Pixel" },
+  { id: "mono", label: "Mono" },
+];
+const avatarIcons = ["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"];
+const alphabetLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 type UpdateInfo = {
   status: "idle" | "available" | "current" | "installing" | "error";
@@ -1502,6 +1513,7 @@ function buildFeedPostFromSession(session: StudySession, state: AppState, course
     userId: state.social.userId,
     displayName: state.social.displayName,
     friendCode: state.social.friendCode,
+    avatar: state.social.avatar,
     type: "session",
     subject,
     detail,
@@ -1647,6 +1659,21 @@ function getInitials(name: string) {
   return initials || "ST";
 }
 
+function getFirstAvatarLetter(name: string) {
+  return (name.trim()[0] || "S").toUpperCase();
+}
+
+function getAvatarDisplayName(avatar: SocialAvatar | undefined, name: string) {
+  if (!avatar) return getInitials(name);
+  if (avatar.kind === "icon") return avatar.icon;
+  return avatar.letter || getFirstAvatarLetter(name);
+}
+
+function getAvatarClass(avatar: SocialAvatar | undefined) {
+  if (!avatar) return "";
+  return avatar.kind === "icon" ? "arena-avatar--icon" : `arena-avatar--letter arena-avatar--letter-${avatar.style}`;
+}
+
 function getArenaHue(name: string) {
   return [...name].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 360;
 }
@@ -1661,14 +1688,14 @@ function ArenaBg() {
   );
 }
 
-function ArenaAvatar({ name, self = false, size = "md" }: { name: string; self?: boolean; size?: "sm" | "md" | "lg" }) {
+function ArenaAvatar({ name, avatar, self = false, size = "md" }: { name: string; avatar?: SocialAvatar; self?: boolean; size?: "sm" | "md" | "lg" }) {
   return (
     <span
-      className={`arena-avatar arena-avatar--${size} ${self ? "arena-avatar--self" : ""}`}
+      className={`arena-avatar arena-avatar--${size} ${getAvatarClass(avatar)} ${self ? "arena-avatar--self" : ""}`}
       style={{ "--avatar-hue": getArenaHue(name) } as CSSProperties}
       aria-hidden="true"
     >
-      {getInitials(name)}
+      {getAvatarDisplayName(avatar, name)}
     </span>
   );
 }
@@ -1685,7 +1712,7 @@ function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEnt
   return (
     <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`} onClick={onProfile} role={onProfile ? "button" : undefined} tabIndex={onProfile ? 0 : undefined} onKeyDown={onProfile ? (e) => { if (e.key === "Enter" || e.key === " ") onProfile(); } : undefined}>
       <ArenaRankBadge rank={entry.rank} />
-      <ArenaAvatar name={entry.displayName} self={entry.isSelf} size="sm" />
+      <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size="sm" />
       <div className="arena-lb-person">
         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
         <span>{entry.friendCode}</span>
@@ -1968,6 +1995,9 @@ function App() {
   const [socialSyncing, setSocialSyncing] = useState(false);
   const [socialNameEditing, setSocialNameEditing] = useState(false);
   const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
+  const [profileAvatarEditorOpen, setProfileAvatarEditorOpen] = useState(false);
+  const [profileAvatarDraft, setProfileAvatarDraft] = useState<SocialAvatar>(() => state.social.avatar);
+  const [profileAvatarLetterPickerOpen, setProfileAvatarLetterPickerOpen] = useState(false);
   const [viewingFriend, setViewingFriend] = useState<SocialProfileTarget | null>(null);
   const [viewingFriendStats, setViewingFriendStats] = useState<PlayerStatsResponse | null>(null);
   const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
@@ -2897,6 +2927,56 @@ function App() {
     if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
   }
 
+  function openProfileAvatarEditor() {
+    setProfileAvatarDraft(state.social.avatar);
+    setProfileAvatarLetterPickerOpen(false);
+    setProfileAvatarEditorOpen(true);
+  }
+
+  function closeProfileAvatarEditor() {
+    setProfileAvatarDraft(state.social.avatar);
+    setProfileAvatarLetterPickerOpen(false);
+    setProfileAvatarEditorOpen(false);
+  }
+
+  function applySelfAvatarToCachedSocial(appState: AppState, avatar: SocialAvatar): AppState {
+    const updatePost = (post: SocialFeedPost) => post.userId === appState.social.userId || post.isSelf ? { ...post, avatar } : post;
+    const updateLeaderboard = (entry: SocialLeaderboardEntry) => entry.userId === appState.social.userId || entry.isSelf ? { ...entry, avatar } : entry;
+    return {
+      ...appState,
+      social: {
+        ...appState.social,
+        avatar,
+        pendingFeedPosts: appState.social.pendingFeedPosts.map(updatePost),
+        cachedFeeds: {
+          global: appState.social.cachedFeeds.global.map(updatePost),
+          friends: appState.social.cachedFeeds.friends.map(updatePost),
+        },
+        cachedLeaderboards: {
+          global: {
+            daily: appState.social.cachedLeaderboards.global.daily.map(updateLeaderboard),
+            weekly: appState.social.cachedLeaderboards.global.weekly.map(updateLeaderboard),
+            overall: appState.social.cachedLeaderboards.global.overall.map(updateLeaderboard),
+          },
+          friends: {
+            daily: appState.social.cachedLeaderboards.friends.daily.map(updateLeaderboard),
+            weekly: appState.social.cachedLeaderboards.friends.weekly.map(updateLeaderboard),
+            overall: appState.social.cachedLeaderboards.friends.overall.map(updateLeaderboard),
+          },
+        },
+      },
+    };
+  }
+
+  async function saveProfileAvatar() {
+    const nextState = applySelfAvatarToCachedSocial(state, profileAvatarDraft);
+    setState(nextState);
+    setProfileAvatarEditorOpen(false);
+    setProfileAvatarLetterPickerOpen(false);
+    setMessage(socialConfigured ? "Profile avatar saved and synced." : "Profile avatar saved locally.");
+    if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
+  }
+
   function postLatestSessionToFeed(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!latestFeedSession) {
@@ -3272,6 +3352,7 @@ function App() {
     try {
       const stats = await getPlayerStats(state.social, friend.userId);
       setViewingFriendStats(stats);
+      setViewingFriend((current) => current && current.userId === friend.userId ? { ...current, avatar: stats.avatar } : current);
     } catch (error: unknown) {
       console.warn("Could not load friend stats.", error);
       setMessage(getErrorMessage(error, "Could not load profile."));
@@ -7641,12 +7722,12 @@ function App() {
 
               <div className="stories" aria-label="Study circle stories">
                 <div className="story">
-                  <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} self size="md" /></div>
+                  <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} avatar={state.social.avatar} self size="md" /></div>
                   <span>You</span>
                 </div>
                 {state.social.friends.slice(0, 10).map((friend) => (
                   <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
-                    <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} size="md" /></div>
+                    <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="md" /></div>
                     <span>{friend.displayName}</span>
                   </div>
                 ))}
@@ -7672,7 +7753,7 @@ function App() {
               <div className="section-label">Activity {feedLoading ? "· Refreshing" : ""}</div>
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
-                const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode };
+                const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: item.avatar };
                 return item.type === "milestone" ? (
                   <article key={item.id} className="milestone">
                     <div className="milestone__icon">{item.icon || "🏆"}</div>
@@ -7684,7 +7765,7 @@ function App() {
                 ) : (
                   <article key={item.id} className="feed-card">
                     <div className="feed-card__head">
-                      <ArenaAvatar name={item.displayName} self={isOwnPost} />
+                      <ArenaAvatar name={item.displayName} avatar={item.avatar} self={isOwnPost} />
                       <div>
                         <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(profileTarget)}>{item.displayName}{isOwnPost ? " (You)" : ""}</button>
                         <span>{formatFeedPostedAt(item.createdAt)}</span>
@@ -7749,7 +7830,7 @@ function App() {
                   const max = Math.max(1, ...weekCompareEntries.map((item) => item.minutes));
                   return (
                     <div key={entry.userId} className="week-compare__row">
-                      <ArenaAvatar name={entry.displayName} self={entry.isSelf} />
+                      <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} />
                       <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                       <div className="week-compare__bar-wrap"><span style={{ width: `${(entry.minutes / max) * 100}%` }} /></div>
                       <small>{formatMinutes(entry.minutes)}</small>
@@ -7765,7 +7846,10 @@ function App() {
               <article className="arena-player-card">
                 <div className="arena-player-card__inner">
                   <div className="arena-player-main">
-                    <ArenaAvatar name={state.social.displayName} self size="lg" />
+                    <button type="button" className="profile-avatar-button" onClick={openProfileAvatarEditor} title="Change profile avatar">
+                      <ArenaAvatar name={state.social.displayName} avatar={state.social.avatar} self size="lg" />
+                      <span>Edit</span>
+                    </button>
                     <div className="arena-player-copy">
                       {socialNameEditing ? (
                         <form className="arena-name-edit" onSubmit={saveSocialName}>
@@ -7877,7 +7961,7 @@ function App() {
                   <h4>Incoming <span>{state.social.incomingFriendRequests.length}</span></h4>
                   {state.social.incomingFriendRequests.length ? state.social.incomingFriendRequests.map((request) => (
                     <div key={request.id} className="arena-request-card">
-                      <ArenaAvatar name={request.fromDisplayName} size="sm" />
+                      <ArenaAvatar name={request.fromDisplayName} avatar={request.fromAvatar} size="sm" />
                       <div className="arena-request-copy"><strong>{request.fromDisplayName}</strong><span>{request.fromFriendCode}</span></div>
                       <div className="arena-request-actions">
                         <button type="button" className="arena-btn arena-btn--accept" onClick={() => void answerFriendRequest(request.id, "accepted")} disabled={socialSyncing}>Accept</button>
@@ -7891,7 +7975,7 @@ function App() {
                   <h4>Pending <span>{state.social.outgoingFriendRequests.length}</span></h4>
                   {state.social.outgoingFriendRequests.length ? state.social.outgoingFriendRequests.map((request) => (
                     <div key={request.id} className="arena-request-card">
-                      <ArenaAvatar name={request.toDisplayName} size="sm" />
+                      <ArenaAvatar name={request.toDisplayName} avatar={request.toAvatar} size="sm" />
                       <div className="arena-request-copy"><strong>{request.toDisplayName}</strong><span>{request.toFriendCode}</span></div>
                       <span className="arena-pending-badge">Pending</span>
                     </div>
@@ -7904,7 +7988,7 @@ function App() {
                     <div className="arena-friend-grid">
                       {state.social.friends.map((friend) => (
                         <div key={friend.userId} className="arena-friend-card" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
-                          <ArenaAvatar name={friend.displayName} size="sm" />
+                          <ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="sm" />
                           <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatProfileSeenAt(friend.lastSeenAt)}` : ""}</span></div>
                         </div>
                       ))}
@@ -7957,10 +8041,10 @@ function App() {
               {socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
-                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode };
+                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
                     return (
                       <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(profileTarget); }}>
-                        <ArenaAvatar name={entry.displayName} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
+                        <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
                         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                         <span>{formatMinutes(entry.minutes)}</span>
                         <div className={`arena-podium-block arena-podium-block--${entry.rank}`}>
@@ -7975,7 +8059,7 @@ function App() {
 
               <div className="arena-lb-rows">
                 {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
-                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode };
+                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
                   return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
                 })}
                 {!socialLeaderboard.length ? (
@@ -7995,7 +8079,7 @@ function App() {
           <article className="arena-player-card" style={{ width: "min(440px, 100%)", padding: 0, alignSelf: "center" }} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${viewingFriend.displayName}'s profile`}>
             <div className="arena-player-card__inner">
               <div className="arena-title-cluster" style={{ marginBottom: 16 }}>
-                <ArenaAvatar name={viewingFriend.displayName} size="lg" />
+                <ArenaAvatar name={viewingFriend.displayName} avatar={viewingFriend.avatar} size="lg" />
                 <div style={{ flex: 1 }}>
                   <span className="arena-kicker">{viewingFriend.friendCode}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -8023,6 +8107,73 @@ function App() {
               ) : (
                 <div className="arena-error">Could not load stats.</div>
               )}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {profileAvatarEditorOpen ? (
+        <div className="calendar-drawer-backdrop" style={{ justifyContent: "center", alignItems: "center" }} onClick={closeProfileAvatarEditor} role="presentation">
+          <article className="profile-avatar-editor" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Edit profile avatar">
+            <button type="button" className="arena-icon-button profile-avatar-close" onClick={() => void saveProfileAvatar()} title="Save and close">×</button>
+            <div className="profile-avatar-editor-head">
+              <ArenaAvatar name={state.social.displayName} avatar={profileAvatarDraft} self size="lg" />
+              <div>
+                <span className="arena-kicker">Profile picture</span>
+                <h3>Choose your arena mark</h3>
+                <p>Friends will see this after your next arena sync.</p>
+              </div>
+            </div>
+
+            <div className="profile-avatar-mode-toggle" aria-label="Avatar type">
+              <button type="button" className={profileAvatarDraft.kind === "letter" ? "active" : ""} onClick={() => setProfileAvatarDraft({ kind: "letter", letter: getFirstAvatarLetter(state.social.displayName), style: "classic" })}>Letter</button>
+              <button type="button" className={profileAvatarDraft.kind === "icon" ? "active" : ""} onClick={() => setProfileAvatarDraft({ kind: "icon", icon: avatarIcons[0] })}>Icon</button>
+            </div>
+
+            {profileAvatarDraft.kind === "letter" ? (
+              <div className="profile-avatar-panel">
+                <div className="profile-avatar-grid profile-avatar-grid--styles">
+                  {avatarStyles.map((style) => {
+                    const avatar: SocialAvatar = { kind: "letter", letter: profileAvatarDraft.letter, style: style.id };
+                    const selected = profileAvatarDraft.kind === "letter" && profileAvatarDraft.style === style.id;
+                    return (
+                      <button key={style.id} type="button" className={`profile-avatar-choice ${selected ? "selected" : ""}`} onClick={() => setProfileAvatarDraft(avatar)}>
+                        <ArenaAvatar name={state.social.displayName} avatar={avatar} self size="md" />
+                        <span>{style.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <button type="button" className="ghost-button small-button profile-avatar-change-letter" onClick={() => setProfileAvatarLetterPickerOpen((open) => !open)}>
+                  Change letter
+                </button>
+                {profileAvatarLetterPickerOpen ? (
+                  <div className="profile-avatar-letter-picker" aria-label="Choose avatar letter">
+                    {alphabetLetters.map((letter) => (
+                      <button key={letter} type="button" className={profileAvatarDraft.letter === letter ? "selected" : ""} onClick={() => setProfileAvatarDraft({ ...profileAvatarDraft, letter })}>
+                        {letter}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="profile-avatar-grid profile-avatar-grid--icons">
+                {avatarIcons.map((icon) => {
+                  const avatar: SocialAvatar = { kind: "icon", icon };
+                  const selected = profileAvatarDraft.kind === "icon" && profileAvatarDraft.icon === icon;
+                  return (
+                    <button key={icon} type="button" className={`profile-avatar-choice ${selected ? "selected" : ""}`} onClick={() => setProfileAvatarDraft(avatar)}>
+                      <ArenaAvatar name={state.social.displayName} avatar={avatar} self size="md" />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="profile-avatar-actions">
+              <button type="button" className="ghost-button small-button" onClick={closeProfileAvatarEditor}>Cancel</button>
+              <button type="button" className="arena-btn arena-btn--send" onClick={() => void saveProfileAvatar()} disabled={socialSyncing}>Save</button>
             </div>
           </article>
         </div>

@@ -4,6 +4,10 @@ export interface Env {
 
 type LeaderboardPeriod = "daily" | "weekly" | "overall";
 type LeaderboardScope = "global" | "friends";
+type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
+type SocialAvatar =
+  | { kind: "letter"; letter: string; style: SocialAvatarStyle }
+  | { kind: "icon"; icon: string };
 
 interface SyncPayload {
   user: {
@@ -11,6 +15,7 @@ interface SyncPayload {
     deviceSecret: string;
     friendCode: string;
     displayName: string;
+    avatar?: unknown;
     isPrivate?: boolean;
   };
   stats: Array<{
@@ -43,6 +48,8 @@ const MAX_DAILY_MINUTES = 24 * 60;
 const MAX_DAILY_SESSIONS = 200;
 const MAX_ID_LENGTH = 80;
 const MAX_SECRET_LENGTH = 120;
+const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
+const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"]);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -97,6 +104,33 @@ function cleanName(value: unknown) {
   return name || "Student";
 }
 
+function firstAvatarLetter(name: string) {
+  return (name.trim()[0] || "S").toUpperCase();
+}
+
+function cleanAvatar(value: unknown, displayName: string): SocialAvatar {
+  if (!value || typeof value !== "object") return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+  const record = value as Record<string, unknown>;
+  if (record.kind === "icon" && typeof record.icon === "string" && avatarIcons.has(record.icon)) {
+    return { kind: "icon", icon: record.icon };
+  }
+  if (record.kind === "letter") {
+    const letter = typeof record.letter === "string" && /^[A-Z]$/i.test(record.letter) ? record.letter.toUpperCase() : firstAvatarLetter(displayName);
+    const style = typeof record.style === "string" && avatarStyles.has(record.style as SocialAvatarStyle) ? record.style as SocialAvatarStyle : "classic";
+    return { kind: "letter", letter, style };
+  }
+  return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+}
+
+function parseAvatar(value: unknown, displayName: string): SocialAvatar {
+  if (typeof value !== "string") return cleanAvatar(null, displayName);
+  try {
+    return cleanAvatar(JSON.parse(value), displayName);
+  } catch {
+    return cleanAvatar(null, displayName);
+  }
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -126,6 +160,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const friendCode = cleanCode(payload.friendCode);
   const displayName = cleanName(payload.displayName);
+  const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
@@ -136,12 +171,12 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   if (codeOwner) throw new Response("Friend code is already in use.", { status: 409, headers: corsHeaders });
 
   if (existing) {
-    await env.DB.prepare("UPDATE users SET friend_code = ?, display_name = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(friendCode, displayName, isPrivate, userId)
+    await env.DB.prepare("UPDATE users SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(friendCode, displayName, avatar, isPrivate, userId)
       .run();
   } else {
-    await env.DB.prepare("INSERT INTO users (id, device_secret, friend_code, display_name, is_private) VALUES (?, ?, ?, ?, ?)")
-      .bind(userId, deviceSecret, friendCode, displayName, isPrivate)
+    await env.DB.prepare("INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate)
       .run();
   }
 }
@@ -237,20 +272,21 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   }
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await env.DB.prepare(`
-    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       COALESCE(SUM(ds.minutes), 0) AS minutes,
       COALESCE(SUM(ds.sessions), 0) AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     LEFT JOIN daily_stats ds ON ds.user_id = u.id
     ${whereClause}
-    GROUP BY u.id, u.display_name, u.friend_code
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json
     ORDER BY minutes DESC, displayName ASC
     LIMIT 50
   `).bind(...params).all<{
     userId: string;
     displayName: string;
     friendCode: string;
+    avatarJson: string;
     minutes: number;
     sessions: number;
     lastActiveDate: string | null;
@@ -258,6 +294,8 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
 
   return rows.results.map((row, index) => ({
     ...row,
+    avatar: parseAvatar(row.avatarJson, row.displayName),
+    avatarJson: undefined,
     minutes: Number(row.minutes),
     sessions: Number(row.sessions),
     rank: index + 1,
@@ -273,7 +311,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const clauses = scope === "global" ? ["u.is_private = 0"] : [`p.user_id IN (${allowedIds.map(() => "?").join(",") || "?"})`];
   const params = scope === "friends" ? (allowedIds.length ? allowedIds : [userId]) : [];
   const posts = await env.DB.prepare(`
-    SELECT p.id, p.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+    SELECT p.id, p.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       p.type, p.subject, p.detail, p.note, p.icon, p.minutes, p.preset_label AS presetLabel, p.created_at AS createdAt
     FROM feed_posts p
     JOIN users u ON u.id = p.user_id
@@ -285,6 +323,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     userId: string;
     displayName: string;
     friendCode: string;
+    avatarJson: string;
     type: "session" | "milestone";
     subject: string;
     detail: string;
@@ -336,6 +375,8 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
 
   return posts.results.map((post) => ({
     ...post,
+    avatar: parseAvatar(post.avatarJson, post.displayName),
+    avatarJson: undefined,
     minutes: Number(post.minutes),
     isSelf: post.userId === userId,
     reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
@@ -346,7 +387,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
 
 async function getSocialSnapshot(env: Env, userId: string) {
   const friends = await env.DB.prepare(`
-    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
+    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
     FROM friendships f
     JOIN users u ON u.id = CASE WHEN f.user_low = ? THEN f.user_high ELSE f.user_low END
     WHERE f.user_low = ? OR f.user_high = ?
@@ -357,6 +398,7 @@ async function getSocialSnapshot(env: Env, userId: string) {
     SELECT r.id, r.from_user_id AS fromUserId, r.to_user_id AS toUserId,
       from_u.display_name AS fromDisplayName, to_u.display_name AS toDisplayName,
       from_u.friend_code AS fromFriendCode, to_u.friend_code AS toFriendCode,
+      from_u.avatar_json AS fromAvatarJson, to_u.avatar_json AS toAvatarJson,
       r.status, r.created_at AS createdAt
     FROM friend_requests r
     JOIN users from_u ON from_u.id = r.from_user_id
@@ -369,6 +411,7 @@ async function getSocialSnapshot(env: Env, userId: string) {
     SELECT r.id, r.from_user_id AS fromUserId, r.to_user_id AS toUserId,
       from_u.display_name AS fromDisplayName, to_u.display_name AS toDisplayName,
       from_u.friend_code AS fromFriendCode, to_u.friend_code AS toFriendCode,
+      from_u.avatar_json AS fromAvatarJson, to_u.avatar_json AS toAvatarJson,
       r.status, r.created_at AS createdAt
     FROM friend_requests r
     JOIN users from_u ON from_u.id = r.from_user_id
@@ -396,9 +439,25 @@ async function getSocialSnapshot(env: Env, userId: string) {
 
   return {
     social: {
-      friends: friends.results,
-      incomingFriendRequests: incoming.results,
-      outgoingFriendRequests: outgoing.results,
+      friends: friends.results.map((friend) => ({
+        ...friend,
+        avatar: parseAvatar((friend as { avatarJson?: string }).avatarJson, (friend as { displayName?: string }).displayName ?? "Student"),
+        avatarJson: undefined,
+      })),
+      incomingFriendRequests: incoming.results.map((request) => ({
+        ...request,
+        fromAvatar: parseAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+        toAvatar: parseAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+        fromAvatarJson: undefined,
+        toAvatarJson: undefined,
+      })),
+      outgoingFriendRequests: outgoing.results.map((request) => ({
+        ...request,
+        fromAvatar: parseAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+        toAvatar: parseAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+        fromAvatarJson: undefined,
+        toAvatarJson: undefined,
+      })),
       cachedLeaderboards,
       cachedFeeds,
     },
@@ -519,8 +578,8 @@ async function handlePlayerStats(request: Request, env: Env) {
   const targetUserId = cleanUserId(payload.targetUserId);
   await verifyUser(env, userId, deviceSecret);
 
-  const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt FROM users WHERE id = ?")
-    .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; lastSeenAt: string | null }>();
+  const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, avatar_json AS avatarJson, last_seen_at AS lastSeenAt FROM users WHERE id = ?")
+    .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; avatarJson: string; lastSeenAt: string | null }>();
   if (!targetUser) return text("User not found.", 404);
 
   const [userLow, userHigh] = friendPair(userId, targetUserId);
@@ -548,6 +607,7 @@ async function handlePlayerStats(request: Request, env: Env) {
   return json({
     displayName: targetUser.displayName,
     friendCode: targetUser.friendCode,
+    avatar: parseAvatar(targetUser.avatarJson, targetUser.displayName),
     lastSeenAt: targetUser.lastSeenAt,
     daily: await getStats("daily"),
     weekly: await getStats("weekly"),

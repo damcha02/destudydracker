@@ -1,4 +1,4 @@
-import type { AppState, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -87,6 +87,7 @@ export function getLocalLeaderboardEntry(state: AppState, period: SocialLeaderbo
     userId: state.social.userId,
     displayName: state.social.displayName,
     friendCode: state.social.friendCode,
+    avatar: state.social.avatar,
     minutes: matchingSessions.reduce((sum, session) => sum + Math.max(0, Math.round(session.minutes)), 0),
     sessions: matchingSessions.length,
     rank: 0,
@@ -150,6 +151,7 @@ export async function syncSocialState(state: AppState) {
       deviceSecret: state.social.deviceSecret,
       friendCode: state.social.friendCode,
       displayName: state.social.displayName,
+      avatar: state.social.avatar,
       isPrivate: state.social.isPrivate,
     },
     stats: getLocalSocialStats(state.sessions),
@@ -261,6 +263,7 @@ export async function presencePing(social: SocialState) {
 export interface PlayerStatsResponse {
   displayName: string;
   friendCode: string;
+  avatar?: SocialAvatar;
   lastSeenAt: string | null;
   daily: { minutes: number; sessions: number; lastActiveDate: string | null };
   weekly: { minutes: number; sessions: number; lastActiveDate: string | null };
