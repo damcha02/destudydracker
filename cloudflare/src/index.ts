@@ -547,6 +547,17 @@ async function handleFriendRequest(request: Request, env: Env) {
   const existingFriendship = await env.DB.prepare("SELECT 1 FROM friendships WHERE user_low = ? AND user_high = ?").bind(userLow, userHigh).first();
   if (existingFriendship) return text("You are already friends.", 409);
 
+  const reciprocalRequest = await env.DB.prepare("SELECT id FROM friend_requests WHERE from_user_id = ? AND to_user_id = ? AND status = 'pending'")
+    .bind(target.id, fromUserId)
+    .first<{ id: string }>();
+  if (reciprocalRequest) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE friend_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP WHERE id = ?").bind(reciprocalRequest.id),
+      env.DB.prepare("INSERT OR IGNORE INTO friendships (user_low, user_high) VALUES (?, ?)").bind(userLow, userHigh),
+    ]);
+    return json(await getSocialSnapshot(env, fromUserId));
+  }
+
   const id = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO friend_requests (id, from_user_id, to_user_id, status) VALUES (?, ?, ?, 'pending') ON CONFLICT(from_user_id, to_user_id) DO UPDATE SET status = 'pending', responded_at = NULL")
     .bind(id, fromUserId, target.id)

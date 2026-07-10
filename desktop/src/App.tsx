@@ -769,10 +769,10 @@ function gardenPickSpecies(rng: () => number, maturity: number): GardenPlantKind
   return ["leafy", "bush", "flower", "fern"][Math.floor(rng() * 4)] as GardenPlantKind;
 }
 
-function buildGardenItems(appState: AppState, stage: number, weeklyMinutes: number, wide: boolean): GardenItem[] {
-  const courseMap = new Map(appState.courses.map((course) => [course.id, course]));
+function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number, weeklyMinutes: number, wide: boolean): GardenItem[] {
+  const courseMap = new Map(courses.map((course) => [course.id, course]));
   const items: GardenItem[] = [];
-  const streak = getStreakDays(appState);
+  const streak = getStreakDays({ sessions } as AppState);
 
   if (stage >= 5 || streak >= 10) {
     items.push({ id: "gk-tree", kind: "tree", wise: true, maturity: 1, label: "The Wise Tree", sub: "A flourishing stretch of study", fixed: true });
@@ -783,7 +783,7 @@ function buildGardenItems(appState: AppState, stage: number, weeklyMinutes: numb
   }
 
   const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
-  appState.sessions
+  sessions
     .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
     .slice(-90)
     .forEach((session) => {
@@ -804,7 +804,7 @@ function buildGardenItems(appState: AppState, stage: number, weeklyMinutes: numb
       });
     });
 
-  appState.tasks.forEach((task) => {
+  tasks.forEach((task) => {
     if (task.totalUnits <= 0 || task.completedUnits < task.totalUnits) return;
     const course = courseMap.get(task.courseId);
     if (!course) return;
@@ -854,8 +854,8 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [wide, setWide] = useState(true);
   const [tip, setTip] = useState<{ x: number; y: number; label?: string; sub?: string } | null>(null);
-  const streak = getStreakDays(appState);
-  const plants = useMemo(() => placeGardenItems(buildGardenItems(appState, stage, weeklyMinutes, wide)), [appState, stage, weeklyMinutes, wide]);
+  const streak = useMemo(() => getStreakDays({ sessions: appState.sessions } as AppState), [appState.sessions]);
+  const plants = useMemo(() => placeGardenItems(buildGardenItems(appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, wide)), [appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, wide]);
   const fireflies = streak >= 5 ? Math.min(6, 2 + Math.floor(streak / 3)) : 0;
 
   useLayoutEffect(() => {
@@ -1972,6 +1972,8 @@ function App() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const summaryLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
+  const latestStateRef = useRef(state);
+  const saveStateTimeoutRef = useRef<number | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
@@ -2006,8 +2008,28 @@ function App() {
   const [feedPostSaving, setFeedPostSaving] = useState(false);
 
   useEffect(() => {
-    saveAppState(state);
+    latestStateRef.current = state;
+    if (saveStateTimeoutRef.current !== null) window.clearTimeout(saveStateTimeoutRef.current);
+    saveStateTimeoutRef.current = window.setTimeout(() => {
+      saveAppState(latestStateRef.current);
+      saveStateTimeoutRef.current = null;
+    }, 700);
   }, [state]);
+
+  useEffect(() => {
+    const flushState = () => {
+      if (saveStateTimeoutRef.current !== null) {
+        window.clearTimeout(saveStateTimeoutRef.current);
+        saveStateTimeoutRef.current = null;
+      }
+      saveAppState(latestStateRef.current);
+    };
+    window.addEventListener("beforeunload", flushState);
+    return () => {
+      window.removeEventListener("beforeunload", flushState);
+      flushState();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.backgroundEffect = state.settings.backgroundEffect === false ? "off" : "on";
@@ -2345,12 +2367,12 @@ function App() {
     [state.courses],
   );
   const referenceCourses = useMemo(
-    () => referenceSemesterId ? getSemesterCourses(state, referenceSemesterId) : [],
-    [referenceSemesterId, state],
+    () => referenceSemesterId ? state.courses.filter((course) => course.semesterId === referenceSemesterId) : [],
+    [referenceSemesterId, state.courses],
   );
   const summaryCourses = useMemo(
-    () => summarySemesterId ? getSemesterCourses(state, summarySemesterId) : [],
-    [summarySemesterId, state],
+    () => summarySemesterId ? state.courses.filter((course) => course.semesterId === summarySemesterId) : [],
+    [summarySemesterId, state.courses],
   );
   const selectedReferenceSemester = referenceSemesterId ? semesterLookup.get(referenceSemesterId) ?? null : null;
   const selectedReferenceCourse = referenceCourseId ? courseLookup.get(referenceCourseId) ?? null : null;
@@ -2493,9 +2515,9 @@ function App() {
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions), [state.sessions]);
-  const upcomingExams = useMemo(() => getUpcomingExams(state), [state]);
-  const overallHealth = useMemo(() => getOverallHealth(state), [state]);
-  const notePreview = useMemo(() => buildDailyNoteMarkdown(state, vaultNoteDate), [state, vaultNoteDate]);
+  const upcomingExams = useMemo(() => getUpcomingExams({ exams: state.exams } as AppState), [state.exams]);
+  const overallHealth = useMemo(() => getOverallHealth({ tasks: state.tasks, exams: state.exams } as AppState), [state.exams, state.tasks]);
+  const notePreview = useMemo(() => buildDailyNoteMarkdown({ courses: state.courses, sessions: state.sessions } as AppState, vaultNoteDate), [state.courses, state.sessions, vaultNoteDate]);
   const dailyPreviewContent = stripMarkdownFrontmatter(vaultNoteContent || notePreview);
   const referencePreview = selectedReferenceSemester && selectedReferenceCourse
     ? stripMarkdownFrontmatter(referenceContent || buildReferenceNoteMarkdown(selectedReferenceCourse))
@@ -2508,12 +2530,16 @@ function App() {
   const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
-  const studyBreakTokens = Math.min(5, Math.floor(getTodayMinutes(state) / 45));
+  const todayMinutes = useMemo(() => getTodayMinutes({ sessions: state.sessions } as AppState), [state.sessions]);
+  const unitsCompletedToday = useMemo(() => getUnitsCompletedToday({ calendarEntries: state.calendarEntries } as AppState), [state.calendarEntries]);
+  const streakDays = useMemo(() => getStreakDays({ sessions: state.sessions } as AppState), [state.sessions]);
+  const focusMomentum = useMemo(() => getFocusMomentum({ sessions: state.sessions } as AppState), [state.sessions]);
+  const studyBreakTokens = Math.min(5, Math.floor(todayMinutes / 45));
   const todayStr = isoDate();
   const effectiveUnlocked = state.unlockedGamesDate === todayStr ? state.unlockedGames : [];
   const canUnlockMore = effectiveUnlocked.length < studyBreakTokens;
-  const minsUntilNext = studyBreakTokens < 5 ? Math.max(1, 45 - (getTodayMinutes(state) % 45)) : 0;
-  const xpProgress = getTodayMinutes(state) % 45;
+  const minsUntilNext = studyBreakTokens < 5 ? Math.max(1, 45 - (todayMinutes % 45)) : 0;
+  const xpProgress = todayMinutes % 45;
   const xpPercent = (xpProgress / 45) * 100;
   const effectivePlayed: PlayedBreak[] = state.playedBreaksDate === todayStr ? state.playedBreaks : [];
   const todayPlayedNames = [...new Set(effectivePlayed.map(p => p.name))];
@@ -5135,10 +5161,8 @@ function App() {
   }
   function renderTodayCard() {
     const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
-    const todayMinutes = getTodayMinutes(state);
     const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
     const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
-    const unitsCompletedToday = getUnitsCompletedToday(state);
     return (
       <article className="panel-card design-card design-today-card">
         <div className="design-today-top">
@@ -5157,11 +5181,11 @@ function App() {
           </div>
           <div>
             <span>Day streak</span>
-            <strong>{getStreakDays(state)}</strong>
+            <strong>{streakDays}</strong>
           </div>
           <div>
             <span>Momentum</span>
-            <strong>{getFocusMomentum(state)}</strong>
+            <strong>{focusMomentum}</strong>
           </div>
         </div>
 
@@ -5389,7 +5413,7 @@ function App() {
 
             <div className="fossil-stats">
               <div><span>Active days</span><strong>{activeDays}</strong><em>/ {focusRange === "week" ? "week" : focusRange === 365 ? "1y" : focusRange}</em></div>
-              <div><span>Streak</span><strong>{getStreakDays(state)}</strong><em>days</em></div>
+              <div><span>Streak</span><strong>{streakDays}</strong><em>days</em></div>
               {biggestDay.totalMinutes > 0 ? <div><span>Biggest day</span><strong>{formatMinutes(biggestDay.totalMinutes)}</strong><em>{formatDate(biggestDay.date)}</em></div> : null}
               {latestMilestone ? <div><span>Latest find</span><strong>{latestMilestone.label}</strong><em>at {latestMilestone.hours}h</em></div> : null}
             </div>
@@ -5586,7 +5610,7 @@ function App() {
         <div className="design-stats-mini-grid">
           <div>
             <span>Focused today</span>
-            <strong>{formatMinutes(getTodayMinutes(state))}</strong>
+            <strong>{formatMinutes(todayMinutes)}</strong>
           </div>
           <div>
             <span>This week</span>
@@ -5594,7 +5618,7 @@ function App() {
           </div>
           <div>
             <span>Streak</span>
-            <strong>{getStreakDays(state)}</strong>
+            <strong>{streakDays}</strong>
           </div>
           <div>
             <span>Open tasks</span>
@@ -6182,9 +6206,9 @@ function App() {
           {dashboardLayout === "analyst" ? (
             <div className="design-stack">
               <div className="dash-stats-grid">
-                {renderStatCard("Focused today", formatMinutes(getTodayMinutes(state)), "Logged study time")}
+                {renderStatCard("Focused today", formatMinutes(todayMinutes), "Logged study time")}
                 {renderStatCard("This week", formatMinutes(weeklyTotalMinutes), "Last 7 days")}
-                {renderStatCard("Day streak", getStreakDays(state), "Consecutive active days", "warm")}
+                {renderStatCard("Day streak", streakDays, "Consecutive active days", "warm")}
                 {renderStatCard("Open tasks", openTaskCount, "Still in progress")}
               </div>
               <div className="dash-analyst-grid">
@@ -8115,7 +8139,7 @@ function App() {
       {profileAvatarEditorOpen ? (
         <div className="calendar-drawer-backdrop" style={{ justifyContent: "center", alignItems: "center" }} onClick={closeProfileAvatarEditor} role="presentation">
           <article className="profile-avatar-editor" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Edit profile avatar">
-            <button type="button" className="arena-icon-button profile-avatar-close" onClick={() => void saveProfileAvatar()} title="Save and close">×</button>
+            <button type="button" className="arena-icon-button profile-avatar-close" onClick={closeProfileAvatarEditor} title="Close">×</button>
             <div className="profile-avatar-editor-head">
               <ArenaAvatar name={state.social.displayName} avatar={profileAvatarDraft} self size="lg" />
               <div>
