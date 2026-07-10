@@ -583,6 +583,30 @@ type CalendarMovePreview = {
   time: string;
 };
 
+type GardenPlantKind = "grass" | "sprout" | "leafy" | "flower" | "herb" | "mushroom" | "bush" | "fern" | "glow" | "tree";
+
+type GardenItem = {
+  id: string;
+  kind: GardenPlantKind;
+  color?: string;
+  maturity: number;
+  label?: string;
+  sub?: string;
+  ambient?: boolean;
+  fresh?: boolean;
+  fixed?: boolean;
+  wise?: boolean;
+};
+
+type PlacedGardenItem = GardenItem & { x: number; t: number };
+
+type GardenSpeciesProps = {
+  rng: () => number;
+  color?: string;
+  maturity?: number;
+  wise?: boolean;
+};
+
 const calendarTimelineHours = Array.from({ length: 18 }, (_, index) => index + 6);
 const calendarDurationOptions = [15, 30, 45, 60, 90, 120, 180];
 const calendarTimeStepMinutes = 5;
@@ -591,6 +615,306 @@ const calendarTimelineHourHeight = 72;
 const calendarTimelineStartMinutes = calendarTimelineStartHour * 60;
 const calendarTimelineEndMinutes = 24 * 60;
 const calendarTimelineTotalMinutes = calendarTimelineEndMinutes - calendarTimelineStartMinutes;
+
+function gardenHash(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function gardenRng(seed: number) {
+  let state = seed | 0;
+  return function next() {
+    state = (state + 0x6D2B79F5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gardenGreen(rng: () => number) {
+  return `color-mix(in oklab, var(--garden), var(--garden-deep) ${Math.round(15 + rng() * 65)}%)`;
+}
+
+function gardenMix(a: string, b: string, pct: number) {
+  return `color-mix(in oklab, ${a}, ${b} ${pct}%)`;
+}
+
+function gardenLeaf(x: number, y: number, len: number, dir: number, lift = 0.7) {
+  const tx = x + dir * len;
+  const ty = y - len * lift;
+  return `M${x} ${y} Q ${x + dir * len * 0.15} ${y - len * 0.8} ${tx} ${ty} Q ${x + dir * len * 0.72} ${y - len * 0.12} ${x} ${y} Z`;
+}
+
+function GardenGrass({ rng }: GardenSpeciesProps) {
+  const count = 4 + Math.floor(rng() * 3);
+  return <g>{Array.from({ length: count }).map((_, index) => {
+    const dx = (rng() - 0.5) * 26;
+    const h = 15 + rng() * 22;
+    return <path key={index} d={`M24 58 Q ${24 + dx * 0.25} ${58 - h * 0.55} ${24 + dx} ${58 - h}`} stroke={gardenGreen(rng)} strokeWidth={1.4 + rng()} fill="none" strokeLinecap="round" opacity={0.7 + rng() * 0.3} />;
+  })}</g>;
+}
+
+function GardenSprout({ rng }: GardenSpeciesProps) {
+  const green = gardenGreen(rng);
+  return <g><path d="M24 58 Q 24.5 51 24 46" stroke="var(--garden-deep)" strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d={gardenLeaf(24, 47, 8 + rng() * 3, -1)} fill={green} /><path d={gardenLeaf(24, 47, 7 + rng() * 3, 1)} fill={gardenMix(green, "var(--garden)", 40)} /></g>;
+}
+
+function GardenLeafy({ rng, color = "var(--accent)", maturity = 0.5 }: GardenSpeciesProps) {
+  const h = 24 + rng() * 16 + maturity * 8;
+  const bend = (rng() - 0.5) * 9;
+  const topX = 24 + bend * 0.7;
+  const topY = 58 - h;
+  const leaves = 3 + Math.floor(rng() * 3);
+  return <g><path d={`M24 58 Q ${24 + bend} ${58 - h * 0.55} ${topX} ${topY}`} stroke="var(--garden-deep)" strokeWidth="1.9" fill="none" strokeLinecap="round" />{Array.from({ length: leaves }).map((_, index) => {
+    const f = 0.28 + 0.62 * (index / leaves);
+    const lx = 24 + bend * f;
+    const ly = 58 - h * f;
+    return <path key={index} d={gardenLeaf(lx, ly, 6.5 + rng() * 5 + maturity * 2, index % 2 === 0 ? -1 : 1)} fill={gardenGreen(rng)} />;
+  })}{maturity > 0.6 ? <circle cx={topX} cy={topY - 1.5} r="3" fill={color} opacity="0.95" /> : null}</g>;
+}
+
+function GardenFlower({ rng, color = "var(--accent)" }: GardenSpeciesProps) {
+  const h = 22 + rng() * 14;
+  const bend = (rng() - 0.5) * 7;
+  const cx = 24 + bend * 0.7;
+  const cy = 58 - h;
+  const rot = rng() * 60;
+  const petals = 5 + Math.floor(rng() * 2);
+  return <g><path d={`M24 58 Q ${24 + bend} ${58 - h * 0.55} ${cx} ${cy}`} stroke="var(--garden-deep)" strokeWidth="1.7" fill="none" strokeLinecap="round" /><path d={gardenLeaf(24 + bend * 0.4, 58 - h * 0.42, 7 + rng() * 3, rng() > 0.5 ? 1 : -1)} fill={gardenGreen(rng)} />{Array.from({ length: petals }).map((_, index) => <ellipse key={index} cx={cx} cy={cy - 4.4} rx="2.9" ry="4.8" fill={color} opacity="0.92" transform={`rotate(${rot + index * (360 / petals)} ${cx} ${cy})`} />)}<circle cx={cx} cy={cy} r="2.5" fill={gardenMix(color, "white", 45)} /></g>;
+}
+
+function GardenHerb({ rng, color = "var(--accent)" }: GardenSpeciesProps) {
+  const stems = 3 + Math.floor(rng() * 2);
+  return <g>{Array.from({ length: stems }).map((_, index) => {
+    const dx = (index - (stems - 1) / 2) * (5 + rng() * 3);
+    const h = 20 + rng() * 14;
+    const green = gardenGreen(rng);
+    return <g key={index}><path d={`M24 58 Q ${24 + dx * 0.5} ${58 - h * 0.5} ${24 + dx} ${58 - h}`} stroke={green} strokeWidth="1.5" fill="none" strokeLinecap="round" />{[0.72, 0.86, 1].map((f, berryIndex) => <circle key={berryIndex} cx={24 + dx * f} cy={58 - h * f} r={1.7 - berryIndex * 0.25} fill={color} opacity="0.9" />)}</g>;
+  })}</g>;
+}
+
+function GardenMushroom({ rng }: GardenSpeciesProps) {
+  const capW = 10 + rng() * 4;
+  const capH = 9 + rng() * 4;
+  const cap = "oklch(0.63 0.075 40)";
+  return <g><rect x="21.6" y="45" width="4.8" height="13" rx="2.4" fill={gardenMix("var(--garden-soil)", "white", 42)} /><path d={`M${24 - capW} 46.5 Q 24 ${46.5 - capH * 2} ${24 + capW} 46.5 Z`} fill={cap} /><circle cx={24 - capW * 0.4} cy="42.5" r="1.2" fill={gardenMix(cap, "white", 50)} /><circle cx={24 + capW * 0.35} cy="40.5" r="0.95" fill={gardenMix(cap, "white", 50)} /></g>;
+}
+
+function GardenBush({ rng, color = "var(--accent)", maturity = 0.5 }: GardenSpeciesProps) {
+  const berries = maturity > 0.55 ? 3 : 0;
+  return <g><ellipse cx="15" cy="50" rx={8 + rng() * 3} ry={7 + rng() * 2} fill={gardenGreen(rng)} /><ellipse cx="30" cy="47" rx={10 + rng() * 3} ry={9 + rng() * 3} fill={gardenGreen(rng)} /><ellipse cx="24" cy="52" rx={9 + rng() * 2} ry={6 + rng() * 2} fill={gardenMix(gardenGreen(rng), "var(--garden)", 30)} />{Array.from({ length: berries }).map((_, index) => <circle key={index} cx={12 + rng() * 24} cy={42 + rng() * 10} r="1.7" fill={color} opacity="0.95" />)}</g>;
+}
+
+function GardenFern({ rng }: GardenSpeciesProps) {
+  const h = 26 + rng() * 14;
+  const curl = 3 + rng() * 4;
+  const green = gardenGreen(rng);
+  const fronds: ReactNode[] = [];
+  for (let index = 0; index < 8; index += 1) {
+    const f = 0.18 + 0.78 * (index / 8);
+    const x = 24 + curl * Math.sin(f * 2.4);
+    const y = 58 - h * f;
+    const len = (1 - f) * 9 + 2;
+    fronds.push(<path key={`l${index}`} d={`M${x} ${y} Q ${x - len * 0.7} ${y - len * 0.4} ${x - len} ${y - len * 0.9}`} stroke={green} strokeWidth="1.3" fill="none" strokeLinecap="round" />);
+    fronds.push(<path key={`r${index}`} d={`M${x} ${y} Q ${x + len * 0.7} ${y - len * 0.4} ${x + len} ${y - len * 0.9}`} stroke={green} strokeWidth="1.3" fill="none" strokeLinecap="round" />);
+  }
+  return <g><path d={`M24 58 Q ${24 + curl * 2} ${58 - h * 0.5} 24 ${58 - h}`} stroke="var(--garden-deep)" strokeWidth="1.7" fill="none" strokeLinecap="round" />{fronds}</g>;
+}
+
+function GardenGlowFlower({ rng }: GardenSpeciesProps) {
+  const cx = 24;
+  const cy = 26;
+  const rot = rng() * 60;
+  return <g style={{ filter: "drop-shadow(0 0 5px var(--warn))" }}><circle cx={cx} cy={cy} r="11" fill="var(--warn)" opacity="0.13" /><path d={`M24 58 Q 26 42 ${cx} ${cy}`} stroke="var(--garden-deep)" strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d={gardenLeaf(25, 46, 8, -1)} fill={gardenGreen(rng)} /><path d={gardenLeaf(25.2, 42, 7, 1)} fill={gardenGreen(rng)} />{Array.from({ length: 6 }).map((_, index) => <ellipse key={index} cx={cx} cy={cy - 5} rx="3.1" ry="5.4" fill="var(--warn)" opacity="0.95" transform={`rotate(${rot + index * 60} ${cx} ${cy})`} />)}<circle cx={cx} cy={cy} r="2.8" fill={gardenMix("var(--warn)", "white", 55)} /></g>;
+}
+
+function GardenTree({ rng, wise }: GardenSpeciesProps) {
+  const trunk = gardenMix("var(--garden-soil)", "black", 22);
+  return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 C 22.5 48 25.5 42 24 32" stroke={trunk} strokeWidth="3.4" fill="none" strokeLinecap="round" /><path d="M24 44 Q 30 40 33 36" stroke={trunk} strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d="M24 40 Q 18 36 15.5 33" stroke={trunk} strokeWidth="1.8" fill="none" strokeLinecap="round" /><circle cx="24" cy="21" r="12.5" fill={gardenGreen(rng)} /><circle cx="13.5" cy="28" r="8" fill={gardenGreen(rng)} /><circle cx="34.5" cy="27" r="8.5" fill={gardenGreen(rng)} /><circle cx="24" cy="30" r="9" fill={gardenMix(gardenGreen(rng), "var(--garden)", 35)} />{wise ? Array.from({ length: 5 }).map((_, index) => <circle key={index} cx={12 + rng() * 24} cy={16 + rng() * 14} r="1.25" fill="var(--warn)" />) : null}</g>;
+}
+
+const gardenSpecies: Record<GardenPlantKind, (props: GardenSpeciesProps) => ReactNode> = {
+  grass: GardenGrass,
+  sprout: GardenSprout,
+  leafy: GardenLeafy,
+  flower: GardenFlower,
+  herb: GardenHerb,
+  mushroom: GardenMushroom,
+  bush: GardenBush,
+  fern: GardenFern,
+  glow: GardenGlowFlower,
+  tree: GardenTree,
+};
+
+const gardenBaseWidth: Record<GardenPlantKind, number> = { grass: 0.82, sprout: 0.52, leafy: 0.95, flower: 0.92, herb: 0.9, mushroom: 0.58, bush: 1.12, fern: 0.95, glow: 1.05, tree: 1.95 };
+
+function gardenPickSpecies(rng: () => number, maturity: number): GardenPlantKind {
+  if (maturity < 0.35) return rng() < 0.5 ? "sprout" : "grass";
+  if (maturity < 0.7) return ["leafy", "herb", "fern", "mushroom"][Math.floor(rng() * 4)] as GardenPlantKind;
+  return ["leafy", "bush", "flower", "fern"][Math.floor(rng() * 4)] as GardenPlantKind;
+}
+
+function buildGardenItems(appState: AppState, stage: number, weeklyMinutes: number, wide: boolean): GardenItem[] {
+  const courseMap = new Map(appState.courses.map((course) => [course.id, course]));
+  const items: GardenItem[] = [];
+  const streak = getStreakDays(appState);
+
+  if (stage >= 5 || streak >= 10) {
+    items.push({ id: "gk-tree", kind: "tree", wise: true, maturity: 1, label: "The Wise Tree", sub: "A flourishing stretch of study", fixed: true });
+  }
+
+  if (streak >= 5) {
+    items.push({ id: "gk-streak", kind: "glow", maturity: 1, label: `${streak}-day streak`, sub: "Rare bloom. Keep it alive." });
+  }
+
+  const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
+  appState.sessions
+    .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
+    .slice(-90)
+    .forEach((session) => {
+      const course = courseMap.get(session.courseId ?? "");
+      if (!course) return;
+      const rng = gardenRng(gardenHash(`${session.id}-species`));
+      const maturity = Math.min(1, session.minutes / 90);
+      const sessionDate = (session.endedAt || session.startedAt).slice(0, 10);
+      const ageDays = (todayTime - new Date(`${sessionDate}T00:00:00`).getTime()) / 86400000;
+      items.push({
+        id: session.id,
+        kind: gardenPickSpecies(rng, maturity),
+        color: course.color,
+        maturity,
+        fresh: ageDays <= 1.5,
+        label: course.name,
+        sub: `${session.presetLabel || session.kind} · ${formatMinutes(session.minutes)}${ageDays <= 1.5 ? " · freshly grown" : ""}`,
+      });
+    });
+
+  appState.tasks.forEach((task) => {
+    if (task.totalUnits <= 0 || task.completedUnits < task.totalUnits) return;
+    const course = courseMap.get(task.courseId);
+    if (!course) return;
+    items.push({ id: `task-${task.id}`, kind: "flower", color: course.color, maturity: 1, label: course.name, sub: `Milestone · ${task.title}` });
+  });
+
+  const ambientBase = [4, 8, 12, 16, 21, 25][stage] ?? 4;
+  const ambient = Math.round((ambientBase + Math.min(8, Math.floor(weeklyMinutes / 90))) * (wide ? 1 : 0.55));
+  for (let index = 0; index < ambient; index += 1) {
+    const rng = gardenRng(gardenHash(`ambient-${stage}-${index}`));
+    items.push({ id: `ambient-${stage}-${index}`, kind: rng() < 0.6 ? "grass" : rng() < 0.5 ? "sprout" : "fern", maturity: 0.25 + rng() * 0.3, ambient: true });
+  }
+
+  return items;
+}
+
+function placeGardenItems(items: GardenItem[]): PlacedGardenItem[] {
+  const placed: PlacedGardenItem[] = [];
+  for (const item of items) {
+    const rng = gardenRng(gardenHash(`${item.id}-pos`));
+    if (item.fixed) {
+      placed.push({ ...item, x: 0.68 + rng() * 0.16, t: 0.42 + rng() * 0.16 });
+      continue;
+    }
+    let best: { x: number; t: number } | null = null;
+    let bestDistance = -1;
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      const x = 0.03 + 0.94 * rng();
+      const t = Math.pow(rng(), 0.82);
+      if (x < 0.46 && t > 0.66) continue;
+      let distance = Infinity;
+      for (const plant of placed) distance = Math.min(distance, Math.hypot((x - plant.x) * 1.7, t - plant.t));
+      if (distance > bestDistance) {
+        bestDistance = distance;
+        best = { x, t };
+      }
+    }
+    placed.push({ ...item, ...(best ?? { x: 0.45 + rng() * 0.3, t: 0.3 + rng() * 0.25 }) });
+  }
+  return placed.sort((a, b) => a.t - b.t);
+}
+
+function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState; weeklyMinutes: number }) {
+  const gardenStageNames = ["Dormant", "Sprouting", "Growing", "Leafy", "Blooming", "Flourishing"];
+  const gardenStageThresholds = [0, 30, 90, 210, 420, 720];
+  const stage = Math.max(0, gardenStageThresholds.filter((threshold) => weeklyMinutes >= threshold).length - 1);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [wide, setWide] = useState(true);
+  const [tip, setTip] = useState<{ x: number; y: number; label?: string; sub?: string } | null>(null);
+  const streak = getStreakDays(appState);
+  const plants = useMemo(() => placeGardenItems(buildGardenItems(appState, stage, weeklyMinutes, wide)), [appState, stage, weeklyMinutes, wide]);
+  const fireflies = streak >= 5 ? Math.min(6, 2 + Math.floor(streak / 3)) : 0;
+
+  useLayoutEffect(() => {
+    const element = wrapRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => setWide(element.clientWidth > 430));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const showTip = (event: MouseEvent<HTMLDivElement>, plant: PlacedGardenItem) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTip({ x: Math.max(10, Math.min(rect.width - 10, event.clientX - rect.left)), y: Math.max(28, event.clientY - rect.top), label: plant.label, sub: plant.sub });
+  };
+
+  return (
+    <div ref={wrapRef} className="garden-stage gk-stage" aria-label={`Knowledge Garden: ${gardenStageNames[stage]}, ${formatMinutes(weeklyMinutes)} this week`}>
+      <div className="gk-sun" aria-hidden="true" />
+      <div className="gk-ground" aria-hidden="true">
+        <svg preserveAspectRatio="none" viewBox="0 0 100 8"><path d="M0 8 Q 14 2.5 32 4.8 T 64 3.6 T 100 5.2 L 100 8 Z" /></svg>
+      </div>
+
+      {plants.map((plant, index) => {
+        const Species = gardenSpecies[plant.kind];
+        const rng = gardenRng(gardenHash(`${plant.id}-draw`));
+        const depth = 0.45 + 0.55 * plant.t;
+        const width = 76 * (gardenBaseWidth[plant.kind] || 1) * depth * (0.72 + 0.38 * (plant.maturity || 0.5));
+        const bottomPct = 2 + (1 - plant.t) * 52;
+        const interactive = !plant.ambient;
+        return (
+          <div
+            key={plant.id}
+            className={`gk-plant-in${plant.fresh ? " gk-fresh" : ""}`}
+            onMouseEnter={interactive ? (event) => showTip(event, plant) : undefined}
+            onMouseMove={interactive ? (event) => showTip(event, plant) : undefined}
+            onMouseLeave={interactive ? () => setTip(null) : undefined}
+            style={{
+              position: "absolute",
+              left: `${plant.x * 100}%`,
+              bottom: `${bottomPct}%`,
+              width,
+              transform: "translateX(-50%)",
+              zIndex: Math.round(plant.t * 40) + 3,
+              opacity: plant.ambient ? 0.5 + 0.35 * plant.t : 0.72 + 0.28 * plant.t,
+              animationDelay: `${(index % 12) * 0.05}s`,
+              pointerEvents: interactive ? "auto" : "none",
+            }}
+          >
+            <span className="gk-sway" style={{ "--gk-dur": `${4.5 + (gardenHash(plant.id) % 40) / 10}s`, "--gk-del": `${-(gardenHash(plant.id) % 60) / 10}s` } as CSSProperties}>
+              <svg viewBox="0 0 48 58" aria-hidden="true"><Species rng={rng} color={plant.color} maturity={plant.maturity} wise={plant.wise} /></svg>
+            </span>
+          </div>
+        );
+      })}
+
+      {Array.from({ length: fireflies }).map((_, index) => {
+        const rng = gardenRng(gardenHash(`fly-${index}`));
+        return <span key={index} className="gk-firefly" style={{ left: `${8 + rng() * 84}%`, top: `${12 + rng() * 38}%`, "--gk-dur": `${2.4 + rng() * 2.4}s`, "--gk-del": `${-rng() * 4}s` } as CSSProperties} />;
+      })}
+
+      {stage >= 4 ? <div className="gk-butterfly" aria-hidden="true"><svg viewBox="0 0 20 16"><ellipse className="gk-wing-l" cx="6" cy="7" rx="5" ry="4" /><ellipse className="gk-wing-r" cx="14" cy="7" rx="5" ry="4" /><rect x="9.3" y="3.5" width="1.4" height="9" rx="0.7" /></svg></div> : null}
+
+      <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 5 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
+      <div className="gk-stats"><span className="serif">{gardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} this week</span></div>
+      {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to plant your first sprout</p> : null}
+      {tip ? <div className="gk-tooltip" style={{ left: tip.x, top: tip.y - 14 }}><strong>{tip.label}</strong>{tip.sub ? <span>{tip.sub}</span> : null}</div> : null}
+    </div>
+  );
+}
 const calendarTimelineHeight = calendarTimelineHours.length * calendarTimelineHourHeight;
 
 const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: string }[] = [
@@ -2304,17 +2628,6 @@ function App() {
         }),
     [calendarToday, state.calendarEntries, taskLookup],
   );
-
-  const gardenCoursePlants = useMemo(() => {
-    const gardenStageThresholds = [0, 30, 90, 210, 420, 720];
-    const stage = gardenStageThresholds.filter((t) => weeklyTotalMinutes >= t).length - 1;
-    const courses = state.courses
-      .map((course) => ({ course, minutes: getCourseMinutes(state, course.id) }))
-      .sort((a, b) => b.minutes - a.minutes)
-      .slice(0, 9);
-    const maxMinutes = Math.max(60, ...courses.map((c) => c.minutes));
-    return { stage, courses, maxMinutes };
-  }, [state, weeklyTotalMinutes]);
 
   const totalAllTimeMinutes = state.sessions.reduce((s, se) => s + se.minutes, 0);
   const sessionDays = new Set(state.sessions.map(s => isoDate(new Date(s.endedAt))));
@@ -4999,9 +5312,6 @@ function App() {
   }
 
   function renderGardenCard(heightClass = "") {
-    const gardenStageNames = ["Dormant", "Sprouting", "Growing", "Leafy", "Blooming", "Flourishing"];
-    const { stage, courses, maxMinutes } = gardenCoursePlants;
-
     return (
       <article className={`panel-card design-card design-garden-card ${heightClass}`}>
         <div className="section-head compact-headline">
@@ -5010,105 +5320,7 @@ function App() {
             <h3>Growth from focus</h3>
           </div>
         </div>
-        <div className="garden-stage" aria-hidden="true">
-          {/* stage progress dots */}
-          <div style={{ position: "absolute", top: 12, left: 14, display: "flex", alignItems: "center", gap: 4, zIndex: 2 }}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <span
-                key={i}
-                style={{
-                  display: "inline-block",
-                  width: 5, height: 5, borderRadius: 99,
-                  background: i < stage ? "var(--garden)" : "var(--line-strong)",
-                  transition: "background 0.4s",
-                }}
-              />
-            ))}
-          </div>
-
-          {/* course plants */}
-          {courses.length ? (
-            <div
-              style={{
-                position: "absolute", left: 0, right: 0, bottom: 14,
-                display: "flex", alignItems: "flex-end", justifyContent: "space-around",
-                padding: "0 16px", gap: 8,
-              }}
-            >
-              {courses.map(({ course, minutes }, i) => {
-                const grow = Math.max(0.12, minutes / maxMinutes);
-                const plantH = Math.round(160 * grow);
-                const leaves = Math.min(4, Math.max(1, Math.round(grow * 4)));
-                return (
-                  <div
-                    key={course.id}
-                    title={`${course.name} · ${formatMinutes(minutes)}`}
-                    style={{ display: "flex", flexDirection: "column", alignItems: "center", position: "relative", flex: 1, minWidth: 0 }}
-                  >
-                    <div
-                      style={{
-                        position: "relative", width: 4, height: plantH,
-                        transformOrigin: "bottom",
-                        animation: `growUp 0.8s cubic-bezier(0.2, 0.8, 0.3, 1) ${i * 0.08}s both`,
-                      }}
-                    >
-                      <div
-                        style={{
-                          position: "absolute", left: 1, top: 0, bottom: 0, width: 2.5,
-                          background: `linear-gradient(180deg, ${course.color}, var(--garden-deep))`,
-                          borderRadius: 2,
-                        }}
-                      />
-                      {Array.from({ length: leaves }).map((_, li) => {
-                        const leafTop = ((li + 0.6) / (leaves + 0.4)) * plantH;
-                        const side = li % 2 === 0 ? -1 : 1;
-                        return (
-                          <span
-                            key={li}
-                            style={{
-                              position: "absolute", top: leafTop,
-                              left: side < 0 ? -8 : 4,
-                              width: 9, height: 6,
-                              background: course.color, opacity: 0.85,
-                              borderRadius: side < 0 ? "60% 10% 60% 10%" : "10% 60% 10% 60%",
-                              transform: `rotate(${side * 18}deg)`,
-                              display: "block",
-                            }}
-                          />
-                        );
-                      })}
-                      {grow > 0.55 && (
-                        <span
-                          style={{
-                            position: "absolute", top: -5, left: -2.5,
-                            width: 9, height: 9, borderRadius: 99,
-                            background: course.color,
-                            boxShadow: `0 0 8px ${course.color}66`,
-                            display: "block",
-                          }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="empty-copy compact-empty" style={{ position: "absolute", bottom: 28, left: 0, right: 0, textAlign: "center", zIndex: 2 }}>
-              Add courses and start studying to grow your garden.
-            </p>
-          )}
-
-          {/* stage name + weekly time */}
-          <div style={{ position: "absolute", bottom: 20, left: 14, display: "flex", alignItems: "baseline", gap: 7, zIndex: 2 }}>
-            <span className="serif" style={{ fontSize: 15, color: "var(--ink)", fontStyle: "italic" }}>
-              {gardenStageNames[stage]}
-            </span>
-            <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-4)" }}>
-              {formatMinutes(weeklyTotalMinutes)} this week
-            </span>
-          </div>
-        </div>
+        <KnowledgeGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
       </article>
     );
   }
