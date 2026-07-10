@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -474,6 +474,12 @@ const socialSubtabs: Array<{ id: SocialSubtab; label: string; badge?: string }> 
   { id: "squad", label: "Squad", badge: "Coming soon" },
   { id: "profile", label: "Profile" },
 ];
+
+const LANDING_PAGE_URL = "https://damcha02.github.io/destudydracker/";
+
+function makeFriendInviteLink(friendCode: string) {
+  return `${LANDING_PAGE_URL}?invite=${encodeURIComponent(friendCode)}`;
+}
 
 const feedFallbackNotes = [
   "only 5 billion things to go...",
@@ -1495,6 +1501,7 @@ function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
+  const [visibleTabsOptionsOpen, setVisibleTabsOptionsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
   const [semesterName, setSemesterName] = useState("");
@@ -1635,6 +1642,10 @@ function App() {
   useEffect(() => {
     saveAppState(state);
   }, [state]);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.backgroundEffect = state.settings.backgroundEffect === false ? "off" : "on";
+  }, [state.settings.backgroundEffect]);
 
   useEffect(() => {
     if (!isTauriApp()) {
@@ -2167,6 +2178,7 @@ function App() {
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
+  const friendInviteLink = makeFriendInviteLink(state.social.friendCode);
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
   const latestFeedSessionPosted = latestFeedSession
     ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
@@ -2438,6 +2450,16 @@ function App() {
     });
   }
 
+  function toggleBackgroundEffect() {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        backgroundEffect: current.settings.backgroundEffect === false,
+      },
+    }));
+  }
+
   async function copyFriendCode() {
     try {
       await navigator.clipboard.writeText(state.social.friendCode);
@@ -2445,6 +2467,16 @@ function App() {
     } catch (error: unknown) {
       console.warn("Could not copy friend code.", error);
       setMessage("Could not copy the friend code. Select it manually instead.");
+    }
+  }
+
+  async function copyFriendInviteLink() {
+    try {
+      await navigator.clipboard.writeText(makeFriendInviteLink(state.social.friendCode));
+      setMessage("Friend invite link copied.");
+    } catch (error: unknown) {
+      console.warn("Could not copy friend invite link.", error);
+      setMessage("Could not copy the invite link. Select it manually instead.");
     }
   }
 
@@ -5485,34 +5517,58 @@ function App() {
 
           {activeMenuPanel === "options" ? (
             <div className="settings-panel-body options-panel-body">
-              <div className="options-intro-card">
-                <strong>Choose visible tabs</strong>
-                <span>Turn off any tab you do not want in the main navigation. The app adapts as if it was never there.</span>
-              </div>
               <div className="tab-toggle-list">
-                {primaryTabs.map((tab) => {
-                  const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
-                  const checked = visibleTabs[tab.id] !== false;
-                  const visibleCount = primaryTabs.filter(({ id }) => visibleTabs[id] !== false).length;
-                  const disabled = checked && visibleCount <= 1;
-
-                  return (
-                    <label key={tab.id} className={`tab-toggle-row ${disabled ? "disabled" : ""}`}>
-                      <span>
-                        <strong>{tab.label}</strong>
-                        <small>{checked ? "Shown in tabs" : "Hidden from tabs"}</small>
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={disabled}
-                        onChange={() => toggleTabVisibility(tab.id)}
-                      />
-                      <span className="ios-switch" aria-hidden="true" />
-                    </label>
-                  );
-                })}
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Background effect</strong>
+                    <small>{state.settings.backgroundEffect === false ? "Off" : "On"} · ambient gradients and animated glows</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={state.settings.backgroundEffect !== false}
+                    onChange={toggleBackgroundEffect}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
               </div>
+              <button
+                type="button"
+                className="options-intro-card options-dropdown-trigger"
+                aria-expanded={visibleTabsOptionsOpen}
+                onClick={() => setVisibleTabsOptionsOpen((current) => !current)}
+              >
+                <span>
+                  <strong>Choose visible tabs</strong>
+                  <span>Turn off any tab you do not want in the main navigation. The app adapts as if it was never there.</span>
+                </span>
+                <span className="options-dropdown-chevron" aria-hidden="true">›</span>
+              </button>
+              {visibleTabsOptionsOpen ? (
+                <div className="tab-toggle-list">
+                  {primaryTabs.map((tab) => {
+                    const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
+                    const checked = visibleTabs[tab.id] !== false;
+                    const visibleCount = primaryTabs.filter(({ id }) => visibleTabs[id] !== false).length;
+                    const disabled = checked && visibleCount <= 1;
+
+                    return (
+                      <label key={tab.id} className={`tab-toggle-row ${disabled ? "disabled" : ""}`}>
+                        <span>
+                          <strong>{tab.label}</strong>
+                          <small>{checked ? "Shown in tabs" : "Hidden from tabs"}</small>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={disabled}
+                          onChange={() => toggleTabVisibility(tab.id)}
+                        />
+                        <span className="ios-switch" aria-hidden="true" />
+                      </label>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -5629,7 +5685,7 @@ function App() {
         </div>
       ) : null}
 
-      <div className="shell" style={{ "--accent": state.settings.accent } as CSSProperties}>
+      <div className={`shell ${showWindowTitlebar ? "with-window-titlebar" : ""}`} style={{ "--accent": state.settings.accent } as CSSProperties}>
       <header className="topbar">
         <div className="brand-cluster">
           <TimerBrandMark phase={timerBrandPhase(state.timer)} />
@@ -7499,6 +7555,11 @@ function App() {
                           <span>{state.social.friendCode}</span>
                           <span className="arena-code-copy">⧉</span>
                         </button>
+                        <button type="button" className="arena-code-plate" onClick={copyFriendInviteLink} title="Copy invite link">
+                          <span className="arena-code-key">↗</span>
+                          <span>Invite link</span>
+                          <span className="arena-code-copy">⧉</span>
+                        </button>
                         <span className={`arena-sync-pill ${state.social.lastSyncError ? "arena-sync-pill--error" : socialConfigured ? "arena-sync-pill--ready" : "arena-sync-pill--local"}`}>
                           <span />{state.social.lastSyncError ? "Sync Issue" : socialConfigured ? "Arena Synced" : "Local Only"}
                         </span>
@@ -7566,12 +7627,21 @@ function App() {
                     <span className="arena-kicker">Player tags</span>
                     <h3>Friends</h3>
                   </div>
-                </div>
+                  </div>
 
-                <form className="arena-add-friend" onSubmit={submitFriendRequest}>
-                  <input className="arena-input" value={friendCodeDraft} onChange={(event) => setFriendCodeDraft(event.target.value.toUpperCase())} placeholder="Enter player tag, e.g. ABCD-1234" disabled={!socialConfigured} />
-                  <button type="submit" className="arena-btn arena-btn--send" disabled={socialSyncing || !socialConfigured}>Send</button>
-                </form>
+                  <div className="arena-invite-card">
+                    <div>
+                      <span className="arena-kicker">Invite link</span>
+                      <p>Share this link in WhatsApp or anywhere else. It opens the download page with your player tag ready to copy.</p>
+                    </div>
+                    <input className="arena-input" value={friendInviteLink} readOnly onFocus={(event) => event.currentTarget.select()} />
+                    <button type="button" className="arena-btn arena-btn--send" onClick={copyFriendInviteLink}>Copy invite link</button>
+                  </div>
+
+                  <form className="arena-add-friend" onSubmit={submitFriendRequest}>
+                    <input className="arena-input" value={friendCodeDraft} onChange={(event) => setFriendCodeDraft(event.target.value.toUpperCase())} placeholder="Enter player tag, e.g. ABCD-1234" disabled={!socialConfigured} />
+                    <button type="submit" className="arena-btn arena-btn--send" disabled={socialSyncing || !socialConfigured}>Send</button>
+                  </form>
 
                 <div className="arena-social-section">
                   <h4>Incoming <span>{state.social.incomingFriendRequests.length}</span></h4>

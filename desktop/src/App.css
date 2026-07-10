@@ -1,7 +1,9 @@
 .window-titlebar {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 100;
+  left: 0;
+  right: 0;
+  z-index: 1000;
   height: 38px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -54,6 +56,10 @@
   width: min(1720px, calc(100vw - 48px));
   margin: 0 auto;
   padding: 22px 0 56px;
+}
+
+.shell.with-window-titlebar {
+  padding-top: 60px;
 }
 
 .topbar {
@@ -205,6 +211,10 @@
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+}
+
+:root[data-background-effect="off"] .arena-bg {
+  display: none;
 }
 
 .arena-bg-orb {
@@ -616,6 +626,23 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
+}
+
+.arena-invite-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 12px;
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
+}
+
+.arena-invite-card p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .arena-input {
@@ -1412,7 +1439,8 @@
 @media (max-width: 720px) {
   .arena-player-main,
   .arena-sync-console,
-  .arena-add-friend {
+  .arena-add-friend,
+  .arena-invite-card {
     grid-template-columns: 1fr;
   }
 
@@ -3573,6 +3601,39 @@ button[type="submit"],
 
 .options-intro-card {
   display: block;
+}
+
+.options-dropdown-trigger {
+  align-items: center;
+  cursor: pointer;
+}
+
+.options-dropdown-trigger:hover {
+  background: var(--hover);
+  border-color: var(--line);
+}
+
+.options-dropdown-trigger > span:first-child {
+  min-width: 0;
+  display: block;
+  margin-top: 0;
+  color: inherit;
+}
+
+.options-dropdown-chevron {
+  flex: 0 0 auto;
+  display: inline-flex;
+  margin-top: 0;
+  color: var(--ink-3);
+  font-size: 1.7rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 0.16s ease, color 0.16s ease;
+}
+
+.options-dropdown-trigger[aria-expanded="true"] .options-dropdown-chevron {
+  color: var(--accent);
+  transform: rotate(90deg);
 }
 
 .tab-toggle-list {

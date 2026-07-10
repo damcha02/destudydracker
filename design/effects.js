@@ -85,7 +85,7 @@
     window.addEventListener('resize', resize);
     apply();
     new MutationObserver(apply).observe(document.documentElement, {
-      attributes: true, attributeFilter: ['data-palette', 'data-theme']
+      attributes: true, attributeFilter: ['data-palette', 'data-theme', 'data-background-effect']
     });
   }
 
@@ -131,6 +131,17 @@
   }
 
   function apply() {
+    if (document.documentElement.getAttribute('data-background-effect') === 'off') {
+      current = { type: 'none', color: '#000000', intensity: 1 };
+      parts = [];
+      cancelAnimationFrame(raf);
+      ctx.clearRect(0, 0, W, H);
+      canvas.style.opacity = '0';
+      canvas.style.display = 'none';
+      return;
+    }
+
+    canvas.style.display = 'block';
     var pal = document.documentElement.getAttribute('data-palette') || 'default';
     var mode = document.documentElement.getAttribute('data-theme') || 'dark';
     var cfg = getModeConfig(CONFIG[pal] || CONFIG.default, mode);

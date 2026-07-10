@@ -98,6 +98,7 @@ export const defaultState: AppState = {
     userName: "",
     dailyGoalMinutes: 120,
     themeFamily: "normal",
+    backgroundEffect: true,
     vaultPath: null,
     vaultName: "StudyTrackerVault",
     visibleTabs: defaultVisibleTabs,

@@ -391,6 +391,11 @@ body {
   letter-spacing: 0.005em;
 }
 
+:root[data-background-effect="off"] body {
+  background: var(--bg);
+  background-attachment: scroll;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -403,6 +408,14 @@ body::before {
 
 :root[data-palette] body::before {
   display: none;
+}
+
+:root[data-background-effect="off"] body::before {
+  display: none;
+}
+
+:root[data-background-effect="off"] #fx-canvas {
+  display: none !important;
 }
 
 #root {

@@ -30,6 +30,41 @@
   var yr = document.getElementById('year');
   if (yr) yr.textContent = new Date().getFullYear();
 
+  /* ---------- Friend invite links ---------- */
+  var inviteCard = document.getElementById('inviteCard');
+  var inviteCode = document.getElementById('inviteCode');
+  var copyInviteCode = document.getElementById('copyInviteCode');
+  var invite = new URLSearchParams(window.location.search).get('invite');
+  invite = invite ? invite.trim().toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 24) : '';
+  if (invite && inviteCard && inviteCode) {
+    inviteCode.textContent = invite;
+    inviteCard.hidden = false;
+  }
+  if (copyInviteCode && invite) {
+    copyInviteCode.addEventListener('click', function () {
+      function copied() {
+        copyInviteCode.textContent = 'Copied';
+        setTimeout(function () { copyInviteCode.textContent = 'Copy player tag'; }, 1800);
+      }
+      function fallbackCopy() {
+        var input = document.createElement('input');
+        input.value = invite;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.appendChild(input);
+        input.select();
+        try { document.execCommand('copy'); copied(); } catch (e) {}
+        document.body.removeChild(input);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(invite).then(copied).catch(fallbackCopy);
+      } else {
+        fallbackCopy();
+      }
+    });
+  }
+
   /* ---------- Nav: shadow on scroll + mobile menu ---------- */
   var nav = document.getElementById('nav');
   var navLinks = document.getElementById('navLinks');
