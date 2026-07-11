@@ -154,6 +154,19 @@ export interface SocialFeedPost {
   reactions: Record<string, number>;
   reacted?: Record<string, boolean>;
   reactedBy?: Record<string, string[]>;
+  comments?: SocialFeedComment[];
+}
+
+export interface SocialFeedComment {
+  id: string;
+  postId: string;
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  avatar?: SocialAvatar;
+  body: string;
+  createdAt: string;
+  isSelf?: boolean;
 }
 
 export interface SocialState {

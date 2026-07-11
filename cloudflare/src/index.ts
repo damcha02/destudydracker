@@ -48,6 +48,7 @@ const MAX_DAILY_MINUTES = 24 * 60;
 const MAX_DAILY_SESSIONS = 200;
 const MAX_ID_LENGTH = 80;
 const MAX_SECRET_LENGTH = 120;
+const MAX_COMMENT_LENGTH = 220;
 const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
 const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"]);
 
@@ -307,6 +308,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
   const viewerFriendIds = scope === "friends" ? friendIds : await getFriendIds(env, userId);
   const visibleReactorIds = new Set([userId, ...viewerFriendIds]);
+  const visibleCommenterIds = visibleReactorIds;
   const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
   const clauses = scope === "global" ? ["u.is_private = 0"] : [`p.user_id IN (${allowedIds.map(() => "?").join(",") || "?"})`];
   const params = scope === "friends" ? (allowedIds.length ? allowedIds : [userId]) : [];
@@ -338,6 +340,17 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const reactionCounts = new Map<string, Record<string, number>>();
   const reacted = new Map<string, Record<string, boolean>>();
   const reactedBy = new Map<string, Record<string, string[]>>();
+  const comments = new Map<string, Array<{
+    id: string;
+    postId: string;
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatar: SocialAvatar;
+    body: string;
+    createdAt: string;
+    isSelf: boolean;
+  }>>();
   if (ids.length) {
     const countRows = await env.DB.prepare(`
       SELECT post_id AS postId, emoji, COUNT(*) AS count
@@ -371,6 +384,31 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
       existing[row.emoji] = names;
       reactedBy.set(row.postId, existing);
     });
+
+    const commentRows = await env.DB.prepare(`
+      SELECT c.id, c.post_id AS postId, c.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+        u.avatar_json AS avatarJson, u.is_private AS isPrivate, c.body, c.created_at AS createdAt
+      FROM feed_comments c
+      JOIN users u ON u.id = c.user_id
+      WHERE c.post_id IN (${ids.map(() => "?").join(",")})
+      ORDER BY c.created_at ASC
+    `).bind(...ids).all<{ id: string; postId: string; userId: string; displayName: string; friendCode: string; avatarJson: string; isPrivate: number; body: string; createdAt: string }>();
+    commentRows.results.forEach((row) => {
+      if (row.isPrivate && !visibleCommenterIds.has(row.userId)) return;
+      const existing = comments.get(row.postId) ?? [];
+      existing.push({
+        id: row.id,
+        postId: row.postId,
+        userId: row.userId,
+        displayName: row.displayName,
+        friendCode: row.friendCode,
+        avatar: parseAvatar(row.avatarJson, row.displayName),
+        body: row.body,
+        createdAt: row.createdAt,
+        isSelf: row.userId === userId,
+      });
+      comments.set(row.postId, existing);
+    });
   }
 
   return posts.results.map((post) => ({
@@ -382,6 +420,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
     reacted: reacted.get(post.id) ?? {},
     reactedBy: reactedBy.get(post.id) ?? {},
+    comments: comments.get(post.id) ?? [],
   }));
 }
 
@@ -534,6 +573,47 @@ async function handleFeedDelete(request: Request, env: Env) {
   return json({ ok: true });
 }
 
+async function handleFeedComment(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string; body: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const postId = cleanText(payload.postId, 80);
+  const visibility = await canViewFeedPost(env, userId, postId);
+  if (visibility.missing) return text("Feed post not found.", 404);
+  if (!visibility.allowed) return text("You cannot comment on this feed post.", 403);
+
+  const body = cleanText(payload.body, MAX_COMMENT_LENGTH);
+  if (!body) return text("Comment cannot be empty.", 400);
+
+  const id = crypto.randomUUID();
+  await env.DB.prepare("INSERT INTO feed_comments (id, post_id, user_id, body) VALUES (?, ?, ?, ?)")
+    .bind(id, postId, userId, body)
+    .run();
+  const row = await env.DB.prepare(`
+    SELECT c.id, c.post_id AS postId, c.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+      u.avatar_json AS avatarJson, c.body, c.created_at AS createdAt
+    FROM feed_comments c
+    JOIN users u ON u.id = c.user_id
+    WHERE c.id = ?
+  `).bind(id).first<{ id: string; postId: string; userId: string; displayName: string; friendCode: string; avatarJson: string; body: string; createdAt: string }>();
+  if (!row) return text("Comment could not be created.", 500);
+
+  return json({
+    ok: true,
+    comment: {
+      id: row.id,
+      postId: row.postId,
+      userId: row.userId,
+      displayName: row.displayName,
+      friendCode: row.friendCode,
+      avatar: parseAvatar(row.avatarJson, row.displayName),
+      body: row.body,
+      createdAt: row.createdAt,
+      isSelf: true,
+    },
+  });
+}
+
 async function handleFriendRequest(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string; friendCode: string }>(request);
   const fromUserId = String(payload.userId ?? "").trim();
@@ -657,6 +737,7 @@ export default {
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);
       if (request.method === "POST" && url.pathname === "/feed/update") return await handleFeedUpdate(request, env);
       if (request.method === "POST" && url.pathname === "/feed/delete") return await handleFeedDelete(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return await handleFriendRequest(request, env);

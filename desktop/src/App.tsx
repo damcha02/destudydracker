@@ -36,10 +36,10 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
 import type { PlayerStatsResponse } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -1991,6 +1991,9 @@ function App() {
   const [feedScope, setFeedScope] = useState<SocialFeedScope>("global");
   const [feedNoteDraft, setFeedNoteDraft] = useState("");
   const [feedLoading, setFeedLoading] = useState(false);
+  const [expandedFeedComments, setExpandedFeedComments] = useState<Set<string>>(() => new Set());
+  const [feedCommentDrafts, setFeedCommentDrafts] = useState<Record<string, string>>({});
+  const [feedCommentSavingId, setFeedCommentSavingId] = useState<string | null>(null);
   const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("global");
   const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
   const [friendCodeDraft, setFriendCodeDraft] = useState("");
@@ -3090,6 +3093,60 @@ function App() {
     } catch (error: unknown) {
       console.warn("Could not sync feed reaction.", error);
       setMessage(getErrorMessage(error, "Could not sync reaction."));
+    }
+  }
+
+  function toggleFeedComments(postId: string) {
+    setExpandedFeedComments((current) => {
+      const next = new Set(current);
+      if (next.has(postId)) next.delete(postId);
+      else next.add(postId);
+      return next;
+    });
+  }
+
+  async function submitFeedComment(event: FormEvent<HTMLFormElement>, post: SocialFeedPost) {
+    event.preventDefault();
+    const body = (feedCommentDrafts[post.id] ?? "").trim();
+    if (!body) {
+      setMessage("Write a comment first.");
+      return;
+    }
+    if (state.social.pendingFeedPosts.some((item) => item.id === post.id)) {
+      setMessage("Sync this post before adding comments.");
+      return;
+    }
+    if (!socialConfigured) {
+      setMessage("Social sync is required for comments.");
+      return;
+    }
+
+    setFeedCommentSavingId(post.id);
+    try {
+      const result = await commentOnFeedPost(state.social, post.id, body);
+      const addComment = (item: SocialFeedPost) => {
+        if (item.id !== post.id) return item;
+        const comments = item.comments ?? [];
+        if (comments.some((comment) => comment.id === result.comment.id)) return item;
+        return { ...item, comments: [...comments, result.comment] };
+      };
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.map(addComment),
+            friends: current.social.cachedFeeds.friends.map(addComment),
+          },
+        },
+      }));
+      setFeedCommentDrafts((current) => ({ ...current, [post.id]: "" }));
+      setExpandedFeedComments((current) => new Set(current).add(post.id));
+    } catch (error: unknown) {
+      console.warn("Could not sync feed comment.", error);
+      setMessage(getErrorMessage(error, "Could not post comment."));
+    } finally {
+      setFeedCommentSavingId(null);
     }
   }
 
@@ -7778,6 +7835,8 @@ function App() {
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
                 const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: item.avatar };
+                const comments = item.comments ?? [];
+                const commentsOpen = expandedFeedComments.has(item.id);
                 return item.type === "milestone" ? (
                   <article key={item.id} className="milestone">
                     <div className="milestone__icon">{item.icon || "🏆"}</div>
@@ -7839,6 +7898,41 @@ function App() {
                           {["🔥", "🧠", "👏", "⭐", "🎯", "💪", "📚", "⚡", "🎉", "🏆", "✨", "💡", "🎓", "🚀", "💎", "🌟", "📖", "🕐", "💯", "🙌", "🤯", "😤", "👑", "🌊"].map((emj) => (
                             <button key={emj} type="button" className={`emoji-picker__item ${item.reacted?.[emj] ? "emoji-picker__item--active" : ""}`} onClick={() => { void toggleLocalFeedReaction(item.id, emj); setEmojiPickerPostId(null); }}>{emj}</button>
                           ))}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="feed-card__comments-shell">
+                      <button type="button" className="feed-comments-toggle" onClick={() => toggleFeedComments(item.id)} aria-expanded={commentsOpen}>
+                        Comments ({comments.length}) {commentsOpen ? "↑" : "↓"}
+                      </button>
+                      {commentsOpen ? (
+                        <div className="feed-card__comments">
+                          {comments.length ? comments.map((comment: SocialFeedComment) => {
+                            const commentTarget = { userId: comment.userId, displayName: comment.displayName, friendCode: comment.friendCode, avatar: comment.avatar };
+                            return (
+                              <div key={comment.id} className="feed-comment">
+                                <ArenaAvatar name={comment.displayName} avatar={comment.avatar} self={comment.isSelf} />
+                                <div>
+                                  <div className="feed-comment__meta">
+                                    <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(commentTarget)}>{comment.displayName}{comment.isSelf ? " (You)" : ""}</button>
+                                    <span>{formatFeedPostedAt(comment.createdAt)}</span>
+                                  </div>
+                                  <p>{comment.body}</p>
+                                </div>
+                              </div>
+                            );
+                          }) : <p className="feed-comments-empty">No comments yet. Start the reply chain.</p>}
+                          <form className="feed-comment-form" onSubmit={(event) => void submitFeedComment(event, item)}>
+                            <input
+                              className="arena-input"
+                              value={feedCommentDrafts[item.id] ?? ""}
+                              onChange={(event) => setFeedCommentDrafts((current) => ({ ...current, [item.id]: event.target.value }))}
+                              maxLength={220}
+                              placeholder="Reply or comment under this post..."
+                              disabled={feedCommentSavingId === item.id}
+                            />
+                            <button type="submit" className="arena-btn arena-btn--send" disabled={feedCommentSavingId === item.id || !(feedCommentDrafts[item.id] ?? "").trim()}>{feedCommentSavingId === item.id ? "Posting" : "Reply"}</button>
+                          </form>
                         </div>
                       ) : null}
                     </div>

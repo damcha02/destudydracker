@@ -1,4 +1,4 @@
-import type { AppState, SocialAvatar, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -206,6 +206,18 @@ export async function deleteFeedPost(social: SocialState, postId: string) {
       userId: social.userId,
       deviceSecret: social.deviceSecret,
       postId,
+    }),
+  });
+}
+
+export async function commentOnFeedPost(social: SocialState, postId: string, body: string) {
+  return requestSocialApi<{ ok: boolean; comment: SocialFeedComment }>("/feed/comment", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+      body,
     }),
   });
 }
