@@ -6506,6 +6506,25 @@ input[type="color"] {
   width: auto;
 }
 
+.calendar-schedule-panel {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--surface-inset) 86%, var(--surface));
+  border: 1px solid var(--line-soft);
+}
+
+.calendar-schedule-panel .calendar-time-preview {
+  margin: 0;
+}
+
+.calendar-schedule-panel .ghost-button {
+  flex: 0 0 auto;
+}
+
 .calendar-source-toggle {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7966,6 +7985,27 @@ input[type="color"] {
 
 .design-priority-card .section-head {
   margin-bottom: 2px;
+  align-items: flex-start;
+}
+
+.dashboard-todo-button {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--accent) 50%, var(--line-strong));
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface));
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  box-shadow: var(--shadow-sm);
+}
+
+.dashboard-todo-button:hover {
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 .design-priority-card .section-note {

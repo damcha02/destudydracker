@@ -4574,6 +4574,15 @@ function App() {
     setCalendarAddOpen(true);
   }
 
+  function openTodayTodoDrawer() {
+    const today = localIsoDate();
+    setCalendarCursorDate(parseCalendarDate(today));
+    setSelectedCalendarDate(today);
+    setCalendarEditEntryId(null);
+    setCalendarAddDraft((current) => ({ ...current, source: "new", noTime: true }));
+    setCalendarAddOpen(true);
+  }
+
   function closeCalendarAddDrawer() {
     setCalendarAddOpen(false);
   }
@@ -5020,9 +5029,102 @@ function App() {
     setMessage(`"${task.title}" sent to timer.`);
   }
 
-  function renderPlannerCalendar() {
-    const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const getCalendarEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
+  const getCalendarEntryTitle = (entry: CalendarEntry) => getCalendarEntryTask(entry)?.title ?? entry.adHocTitle ?? "Calendar task";
+  const getCalendarEntryCourse = (entry: CalendarEntry) => {
+    const task = getCalendarEntryTask(entry);
+    return task ? courseLookup.get(task.courseId) ?? null : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) ?? null : null;
+  };
+  const getCalendarEntrySemester = (entry: CalendarEntry) => {
+    const task = getCalendarEntryTask(entry);
+    return task ? semesterLookup.get(task.semesterId) ?? null : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) ?? null : null;
+  };
+
+  function renderCalendarTimelineEntry(entry: CalendarEntry) {
+    const task = getCalendarEntryTask(entry);
+    const course = getCalendarEntryCourse(entry);
+    const semester = getCalendarEntrySemester(entry);
+    const isEditing = calendarEditEntryId === entry.id;
+    const isDragging = calendarDragEntryId === entry.id;
+    const isResizing = calendarResizeEntryId === entry.id;
+    const entryStartMinutes = entry.startTime ? timeToMinutes(entry.startTime) : calendarTimelineStartMinutes;
+    const entryEndMinutes = entry.endTime ? timeToMinutes(entry.endTime) : entryStartMinutes + 60;
+    const entryTop = ((entryStartMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
+    const entryHeight = Math.max(58, ((entryEndMinutes - entryStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+    const entryStyle = {
+      "--entry-color": course?.color ?? "var(--accent)",
+      ...(entry.startTime ? { top: `${Math.max(4, entryTop + 4)}px`, height: `${entryHeight}px` } : {}),
+    } as CSSProperties;
+    return (
+      <div
+        key={entry.id}
+        className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""}`}
+        onMouseDown={(event) => !isEditing && startCalendarEntryMove(event, entry)}
+        style={entryStyle}
+      >
+        {isEditing ? (
+          <div className="calendar-edit-inline">
+            <label>
+              <span>Start</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-2][0-9]:[0-5][0-9]"
+                placeholder="09:00"
+                value={calendarEditDraft.startTime}
+                onChange={(event) => setCalendarEditDraft((current) => ({ ...current, startTime: event.target.value }))}
+              />
+            </label>
+            <label>
+              <span>End</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-2][0-9]:[0-5][0-9]"
+                placeholder="10:00"
+                value={calendarEditDraft.endTime}
+                onChange={(event) => setCalendarEditDraft((current) => ({ ...current, endTime: event.target.value }))}
+              />
+            </label>
+            <button type="button" className="calendar-primary-button" onClick={() => saveCalendarEntryEdit(entry.id)}>
+              Save
+            </button>
+            <button type="button" className="ghost-button small-button" onClick={() => setCalendarEditEntryId(null)}>
+              Cancel
+            </button>
+            <button type="button" className="ghost-button small-button" onClick={() => unscheduleCalendarEntry(entry.id)}>
+              Unschedule
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="calendar-timeline-entry-copy">
+              <strong>{getCalendarEntryTitle(entry)}</strong>
+              <span>{course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
+              <small>{formatTimeRange(entry)} · {formatUnitAmount(getCalendarEntryAmount(entry))}{task ? "" : " · calendar only"}</small>
+            </div>
+            <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
+            <div className="calendar-timeline-entry-actions">
+              <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
+                Edit
+              </button>
+              <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
+                Remove
+              </button>
+            </div>
+            {entry.startTime ? (
+              <div className="calendar-resize-handle" onMouseDown={(event) => startCalendarEntryResize(event, entry)} title="Drag to change duration" />
+            ) : null}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderCalendarDayOverlay() {
     const selectedDate = selectedCalendarDate ? parseCalendarDate(selectedCalendarDate) : null;
+    if (!selectedCalendarDate || !selectedDate) return null;
+
     const selectedEntries = selectedCalendarDate ? (calendarEntriesByDate.get(selectedCalendarDate) ?? []) : [];
     const selectedExams = selectedCalendarDate ? (examsByDate.get(selectedCalendarDate) ?? []) : [];
     const selectedDeadlines = selectedCalendarDate ? (deadlinesByDate.get(selectedCalendarDate) ?? []) : [];
@@ -5031,97 +5133,260 @@ function App() {
       .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
     const unscheduledEntries = selectedEntries.filter((entry) => !entry.startTime);
 
-    const getEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
-    const getEntryTitle = (entry: CalendarEntry) => getEntryTask(entry)?.title ?? entry.adHocTitle ?? "Calendar task";
-    const getEntryCourse = (entry: CalendarEntry) => {
-      const task = getEntryTask(entry);
-      return task ? courseLookup.get(task.courseId) ?? null : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) ?? null : null;
-    };
-    const getEntrySemester = (entry: CalendarEntry) => {
-      const task = getEntryTask(entry);
-      return task ? semesterLookup.get(task.semesterId) ?? null : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) ?? null : null;
-    };
-
-    function renderTimelineEntry(entry: CalendarEntry) {
-      const task = getEntryTask(entry);
-      const course = getEntryCourse(entry);
-      const semester = getEntrySemester(entry);
-      const isEditing = calendarEditEntryId === entry.id;
-      const isDragging = calendarDragEntryId === entry.id;
-      const isResizing = calendarResizeEntryId === entry.id;
-      const entryStartMinutes = entry.startTime ? timeToMinutes(entry.startTime) : calendarTimelineStartMinutes;
-      const entryEndMinutes = entry.endTime ? timeToMinutes(entry.endTime) : entryStartMinutes + 60;
-      const entryTop = ((entryStartMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
-      const entryHeight = Math.max(58, ((entryEndMinutes - entryStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
-      const entryStyle = {
-        "--entry-color": course?.color ?? "var(--accent)",
-        ...(entry.startTime ? { top: `${Math.max(4, entryTop + 4)}px`, height: `${entryHeight}px` } : {}),
-      } as CSSProperties;
-      return (
-        <div
-          key={entry.id}
-          className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""}`}
-          onMouseDown={(event) => !isEditing && startCalendarEntryMove(event, entry)}
-          style={entryStyle}
-        >
-          {isEditing ? (
-            <div className="calendar-edit-inline">
-              <label>
-                <span>Start</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-2][0-9]:[0-5][0-9]"
-                  placeholder="09:00"
-                  value={calendarEditDraft.startTime}
-                  onChange={(event) => setCalendarEditDraft((current) => ({ ...current, startTime: event.target.value }))}
-                />
-              </label>
-              <label>
-                <span>End</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-2][0-9]:[0-5][0-9]"
-                  placeholder="10:00"
-                  value={calendarEditDraft.endTime}
-                  onChange={(event) => setCalendarEditDraft((current) => ({ ...current, endTime: event.target.value }))}
-                />
-              </label>
-              <button type="button" className="calendar-primary-button" onClick={() => saveCalendarEntryEdit(entry.id)}>
-                Save
+    return (
+      <div className="calendar-drawer-backdrop calendar-day-view-backdrop" onMouseDown={closeCalendarDrawer}>
+        <aside className="calendar-day-view" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day view">
+          <div className="calendar-day-view-head">
+            <div>
+              <p className="eyebrow">Day view</p>
+              <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
+              <p className="section-note">Click + to assign planner tasks or create calendar-only tasks.</p>
+            </div>
+            <div className="calendar-day-view-actions">
+              <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
+                + Add task
               </button>
-              <button type="button" className="ghost-button small-button" onClick={() => setCalendarEditEntryId(null)}>
-                Cancel
-              </button>
-              <button type="button" className="ghost-button small-button" onClick={() => unscheduleCalendarEntry(entry.id)}>
-                Unschedule
+              <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
+                Done
               </button>
             </div>
-          ) : (
-            <>
-              <div className="calendar-timeline-entry-copy">
-                <strong>{getEntryTitle(entry)}</strong>
-                <span>{course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
-                <small>{formatTimeRange(entry)} · {formatUnitAmount(getCalendarEntryAmount(entry))}{task ? "" : " · calendar only"}</small>
+          </div>
+
+          <div className="calendar-day-view-body">
+            <div className="calendar-timeline">
+              <div
+                ref={calendarTimelineRef}
+                className={`calendar-timeline-canvas ${calendarMovePreview ? "drag-over" : ""}`}
+                style={{ height: `${calendarTimelineHeight}px` }}
+              >
+                {calendarTimelineHours.map((hour) => (
+                  <div key={hour} className="calendar-timeline-hour" style={{ height: `${calendarTimelineHourHeight}px` }}>
+                    <div className="calendar-timeline-time">{String(hour).padStart(2, "0")}:00</div>
+                  </div>
+                ))}
+                {calendarMovePreview ? (
+                  <div className="calendar-drop-guide" style={{ top: `${calendarMovePreview.top}px` }}>
+                    <span>{calendarMovePreview.time}</span>
+                  </div>
+                ) : null}
+                {timedEntries.map(renderCalendarTimelineEntry)}
               </div>
-              <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
-              <div className="calendar-timeline-entry-actions">
-                <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
-                  Edit
-                </button>
-                <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
-                  Remove
-                </button>
-              </div>
-              {entry.startTime ? (
-                <div className="calendar-resize-handle" onMouseDown={(event) => startCalendarEntryResize(event, entry)} title="Drag to change duration" />
+            </div>
+
+            <div className="calendar-day-side-panel">
+              <section className="calendar-drawer-section">
+                <div>
+                  <strong>Unscheduled</strong>
+                  <small>Entries without a time stay here.</small>
+                </div>
+                <div className="calendar-expanded-list drawer-list">
+                  {unscheduledEntries.length ? unscheduledEntries.map(renderCalendarTimelineEntry) : (
+                    <p className="empty-copy compact-empty">No unscheduled calendar tasks.</p>
+                  )}
+                </div>
+              </section>
+
+              {selectedExams.length || selectedDeadlines.length ? (
+                <section className="calendar-drawer-section">
+                  <div>
+                    <strong>Fixed markers</strong>
+                    <small>Exams and deadlines are pulled from the planner.</small>
+                  </div>
+                  <div className="calendar-expanded-list drawer-list">
+                    {selectedExams.map((exam) => (
+                      <div key={exam.id} className="calendar-marker-row exam-marker">
+                        <strong>Exam</strong>
+                        <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
+                      </div>
+                    ))}
+                    {selectedDeadlines.map((task) => (
+                      <div key={task.id} className="calendar-marker-row deadline-marker">
+                        <strong>Deadline</strong>
+                        <span>{task.title} · {courseLookup.get(task.courseId)?.name ?? "No course"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               ) : null}
-            </>
-          )}
-        </div>
-      );
-    }
+
+              <section className="calendar-drawer-section">
+                <div>
+                  <strong>Day controls</strong>
+                  <small>Move through days or add a new calendar block.</small>
+                </div>
+                <div className="calendar-day-side-actions">
+                  <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
+                    Next day
+                  </button>
+                  <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
+                    + Add task
+                  </button>
+                </div>
+              </section>
+            </div>
+
+            {calendarAddOpen ? (
+              <aside className="calendar-drawer calendar-add-drawer" aria-label="Add calendar task">
+                <div className="calendar-drawer-head">
+                  <div>
+                    <p className="eyebrow">Add task</p>
+                    <h3>{calendarAddDraft.noTime ? "Add today's TODO" : "Plan a time block"}</h3>
+                  </div>
+                  <button type="button" className="ghost-button small-button" onClick={closeCalendarAddDrawer}>
+                    Close
+                  </button>
+                </div>
+
+                <div className="calendar-add-form">
+                  <label>
+                    <span>Semester</span>
+                    <select
+                      value={calendarAddDraft.semesterId}
+                      onChange={(event) => setCalendarAddDraft((current) => ({ ...current, semesterId: event.target.value, courseId: "", taskId: "" }))}
+                    >
+                      <option value="">No semester</option>
+                      {state.semesters.map((semester) => (
+                        <option key={semester.id} value={semester.id}>{semester.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Subject</span>
+                    <select
+                      value={calendarAddDraft.courseId}
+                      onChange={(event) => setCalendarAddDraft((current) => ({ ...current, courseId: event.target.value, taskId: "" }))}
+                    >
+                      <option value="">General</option>
+                      {calendarAddCourses.map((course) => (
+                        <option key={course.id} value={course.id}>{course.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="calendar-source-toggle" aria-label="Task source">
+                    {(["planner", "new"] as CalendarTaskSource[]).map((source) => (
+                      <button
+                        key={source}
+                        type="button"
+                        className={calendarAddDraft.source === source ? "active" : ""}
+                        onClick={() => setCalendarAddDraft((current) => ({ ...current, source }))}
+                      >
+                        {source === "planner" ? "From planner" : "New task"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {calendarAddDraft.source === "planner" ? (
+                    <label>
+                      <span>Planner task</span>
+                      <select
+                        value={calendarAddDraft.taskId}
+                        onChange={(event) => setCalendarAddDraft((current) => ({ ...current, taskId: event.target.value }))}
+                      >
+                        <option value="">Pick a task</option>
+                        {calendarAddTasks.map((task) => (
+                          <option key={task.id} value={task.id}>{task.title}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <label>
+                      <span>New calendar task</span>
+                      <input
+                        value={calendarAddDraft.title}
+                        onChange={(event) => setCalendarAddDraft((current) => ({ ...current, title: event.target.value }))}
+                        placeholder="Watch Youtube video"
+                      />
+                    </label>
+                  )}
+
+                  <div className="calendar-unit-toggle" aria-label="Calendar unit amount">
+                    {([1, 0.5, 0.25] as CalendarUnitAmount[]).map((amount) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        className={calendarAddDraft.unitAmount === amount ? "active" : ""}
+                        onClick={() => setCalendarAddDraft((current) => ({ ...current, unitAmount: amount }))}
+                      >
+                        {amount === 1 ? "1" : amount === 0.5 ? "1/2" : "1/4"}
+                      </button>
+                    ))}
+                  </div>
+
+                  {calendarAddDraft.noTime ? (
+                    <div className="calendar-schedule-panel">
+                      <p className="calendar-time-preview">This task will appear in Unscheduled.</p>
+                      <button type="button" className="ghost-button" onClick={() => setCalendarAddDraft((current) => ({ ...current, noTime: false }))}>
+                        Schedule
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="calendar-time-form-grid">
+                        <label>
+                          <span>Start</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-2][0-9]:[0-5][0-9]"
+                            placeholder="09:00"
+                            value={calendarAddDraft.startTime}
+                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, startTime: event.target.value }))}
+                          />
+                        </label>
+                        <label>
+                          <span>Duration</span>
+                          <select
+                            value={calendarAddDraft.durationMinutes}
+                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, durationMinutes: event.target.value }))}
+                          >
+                            {calendarDurationOptions.map((minutes) => (
+                              <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div className="calendar-schedule-panel scheduled">
+                        <p className="calendar-time-preview">
+                          {calendarAddDraft.startTime} - {addMinutesToTime(calendarAddDraft.startTime, Number(calendarAddDraft.durationMinutes) || 60)}
+                        </p>
+                        <button type="button" className="ghost-button" onClick={() => setCalendarAddDraft((current) => ({ ...current, noTime: true }))}>
+                          Unschedule
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="calendar-drawer-actions">
+                  <button type="button" className="ghost-button" onClick={closeCalendarAddDrawer}>
+                    Cancel
+                  </button>
+                  <button type="button" className="calendar-primary-button" onClick={addCalendarEntryFromDrawer}>
+                    Add to calendar
+                  </button>
+                </div>
+              </aside>
+            ) : null}
+            {calendarMovePreview ? (() => {
+              const previewEntry = selectedEntries.find((entry) => entry.id === calendarMovePreview.entryId);
+              return (
+                <div className="calendar-drag-preview" style={{ left: calendarMovePreview.x + 14, top: calendarMovePreview.y + 14 }}>
+                  <strong>{previewEntry ? getCalendarEntryTitle(previewEntry) : "Calendar task"}</strong>
+                  <span>{calendarMovePreview.time}</span>
+                </div>
+              );
+            })() : null}
+          </div>
+        </aside>
+      </div>
+    );
+  }
+
+  function renderPlannerCalendar() {
+    const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     return (
       <article className="panel-card planner-calendar-card">
@@ -5195,7 +5460,7 @@ function App() {
 
                 <div className="calendar-day-items">
                   {entries.slice(0, 3).map((entry) => {
-                    const course = getEntryCourse(entry);
+                    const course = getCalendarEntryCourse(entry);
                     return (
                       <div key={entry.id} className={`calendar-pill task-pill ${entry.completed ? "completed" : ""}`} style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}>
                         <input
@@ -5206,7 +5471,7 @@ function App() {
                           onClick={(event) => event.stopPropagation()}
                         />
                         <span className="calendar-task-copy">
-                          <span className="calendar-task-title">{getEntryTitle(entry)}</span>
+                          <span className="calendar-task-title">{getCalendarEntryTitle(entry)}</span>
                           <span className="calendar-task-course">{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</span>
                         </span>
                       </div>
@@ -5236,256 +5501,6 @@ function App() {
             );
           })}
         </div>
-
-        {selectedCalendarDate && selectedDate ? (
-          <div className="calendar-drawer-backdrop calendar-day-view-backdrop" onMouseDown={closeCalendarDrawer}>
-            <aside className="calendar-day-view" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day view">
-              <div className="calendar-day-view-head">
-                <div>
-                  <p className="eyebrow">Day view</p>
-                  <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
-                  <p className="section-note">Click + to assign planner tasks or create calendar-only tasks.</p>
-                </div>
-                <div className="calendar-day-view-actions">
-                  <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
-                    + Add task
-                  </button>
-                  <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
-                    Done
-                  </button>
-                </div>
-              </div>
-
-              <div className="calendar-day-view-body">
-                <div className="calendar-timeline">
-                  <div
-                    ref={calendarTimelineRef}
-                    className={`calendar-timeline-canvas ${calendarMovePreview ? "drag-over" : ""}`}
-                    style={{ height: `${calendarTimelineHeight}px` }}
-                  >
-                    {calendarTimelineHours.map((hour) => (
-                      <div key={hour} className="calendar-timeline-hour" style={{ height: `${calendarTimelineHourHeight}px` }}>
-                        <div className="calendar-timeline-time">{String(hour).padStart(2, "0")}:00</div>
-                      </div>
-                    ))}
-                    {calendarMovePreview ? (
-                      <div className="calendar-drop-guide" style={{ top: `${calendarMovePreview.top}px` }}>
-                        <span>{calendarMovePreview.time}</span>
-                      </div>
-                    ) : null}
-                    {timedEntries.map(renderTimelineEntry)}
-                  </div>
-                </div>
-
-                <div className="calendar-day-side-panel">
-                  <section className="calendar-drawer-section">
-                    <div>
-                      <strong>Unscheduled</strong>
-                      <small>Entries without a time stay here.</small>
-                    </div>
-                    <div className="calendar-expanded-list drawer-list">
-                      {unscheduledEntries.length ? unscheduledEntries.map(renderTimelineEntry) : (
-                        <p className="empty-copy compact-empty">No unscheduled calendar tasks.</p>
-                      )}
-                    </div>
-                  </section>
-
-                  {selectedExams.length || selectedDeadlines.length ? (
-                    <section className="calendar-drawer-section">
-                      <div>
-                        <strong>Fixed markers</strong>
-                        <small>Exams and deadlines are pulled from the planner.</small>
-                      </div>
-                      <div className="calendar-expanded-list drawer-list">
-                        {selectedExams.map((exam) => (
-                          <div key={exam.id} className="calendar-marker-row exam-marker">
-                            <strong>Exam</strong>
-                            <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
-                          </div>
-                        ))}
-                        {selectedDeadlines.map((task) => (
-                          <div key={task.id} className="calendar-marker-row deadline-marker">
-                            <strong>Deadline</strong>
-                            <span>{task.title} · {courseLookup.get(task.courseId)?.name ?? "No course"}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  ) : null}
-
-                  <section className="calendar-drawer-section">
-                    <div>
-                      <strong>Day controls</strong>
-                      <small>Move through days or add a new calendar block.</small>
-                    </div>
-                    <div className="calendar-day-side-actions">
-                      <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
-                        Next day
-                      </button>
-                      <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
-                        + Add task
-                      </button>
-                    </div>
-                  </section>
-                </div>
-
-                {calendarAddOpen ? (
-                  <aside className="calendar-drawer calendar-add-drawer" aria-label="Add calendar task">
-                    <div className="calendar-drawer-head">
-                      <div>
-                        <p className="eyebrow">Add task</p>
-                        <h3>Plan a time block</h3>
-                      </div>
-                      <button type="button" className="ghost-button small-button" onClick={closeCalendarAddDrawer}>
-                        Close
-                      </button>
-                    </div>
-
-                    <div className="calendar-add-form">
-                      <label>
-                        <span>Semester</span>
-                        <select
-                          value={calendarAddDraft.semesterId}
-                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, semesterId: event.target.value, courseId: "", taskId: "" }))}
-                        >
-                          <option value="">No semester</option>
-                          {state.semesters.map((semester) => (
-                            <option key={semester.id} value={semester.id}>{semester.name}</option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <label>
-                        <span>Subject</span>
-                        <select
-                          value={calendarAddDraft.courseId}
-                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, courseId: event.target.value, taskId: "" }))}
-                        >
-                          <option value="">General</option>
-                          {calendarAddCourses.map((course) => (
-                            <option key={course.id} value={course.id}>{course.name}</option>
-                          ))}
-                        </select>
-                      </label>
-
-                      <div className="calendar-source-toggle" aria-label="Task source">
-                        {(["planner", "new"] as CalendarTaskSource[]).map((source) => (
-                          <button
-                            key={source}
-                            type="button"
-                            className={calendarAddDraft.source === source ? "active" : ""}
-                            onClick={() => setCalendarAddDraft((current) => ({ ...current, source }))}
-                          >
-                            {source === "planner" ? "From planner" : "New task"}
-                          </button>
-                        ))}
-                      </div>
-
-                      {calendarAddDraft.source === "planner" ? (
-                        <label>
-                          <span>Planner task</span>
-                          <select
-                            value={calendarAddDraft.taskId}
-                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, taskId: event.target.value }))}
-                          >
-                            <option value="">Pick a task</option>
-                            {calendarAddTasks.map((task) => (
-                              <option key={task.id} value={task.id}>{task.title}</option>
-                            ))}
-                          </select>
-                        </label>
-                      ) : (
-                        <label>
-                          <span>New calendar task</span>
-                          <input
-                            value={calendarAddDraft.title}
-                            onChange={(event) => setCalendarAddDraft((current) => ({ ...current, title: event.target.value }))}
-                            placeholder="Watch Youtube video"
-                          />
-                        </label>
-                      )}
-
-                      <div className="calendar-unit-toggle" aria-label="Calendar unit amount">
-                        {([1, 0.5, 0.25] as CalendarUnitAmount[]).map((amount) => (
-                          <button
-                            key={amount}
-                            type="button"
-                            className={calendarAddDraft.unitAmount === amount ? "active" : ""}
-                            onClick={() => setCalendarAddDraft((current) => ({ ...current, unitAmount: amount }))}
-                          >
-                            {amount === 1 ? "1" : amount === 0.5 ? "1/2" : "1/4"}
-                          </button>
-                        ))}
-                      </div>
-
-                      <label className="calendar-checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={calendarAddDraft.noTime}
-                          onChange={(event) => setCalendarAddDraft((current) => ({ ...current, noTime: event.target.checked }))}
-                        />
-                        <span>No time yet (keep unscheduled)</span>
-                      </label>
-
-                      {!calendarAddDraft.noTime ? (
-                        <>
-                          <div className="calendar-time-form-grid">
-                            <label>
-                              <span>Start</span>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-2][0-9]:[0-5][0-9]"
-                                placeholder="09:00"
-                                value={calendarAddDraft.startTime}
-                                onChange={(event) => setCalendarAddDraft((current) => ({ ...current, startTime: event.target.value }))}
-                              />
-                            </label>
-                            <label>
-                              <span>Duration</span>
-                              <select
-                                value={calendarAddDraft.durationMinutes}
-                                onChange={(event) => setCalendarAddDraft((current) => ({ ...current, durationMinutes: event.target.value }))}
-                              >
-                                {calendarDurationOptions.map((minutes) => (
-                                  <option key={minutes} value={minutes}>{minutes < 60 ? `${minutes} min` : `${minutes / 60} h`}</option>
-                                ))}
-                              </select>
-                            </label>
-                          </div>
-
-                          <p className="calendar-time-preview">
-                            {calendarAddDraft.startTime} - {addMinutesToTime(calendarAddDraft.startTime, Number(calendarAddDraft.durationMinutes) || 60)}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="calendar-time-preview">This task will appear in Unscheduled.</p>
-                      )}
-                    </div>
-
-                    <div className="calendar-drawer-actions">
-                      <button type="button" className="ghost-button" onClick={closeCalendarAddDrawer}>
-                        Cancel
-                      </button>
-                      <button type="button" className="calendar-primary-button" onClick={addCalendarEntryFromDrawer}>
-                        Add to calendar
-                      </button>
-                    </div>
-                  </aside>
-                ) : null}
-                {calendarMovePreview ? (() => {
-                  const previewEntry = selectedEntries.find((entry) => entry.id === calendarMovePreview.entryId);
-                  return (
-                    <div className="calendar-drag-preview" style={{ left: calendarMovePreview.x + 14, top: calendarMovePreview.y + 14 }}>
-                      <strong>{previewEntry ? getEntryTitle(previewEntry) : "Calendar task"}</strong>
-                      <span>{calendarMovePreview.time}</span>
-                    </div>
-                  );
-                })() : null}
-              </div>
-            </aside>
-          </div>
-        ) : null}
       </article>
     );
   }
@@ -5783,6 +5798,9 @@ function App() {
             <h3>Planned today</h3>
             <p className="section-note">From your calendar schedule.</p>
           </div>
+          <button type="button" className="dashboard-todo-button" onClick={openTodayTodoDrawer}>
+            TODO
+          </button>
         </div>
 
         <div className="design-task-list">
@@ -6474,6 +6492,8 @@ function App() {
       </nav>
 
       {message ? <div className="message-banner">{message}</div> : null}
+
+      {renderCalendarDayOverlay()}
 
       {state.activeTab === "dashboard" ? (
         <section className="dashboard-design fade-up">
