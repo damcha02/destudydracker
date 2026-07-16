@@ -7283,6 +7283,37 @@ input[type="color"] {
   height: 100%;
 }
 
+.dash-3col,
+.dash-analyst-grid {
+  align-items: stretch;
+}
+
+.dash-3col > .design-stack,
+.dash-analyst-grid > .design-stack {
+  align-self: stretch;
+  height: 100%;
+}
+
+.dash-3col > .design-stack > .panel-card,
+.dash-analyst-grid > .design-stack > .panel-card {
+  flex-shrink: 0;
+  height: auto;
+}
+
+.dash-3col .design-garden-card,
+.dash-3col .design-priority-card,
+.dash-3col .design-exam-runway,
+.dash-analyst-grid .design-priority-card,
+.dash-analyst-grid .design-exam-runway {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dash-3col .design-weekly-card.fossil-card,
+.dash-analyst-grid .design-weekly-card.fossil-card {
+  flex: 0 0 auto;
+}
+
 .dashboard-design .section-head {
   min-height: 58px;
   margin-bottom: 14px;
