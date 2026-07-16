@@ -198,8 +198,7 @@ export function getOverallHealth(state: AppState) {
   return calculateWorkloadHealth(state.tasks, state.exams).score;
 }
 
-export function getWeeklyActivity(sessions: StudySession[]) {
-  const today = new Date();
+export function getWeeklyActivity(sessions: StudySession[], today = new Date()) {
   const buckets = Array.from({ length: 7 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() - (6 - index));
@@ -239,26 +238,24 @@ export function getUpcomingExams(state: AppState) {
     .slice(0, 4);
 }
 
-export function getTodaySessions(state: AppState) {
-  const today = isoDate();
+export function getTodaySessions(state: AppState, today = isoDate()) {
   return state.sessions.filter((session) => sessionDateKey(session) === today);
 }
 
-export function getTodayMinutes(state: AppState) {
-  return getTodaySessions(state).reduce((sum, session) => sum + session.minutes, 0);
+export function getTodayMinutes(state: AppState, today = isoDate()) {
+  return getTodaySessions(state, today).reduce((sum, session) => sum + session.minutes, 0);
 }
 
-export function getUnitsCompletedToday(state: AppState) {
-  const today = isoDate();
+export function getUnitsCompletedToday(state: AppState, today = isoDate()) {
   return state.calendarEntries
     .filter((entry) => entry.completedAt && isoDate(new Date(entry.completedAt)) === today)
     .reduce((sum, entry) => sum + (entry.unitAmount ?? 1), 0);
 }
 
-export function getStreakDays(state: AppState) {
+export function getStreakDays(state: AppState, today = isoDate()) {
   const sessionDays = new Set(state.sessions.map(sessionDateKey));
   let streak = 0;
-  const cursor = new Date();
+  const cursor = new Date(`${today}T00:00:00`);
 
   if (!sessionDays.has(isoDate(cursor))) {
     cursor.setDate(cursor.getDate() - 1);
@@ -271,11 +268,11 @@ export function getStreakDays(state: AppState) {
   return streak;
 }
 
-export function getFocusMomentum(state: AppState) {
-  const week = getWeeklyActivity(state.sessions);
+export function getFocusMomentum(state: AppState, today = isoDate()) {
+  const week = getWeeklyActivity(state.sessions, new Date(`${today}T00:00:00`));
   const total = week.reduce((sum, day) => sum + day.minutes, 0);
   const average = total / week.length;
-  const streak = getStreakDays(state);
+  const streak = getStreakDays(state, today);
 
   if (streak >= 5 && average >= 35) return "Surging";
   if (streak >= 5) return "Stable";

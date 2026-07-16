@@ -151,6 +151,10 @@ export interface SocialFeedPost {
   presetLabel: string;
   createdAt: string;
   isSelf?: boolean;
+  imageUrl?: string | null;
+  imageMimeType?: string | null;
+  imageExpiresAt?: string | null;
+  imageExpiredAt?: string | null;
   reactions: Record<string, number>;
   reacted?: Record<string, boolean>;
   reactedBy?: Record<string, string[]>;
@@ -235,6 +239,8 @@ export interface AppState {
   lastUnlockDate: string;
   speedrunnerToday: boolean;
   playedGamesAllTime: string[];
+  badgeCounts: Record<string, number>;
+  badgeCountDates: Record<string, string>;
   waterGlasses: number;
   waterDate: string;
   petRockPats: number;

@@ -6,3 +6,10 @@ compatibility_date = "2026-06-29"
 binding = "DB"
 database_name = "study-tracker-social"
 database_id = "5f4c597d-4347-41d7-96c6-73bf43c2254d"
+
+[[r2_buckets]]
+binding = "FEED_IMAGES"
+bucket_name = "study-tracker-feed-images"
+
+[triggers]
+crons = ["0 3 * * *"]

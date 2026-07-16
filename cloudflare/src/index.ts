@@ -1,5 +1,7 @@
 export interface Env {
   DB: D1Database;
+  FEED_IMAGES: R2Bucket;
+  R2_ALERT_WEBHOOK_URL?: string;
 }
 
 type LeaderboardPeriod = "daily" | "weekly" | "overall";
@@ -49,8 +51,18 @@ const MAX_DAILY_SESSIONS = 200;
 const MAX_ID_LENGTH = 80;
 const MAX_SECRET_LENGTH = 120;
 const MAX_COMMENT_LENGTH = 220;
+const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
+const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
+const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
+const R2_STORAGE_HARD_BYTES = 500 * 1024 * 1024;
+const R2_CLASS_A_WARNING_MONTHLY = 40_000;
+const R2_CLASS_A_HARD_MONTHLY = 50_000;
+const R2_CLASS_B_WARNING_MONTHLY = 200_000;
+const R2_CLASS_B_HARD_MONTHLY = 250_000;
+const R2_OWNER_FRIEND_CODE = "ZRWL-WKNF";
 const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
 const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"]);
+const feedImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -151,9 +163,10 @@ function friendPair(a: string, b: string) {
 async function verifyUser(env: Env, userId: string, deviceSecret: string) {
   userId = cleanUserId(userId);
   deviceSecret = cleanDeviceSecret(deviceSecret);
-  const user = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
+  const user = await env.DB.prepare("SELECT id, device_secret, friend_code AS friendCode FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string; friendCode: string }>();
   if (!user) throw new Response("User has not synced a profile yet.", { status: 404, headers: corsHeaders });
   if (user.device_secret !== deviceSecret) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
+  return user;
 }
 
 async function upsertUser(env: Env, payload: SyncPayload["user"]) {
@@ -184,6 +197,117 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
 
 function cleanText(value: unknown, max = 180) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function feedImageUrl(request: Request, key: string | null) {
+  if (!key) return null;
+  return `${new URL(request.url).origin}/feed/image/${encodeURIComponent(key)}`;
+}
+
+function imageExpiresAt(now = new Date()) {
+  return new Date(now.getTime() + FEED_IMAGE_TTL_MS).toISOString();
+}
+
+function usageMonth(date = new Date()) {
+  return date.toISOString().slice(0, 7);
+}
+
+async function getR2Usage(env: Env, month = usageMonth()) {
+  const [usage, storage] = await Promise.all([
+    env.DB.prepare("SELECT class_a_ops AS classAOps, class_b_ops AS classBOps FROM r2_usage_monthly WHERE month = ?")
+      .bind(month)
+      .first<{ classAOps: number; classBOps: number }>(),
+    env.DB.prepare("SELECT COALESCE(SUM(image_size_bytes), 0) AS storageBytes FROM feed_posts WHERE image_key IS NOT NULL")
+      .first<{ storageBytes: number }>(),
+  ]);
+  const storageBytes = Number(storage?.storageBytes ?? 0);
+  const classAOps = Number(usage?.classAOps ?? 0);
+  const classBOps = Number(usage?.classBOps ?? 0);
+  return {
+    month,
+    storageBytes,
+    classAOps,
+    classBOps,
+    warning: storageBytes >= R2_STORAGE_WARNING_BYTES || classAOps >= R2_CLASS_A_WARNING_MONTHLY || classBOps >= R2_CLASS_B_WARNING_MONTHLY,
+    paused: storageBytes >= R2_STORAGE_HARD_BYTES || classAOps >= R2_CLASS_A_HARD_MONTHLY || classBOps >= R2_CLASS_B_HARD_MONTHLY,
+    limits: {
+      storageWarningBytes: R2_STORAGE_WARNING_BYTES,
+      storageHardBytes: R2_STORAGE_HARD_BYTES,
+      classAWarningMonthly: R2_CLASS_A_WARNING_MONTHLY,
+      classAHardMonthly: R2_CLASS_A_HARD_MONTHLY,
+      classBWarningMonthly: R2_CLASS_B_WARNING_MONTHLY,
+      classBHardMonthly: R2_CLASS_B_HARD_MONTHLY,
+    },
+  };
+}
+
+async function incrementR2Usage(env: Env, values: { classA?: number; classB?: number }) {
+  const month = usageMonth();
+  await env.DB.prepare(`
+    INSERT INTO r2_usage_monthly (month, class_a_ops, class_b_ops, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(month) DO UPDATE SET
+      class_a_ops = class_a_ops + excluded.class_a_ops,
+      class_b_ops = class_b_ops + excluded.class_b_ops,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(month, values.classA ?? 0, values.classB ?? 0).run();
+}
+
+function r2AlertLevel(usage: Awaited<ReturnType<typeof getR2Usage>>) {
+  return usage.paused ? "paused" : usage.warning ? "warning" : "ok";
+}
+
+function formatUsageBytes(bytes: number) {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+async function maybeNotifyR2Usage(env: Env, currentUsage?: Awaited<ReturnType<typeof getR2Usage>>) {
+  if (!env.R2_ALERT_WEBHOOK_URL) return;
+  const usage = currentUsage ?? await getR2Usage(env);
+  const level = r2AlertLevel(usage);
+  const existing = await env.DB.prepare("SELECT level FROM r2_alert_state WHERE id = 'global'").first<{ level: string }>();
+  if ((existing?.level ?? "ok") === level) return;
+
+  await env.DB.prepare(`
+    INSERT INTO r2_alert_state (id, level, notified_at, updated_at)
+    VALUES ('global', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(id) DO UPDATE SET level = excluded.level, notified_at = excluded.notified_at, updated_at = CURRENT_TIMESTAMP
+  `).bind(level).run();
+
+  if (level === "ok") return;
+  const title = level === "paused" ? "Study Tracker R2 paused" : "Study Tracker R2 warning";
+  const body = `${title}: storage ${formatUsageBytes(usage.storageBytes)} / ${formatUsageBytes(usage.limits.storageHardBytes)}, writes ${usage.classAOps} / ${usage.limits.classAHardMonthly}, reads ${usage.classBOps} / ${usage.limits.classBHardMonthly}.`;
+  await fetch(env.R2_ALERT_WEBHOOK_URL, {
+    method: "POST",
+    headers: {
+      title,
+      priority: level === "paused" ? "urgent" : "high",
+      tags: level === "paused" ? "warning" : "eyes",
+    },
+    body,
+  }).catch(() => undefined);
+}
+
+async function ownerR2Usage(env: Env, friendCode: string) {
+  if (friendCode !== R2_OWNER_FRIEND_CODE) return undefined;
+  return getR2Usage(env);
+}
+
+async function assertR2ClassABudget(env: Env, additionalOps: number) {
+  const usage = await getR2Usage(env);
+  await maybeNotifyR2Usage(env, usage);
+  if (usage.classAOps + additionalOps > R2_CLASS_A_HARD_MONTHLY) {
+    throw new Response("Image uploads are paused to keep R2 usage below the free tier.", { status: 429, headers: corsHeaders });
+  }
+  return usage;
+}
+
+async function assertR2ClassBBudget(env: Env) {
+  const usage = await getR2Usage(env);
+  await maybeNotifyR2Usage(env, usage);
+  if (usage.classBOps + 1 > R2_CLASS_B_HARD_MONTHLY) {
+    throw new Response("Image loading is paused to keep R2 usage below the free tier.", { status: 429, headers: corsHeaders });
+  }
 }
 
 async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["feedPosts"]) {
@@ -304,7 +428,7 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   }));
 }
 
-async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
+async function getFeed(request: Request, env: Env, userId: string, scope: LeaderboardScope) {
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
   const viewerFriendIds = scope === "friends" ? friendIds : await getFriendIds(env, userId);
   const visibleReactorIds = new Set([userId, ...viewerFriendIds]);
@@ -314,7 +438,8 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   const params = scope === "friends" ? (allowedIds.length ? allowedIds : [userId]) : [];
   const posts = await env.DB.prepare(`
     SELECT p.id, p.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
-      p.type, p.subject, p.detail, p.note, p.icon, p.minutes, p.preset_label AS presetLabel, p.created_at AS createdAt
+      p.type, p.subject, p.detail, p.note, p.icon, p.minutes, p.preset_label AS presetLabel, p.created_at AS createdAt,
+      p.image_key AS imageKey, p.image_mime_type AS imageMimeType, p.image_expires_at AS imageExpiresAt, p.image_expired_at AS imageExpiredAt
     FROM feed_posts p
     JOIN users u ON u.id = p.user_id
     WHERE ${clauses.join(" AND ")}
@@ -334,6 +459,10 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     minutes: number;
     presetLabel: string;
     createdAt: string;
+    imageKey: string | null;
+    imageMimeType: string | null;
+    imageExpiresAt: string | null;
+    imageExpiredAt: string | null;
   }>();
 
   const ids = posts.results.map((post) => post.id);
@@ -417,6 +546,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
     avatarJson: undefined,
     minutes: Number(post.minutes),
     isSelf: post.userId === userId,
+    imageUrl: feedImageUrl(request, post.imageKey),
     reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
     reacted: reacted.get(post.id) ?? {},
     reactedBy: reactedBy.get(post.id) ?? {},
@@ -424,7 +554,7 @@ async function getFeed(env: Env, userId: string, scope: LeaderboardScope) {
   }));
 }
 
-async function getSocialSnapshot(env: Env, userId: string) {
+async function getSocialSnapshot(request: Request, env: Env, userId: string) {
   const friends = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
     FROM friendships f
@@ -472,8 +602,8 @@ async function getSocialSnapshot(env: Env, userId: string) {
     },
   };
   const cachedFeeds = {
-    global: await getFeed(env, userId, "global"),
-    friends: await getFeed(env, userId, "friends"),
+    global: await getFeed(request, env, userId, "global"),
+    friends: await getFeed(request, env, userId, "friends"),
   };
 
   return {
@@ -510,7 +640,7 @@ async function handleSync(request: Request, env: Env) {
   const userId = cleanUserId(payload.user.userId);
   await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
   await upsertFeedPosts(env, userId, payload.feedPosts);
-  return json(await getSocialSnapshot(env, userId));
+  return json(await getSocialSnapshot(request, env, userId));
 }
 
 async function handleFeed(request: Request, env: Env) {
@@ -518,9 +648,120 @@ async function handleFeed(request: Request, env: Env) {
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const scope = payload.scope === "friends" ? "friends" : "global";
-  await verifyUser(env, userId, deviceSecret);
+  const viewer = await verifyUser(env, userId, deviceSecret);
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
-  return json({ feed: await getFeed(env, userId, scope) });
+  const usage = await getR2Usage(env);
+  await maybeNotifyR2Usage(env, usage);
+  return json({ feed: await getFeed(request, env, userId, scope), r2Usage: viewer.friendCode === R2_OWNER_FRIEND_CODE ? usage : undefined });
+}
+
+async function getOwnedPostImage(env: Env, userId: string, postId: string) {
+  const row = await env.DB.prepare("SELECT user_id AS userId, image_key AS imageKey, image_size_bytes AS imageSizeBytes FROM feed_posts WHERE id = ?")
+    .bind(postId)
+    .first<{ userId: string; imageKey: string | null; imageSizeBytes: number }>();
+  if (!row) throw new Response("Feed post not found.", { status: 404, headers: corsHeaders });
+  if (row.userId !== userId) throw new Response("You can only edit your own post image.", { status: 403, headers: corsHeaders });
+  return row;
+}
+
+async function handleFeedImageUpload(request: Request, env: Env) {
+  const form = await request.formData();
+  const userId = String(form.get("userId") ?? "").trim();
+  const deviceSecret = String(form.get("deviceSecret") ?? "");
+  const postId = cleanText(form.get("postId"), 80);
+  const owner = await verifyUser(env, userId, deviceSecret);
+
+  const existing = await getOwnedPostImage(env, userId, postId);
+  const image = form.get("image");
+  if (!(image instanceof File)) return text("Missing image.", 400);
+  if (!feedImageTypes.has(image.type)) return text("Use PNG, JPEG, WebP, or GIF images.", 400);
+  if (image.size > MAX_FEED_IMAGE_BYTES) return text("Image is too large. Use an image under 5 MB.", 413);
+
+  const classAOps = existing.imageKey ? 2 : 1;
+  const usage = await assertR2ClassABudget(env, classAOps);
+  const previousBytes = Number(existing.imageSizeBytes ?? 0);
+  const nextStorageBytes = usage.storageBytes - previousBytes + image.size;
+  if (nextStorageBytes > R2_STORAGE_HARD_BYTES) {
+    return text("Image uploads are paused to keep R2 storage below the free tier.", 429);
+  }
+
+  const extension = image.type === "image/png" ? "png" : image.type === "image/webp" ? "webp" : image.type === "image/gif" ? "gif" : "jpg";
+  const key = `feed-posts/${postId}/${crypto.randomUUID()}.${extension}`;
+  await env.FEED_IMAGES.put(key, image.stream(), {
+    httpMetadata: { contentType: image.type },
+  });
+  if (existing.imageKey) await env.FEED_IMAGES.delete(existing.imageKey).catch(() => undefined);
+  await incrementR2Usage(env, { classA: classAOps });
+
+  const expiresAt = imageExpiresAt();
+  await env.DB.prepare(`
+    UPDATE feed_posts
+    SET image_key = ?, image_mime_type = ?, image_expires_at = ?, image_expired_at = NULL, image_size_bytes = ?
+    WHERE id = ? AND user_id = ?
+  `).bind(key, image.type, expiresAt, image.size, postId, userId).run();
+  await env.DB.prepare(`
+    INSERT INTO r2_usage_monthly (month, storage_bytes, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(month) DO UPDATE SET storage_bytes = ?, updated_at = CURRENT_TIMESTAMP
+  `).bind(usageMonth(), nextStorageBytes, nextStorageBytes).run();
+
+  const nextUsage = await getR2Usage(env);
+  await maybeNotifyR2Usage(env, nextUsage);
+  return json({
+    ok: true,
+    imageKey: key,
+    imageMimeType: image.type,
+    imageExpiresAt: expiresAt,
+    imageExpiredAt: null,
+    imageUrl: feedImageUrl(request, key),
+    r2Usage: owner.friendCode === R2_OWNER_FRIEND_CODE ? nextUsage : undefined,
+  });
+}
+
+async function handleFeedImageDelete(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  const owner = await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const postId = cleanText(payload.postId, 80);
+  const existing = await getOwnedPostImage(env, userId, postId);
+  if (existing.imageKey) await assertR2ClassABudget(env, 1);
+  if (existing.imageKey) await env.FEED_IMAGES.delete(existing.imageKey).catch(() => undefined);
+  if (existing.imageKey) await incrementR2Usage(env, { classA: 1 });
+  const usage = await getR2Usage(env);
+  const nextStorageBytes = Math.max(0, usage.storageBytes - Number(existing.imageSizeBytes ?? 0));
+  await env.DB.prepare(`
+    UPDATE feed_posts
+    SET image_key = NULL, image_mime_type = NULL, image_expires_at = NULL, image_expired_at = NULL, image_size_bytes = 0
+    WHERE id = ? AND user_id = ?
+  `).bind(postId, userId).run();
+  await env.DB.prepare(`
+    INSERT INTO r2_usage_monthly (month, storage_bytes, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(month) DO UPDATE SET storage_bytes = ?, updated_at = CURRENT_TIMESTAMP
+  `).bind(usageMonth(), nextStorageBytes, nextStorageBytes).run();
+  const nextUsage = await getR2Usage(env);
+  await maybeNotifyR2Usage(env, nextUsage);
+  return json({ ok: true, r2Usage: owner.friendCode === R2_OWNER_FRIEND_CODE ? nextUsage : undefined });
+}
+
+async function handleFeedImageGet(request: Request, env: Env, key: string) {
+  await assertR2ClassBBudget(env);
+  const post = await env.DB.prepare("SELECT image_mime_type AS imageMimeType FROM feed_posts WHERE image_key = ? AND image_expires_at > ?")
+    .bind(key, new Date().toISOString())
+    .first<{ imageMimeType: string | null }>();
+  if (!post) return text("Image not found.", 404);
+
+  const object = await env.FEED_IMAGES.get(key);
+  if (!object) return text("Image not found.", 404);
+  await incrementR2Usage(env, { classB: 1 });
+  await maybeNotifyR2Usage(env);
+  return new Response(object.body, {
+    headers: {
+      ...corsHeaders,
+      "content-type": post.imageMimeType || object.httpMetadata?.contentType || "application/octet-stream",
+      "cache-control": "public, max-age=3600",
+    },
+  });
 }
 
 async function handleFeedReaction(request: Request, env: Env) {
@@ -565,10 +806,23 @@ async function handleFeedDelete(request: Request, env: Env) {
   await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
 
   const postId = cleanText(payload.postId, 80);
-  const existing = await env.DB.prepare("SELECT user_id AS userId FROM feed_posts WHERE id = ?").bind(postId).first<{ userId: string }>();
+  const existing = await env.DB.prepare("SELECT user_id AS userId, image_key AS imageKey, image_size_bytes AS imageSizeBytes FROM feed_posts WHERE id = ?").bind(postId).first<{ userId: string; imageKey: string | null; imageSizeBytes: number }>();
   if (!existing) return text("Feed post not found.", 404);
   if (existing.userId !== userId) return text("You can only delete your own posts.", 403);
 
+  if (existing.imageKey) await assertR2ClassABudget(env, 1);
+  if (existing.imageKey) await env.FEED_IMAGES.delete(existing.imageKey).catch(() => undefined);
+  if (existing.imageKey) {
+    await incrementR2Usage(env, { classA: 1 });
+    const usage = await getR2Usage(env);
+    const nextStorageBytes = Math.max(0, usage.storageBytes - Number(existing.imageSizeBytes ?? 0));
+    await env.DB.prepare(`
+      INSERT INTO r2_usage_monthly (month, storage_bytes, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(month) DO UPDATE SET storage_bytes = ?, updated_at = CURRENT_TIMESTAMP
+    `).bind(usageMonth(), nextStorageBytes, nextStorageBytes).run();
+    await maybeNotifyR2Usage(env);
+  }
   await env.DB.prepare("DELETE FROM feed_posts WHERE id = ? AND user_id = ?").bind(postId, userId).run();
   return json({ ok: true });
 }
@@ -635,14 +889,14 @@ async function handleFriendRequest(request: Request, env: Env) {
       env.DB.prepare("UPDATE friend_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP WHERE id = ?").bind(reciprocalRequest.id),
       env.DB.prepare("INSERT OR IGNORE INTO friendships (user_low, user_high) VALUES (?, ?)").bind(userLow, userHigh),
     ]);
-    return json(await getSocialSnapshot(env, fromUserId));
+    return json(await getSocialSnapshot(request, env, fromUserId));
   }
 
   const id = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO friend_requests (id, from_user_id, to_user_id, status) VALUES (?, ?, ?, 'pending') ON CONFLICT(from_user_id, to_user_id) DO UPDATE SET status = 'pending', responded_at = NULL")
     .bind(id, fromUserId, target.id)
     .run();
-  return json(await getSocialSnapshot(env, fromUserId));
+  return json(await getSocialSnapshot(request, env, fromUserId));
 }
 
 async function handlePresence(request: Request, env: Env) {
@@ -659,7 +913,7 @@ async function handleFriendStatus(request: Request, env: Env) {
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   await verifyUser(env, userId, deviceSecret);
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
-  return json(await getSocialSnapshot(env, userId));
+  return json(await getSocialSnapshot(request, env, userId));
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
@@ -724,7 +978,7 @@ async function handleFriendResponse(request: Request, env: Env) {
     await env.DB.prepare("INSERT OR IGNORE INTO friendships (user_low, user_high) VALUES (?, ?)").bind(userLow, userHigh).run();
   }
 
-  return json(await getSocialSnapshot(env, userId));
+  return json(await getSocialSnapshot(request, env, userId));
 }
 
 export default {
@@ -734,12 +988,15 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
+      if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);
       if (request.method === "POST" && url.pathname === "/feed/update") return await handleFeedUpdate(request, env);
       if (request.method === "POST" && url.pathname === "/feed/delete") return await handleFeedDelete(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/image") return await handleFeedImageUpload(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/image/delete") return await handleFeedImageDelete(request, env);
       if (request.method === "POST" && url.pathname === "/friends/request") return await handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return await handleFriendResponse(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
@@ -750,6 +1007,41 @@ export default {
       if (error instanceof Response) return error;
       console.error(error);
       return text(error instanceof Error ? error.message : "Unexpected server error.", 500);
+    }
+  },
+  async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    const now = new Date().toISOString();
+    const usage = await getR2Usage(env);
+    const remainingClassA = Math.max(0, R2_CLASS_A_HARD_MONTHLY - usage.classAOps);
+    if (!remainingClassA) return;
+    const rows = await env.DB.prepare(`
+      SELECT id, image_key AS imageKey, image_size_bytes AS imageSizeBytes
+      FROM feed_posts
+      WHERE image_key IS NOT NULL AND image_expires_at IS NOT NULL AND image_expires_at <= ?
+      LIMIT 100
+    `).bind(now).all<{ id: string; imageKey: string; imageSizeBytes: number }>();
+
+    let deleted = 0;
+    let releasedBytes = 0;
+    for (const row of rows.results.slice(0, remainingClassA)) {
+      await env.FEED_IMAGES.delete(row.imageKey).catch(() => undefined);
+      await incrementR2Usage(env, { classA: 1 });
+      deleted += 1;
+      releasedBytes += Number(row.imageSizeBytes ?? 0);
+      await env.DB.prepare(`
+        UPDATE feed_posts
+        SET image_key = NULL, image_mime_type = NULL, image_expires_at = NULL, image_expired_at = ?, image_size_bytes = 0
+        WHERE id = ? AND image_key = ?
+      `).bind(now, row.id, row.imageKey).run();
+    }
+    if (deleted) {
+      const nextStorageBytes = Math.max(0, usage.storageBytes - releasedBytes);
+      await env.DB.prepare(`
+        INSERT INTO r2_usage_monthly (month, storage_bytes, updated_at)
+        VALUES (?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(month) DO UPDATE SET storage_bytes = ?, updated_at = CURRENT_TIMESTAMP
+      `).bind(usageMonth(), nextStorageBytes, nextStorageBytes).run();
+      await maybeNotifyR2Usage(env);
     }
   },
 };

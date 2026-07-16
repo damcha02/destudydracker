@@ -21,6 +21,24 @@ interface SocialStatusResponse {
 
 interface SocialFeedResponse {
   feed: SocialFeedPost[];
+  r2Usage?: R2UsageStatus;
+}
+
+export interface R2UsageStatus {
+  month: string;
+  storageBytes: number;
+  classAOps: number;
+  classBOps: number;
+  warning: boolean;
+  paused: boolean;
+  limits: {
+    storageWarningBytes: number;
+    storageHardBytes: number;
+    classAWarningMonthly: number;
+    classAHardMonthly: number;
+    classBWarningMonthly: number;
+    classBHardMonthly: number;
+  };
 }
 
 function sessionDateKey(session: StudySession) {
@@ -144,6 +162,21 @@ async function requestSocialApi<T>(path: string, init: RequestInit): Promise<T> 
   return response.json() as Promise<T>;
 }
 
+async function requestSocialForm<T>(path: string, form: FormData): Promise<T> {
+  assertSocialApiConfigured();
+  const response = await fetch(`${SOCIAL_API_URL}${path}`, {
+    method: "POST",
+    body: form,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Social sync failed with HTTP ${response.status}.`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 export async function syncSocialState(state: AppState) {
   const payload = {
     user: {
@@ -201,6 +234,26 @@ export async function updateFeedPost(social: SocialState, postId: string, note: 
 
 export async function deleteFeedPost(social: SocialState, postId: string) {
   return requestSocialApi<{ ok: boolean }>("/feed/delete", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+    }),
+  });
+}
+
+export async function uploadFeedPostImage(social: SocialState, postId: string, image: Blob) {
+  const form = new FormData();
+  form.set("userId", social.userId);
+  form.set("deviceSecret", social.deviceSecret);
+  form.set("postId", postId);
+  form.set("image", image, "feed-image.webp");
+  return requestSocialForm<{ ok: boolean; imageUrl: string; imageMimeType: string; imageExpiresAt: string; imageExpiredAt: null; r2Usage?: R2UsageStatus }>("/feed/image", form);
+}
+
+export async function deleteFeedPostImage(social: SocialState, postId: string) {
+  return requestSocialApi<{ ok: boolean; r2Usage?: R2UsageStatus }>("/feed/image/delete", {
     method: "POST",
     body: JSON.stringify({
       userId: social.userId,

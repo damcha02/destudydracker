@@ -137,6 +137,8 @@ export const defaultState: AppState = {
   lastUnlockDate: "",
   speedrunnerToday: false,
   playedGamesAllTime: [],
+  badgeCounts: {},
+  badgeCountDates: {},
   waterGlasses: 0,
   waterDate: "",
   petRockPats: 0,
@@ -425,6 +427,8 @@ export function loadAppState(): AppState {
       timer: timerRecovery.timer,
       sessions: timerRecovery.sessions,
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],
+      badgeCounts: parsed.badgeCounts && typeof parsed.badgeCounts === "object" ? parsed.badgeCounts as Record<string, number> : {},
+      badgeCountDates: parsed.badgeCountDates && typeof parsed.badgeCountDates === "object" ? parsed.badgeCountDates as Record<string, string> : {},
     };
   } catch {
     return defaultState;

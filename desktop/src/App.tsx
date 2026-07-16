@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
+import type { CSSProperties, ChangeEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getVersion } from "@tauri-apps/api/app";
@@ -36,14 +36,23 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, deleteFeedPost, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost } from "./lib/social";
-import type { PlayerStatsResponse } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost, uploadFeedPostImage } from "./lib/social";
+import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
 type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode" | "avatar"> & { lastSeenAt?: string | null };
+type ProfileBadge = {
+  id: string;
+  icon: string;
+  name: string;
+  how: string;
+  earned: boolean;
+  daily?: boolean;
+  count?: number;
+};
 
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
@@ -1505,6 +1514,60 @@ function pickFeedFallbackNote(seed: string) {
   return feedFallbackNotes[total % feedFallbackNotes.length];
 }
 
+const FEED_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+const FEED_IMAGE_MAX_DIMENSION = 1280;
+const FEED_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const R2_OWNER_FRIEND_CODE = "ZRWL-WKNF";
+
+interface PreparedFeedImage {
+  blob: Blob;
+  previewUrl: string;
+  name: string;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not prepare image.")), type, quality);
+  });
+}
+
+async function prepareFeedImage(file: File): Promise<PreparedFeedImage> {
+  if (!FEED_IMAGE_TYPES.has(file.type)) throw new Error("Use PNG, JPEG, WebP, or GIF images.");
+  if (file.size > FEED_IMAGE_MAX_BYTES) throw new Error("Image is too large. Use an image under 5 MB.");
+  if (file.type === "image/gif") {
+    return { blob: file, previewUrl: URL.createObjectURL(file), name: file.name };
+  }
+
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, FEED_IMAGE_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Could not prepare image.");
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await canvasToBlob(canvas, "image/webp", 0.82);
+    if (blob.size > FEED_IMAGE_MAX_BYTES) throw new Error("Image is still too large after compression.");
+    return { blob, previewUrl: URL.createObjectURL(blob), name: file.name };
+  } finally {
+    bitmap.close();
+  }
+}
+
+function formatBytes(value: number) {
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  if (value >= 1024 * 1024) return `${Math.round(value / (1024 * 1024))} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function formatCompactNumber(value: number) {
+  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
 function buildFeedPostFromSession(session: StudySession, state: AppState, courseName: string, note?: string): SocialFeedPost {
   const subject = courseName || session.goal || (session.kind === "exam" ? "Exam session" : "Study session");
   const detail = `${formatMinutes(session.minutes)} · ${session.presetLabel || (session.kind === "exam" ? "Exam" : "Focus")}`;
@@ -1990,6 +2053,9 @@ function App() {
   const [socialSubtab, setSocialSubtab] = useState<SocialSubtab>("feed");
   const [feedScope, setFeedScope] = useState<SocialFeedScope>("global");
   const [feedNoteDraft, setFeedNoteDraft] = useState("");
+  const [feedImageDraft, setFeedImageDraft] = useState<PreparedFeedImage | null>(null);
+  const [r2UsageStatus, setR2UsageStatus] = useState<R2UsageStatus | null>(null);
+  const [failedFeedImages, setFailedFeedImages] = useState<Set<string>>(() => new Set());
   const [feedLoading, setFeedLoading] = useState(false);
   const [expandedFeedComments, setExpandedFeedComments] = useState<Set<string>>(() => new Set());
   const [feedCommentDrafts, setFeedCommentDrafts] = useState<Record<string, string>>({});
@@ -2008,7 +2074,11 @@ function App() {
   const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
   const [editingFeedPostId, setEditingFeedPostId] = useState<string | null>(null);
   const [editingFeedPostNote, setEditingFeedPostNote] = useState("");
+  const [editingFeedPostImage, setEditingFeedPostImage] = useState<PreparedFeedImage | null>(null);
+  const [editingFeedPostRemoveImage, setEditingFeedPostRemoveImage] = useState(false);
   const [feedPostSaving, setFeedPostSaving] = useState(false);
+  const [badgesOpen, setBadgesOpen] = useState(false);
+  const canViewR2Usage = state.social.friendCode === R2_OWNER_FRIEND_CODE;
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -2033,6 +2103,14 @@ function App() {
       flushState();
     };
   }, []);
+
+  useEffect(() => () => {
+    if (feedImageDraft) URL.revokeObjectURL(feedImageDraft.previewUrl);
+  }, [feedImageDraft]);
+
+  useEffect(() => () => {
+    if (editingFeedPostImage) URL.revokeObjectURL(editingFeedPostImage.previewUrl);
+  }, [editingFeedPostImage]);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.backgroundEffect = state.settings.backgroundEffect === false ? "off" : "on";
@@ -2517,7 +2595,7 @@ function App() {
   }, [state.tasks]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
 
-  const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions), [state.sessions]);
+  const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions, new Date(`${calendarToday}T00:00:00`)), [state.sessions, calendarToday]);
   const upcomingExams = useMemo(() => getUpcomingExams({ exams: state.exams } as AppState), [state.exams]);
   const overallHealth = useMemo(() => getOverallHealth({ tasks: state.tasks, exams: state.exams } as AppState), [state.exams, state.tasks]);
   const notePreview = useMemo(() => buildDailyNoteMarkdown({ courses: state.courses, sessions: state.sessions } as AppState, vaultNoteDate), [state.courses, state.sessions, vaultNoteDate]);
@@ -2533,12 +2611,13 @@ function App() {
   const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
-  const todayMinutes = useMemo(() => getTodayMinutes({ sessions: state.sessions } as AppState), [state.sessions]);
-  const unitsCompletedToday = useMemo(() => getUnitsCompletedToday({ calendarEntries: state.calendarEntries } as AppState), [state.calendarEntries]);
-  const streakDays = useMemo(() => getStreakDays({ sessions: state.sessions } as AppState), [state.sessions]);
-  const focusMomentum = useMemo(() => getFocusMomentum({ sessions: state.sessions } as AppState), [state.sessions]);
+  const gardenStage = Math.max(0, [0, 30, 90, 210, 420, 720].filter((threshold) => weeklyTotalMinutes >= threshold).length - 1);
+  const todayMinutes = useMemo(() => getTodayMinutes({ sessions: state.sessions } as AppState, calendarToday), [state.sessions, calendarToday]);
+  const unitsCompletedToday = useMemo(() => getUnitsCompletedToday({ calendarEntries: state.calendarEntries } as AppState, calendarToday), [state.calendarEntries, calendarToday]);
+  const streakDays = useMemo(() => getStreakDays({ sessions: state.sessions } as AppState, calendarToday), [state.sessions, calendarToday]);
+  const focusMomentum = useMemo(() => getFocusMomentum({ sessions: state.sessions } as AppState, calendarToday), [state.sessions, calendarToday]);
   const studyBreakTokens = Math.min(5, Math.floor(todayMinutes / 45));
-  const todayStr = isoDate();
+  const todayStr = calendarToday;
   const effectiveUnlocked = state.unlockedGamesDate === todayStr ? state.unlockedGames : [];
   const canUnlockMore = effectiveUnlocked.length < studyBreakTokens;
   const minsUntilNext = studyBreakTokens < 5 ? Math.max(1, 45 - (todayMinutes % 45)) : 0;
@@ -2552,7 +2631,8 @@ function App() {
   const badgeOnFire = state.unlockStreak >= 3;
   const badgeEarlyBird = effectivePlayed.some(p => new Date(p.playedAt).getHours() < 9);
   const badgeNightOwl = effectivePlayed.some(p => new Date(p.playedAt).getHours() >= 22);
-  const badgeSpeedrunner = state.speedrunnerToday;
+  const badgeSpeedrunnerToday = state.speedrunnerToday && state.lastUnlockDate === todayStr;
+  const badgeSpeedrunner = badgeSpeedrunnerToday || (state.badgeCounts.speedrunner ?? 0) > 0;
   const badgeExplorer = state.playedGamesAllTime.length >= 5;
   const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === 5;
   const badgeVeteran = state.totalUnlocks >= 10;
@@ -2599,17 +2679,45 @@ function App() {
     : { plant: "", label: "Pet Rock" };
   const streakEmoji = state.unlockStreak >= 7 ? "\u{1F525}\u{1F525}\u{1F525}" : state.unlockStreak >= 3 ? "\u{1F525}\u{1F525}" : state.unlockStreak >= 1 ? "\u{1F525}" : "";
   const badges = [
-    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse },
-    { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak },
-    { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire },
-    { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird },
-    { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl },
-    { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner },
-    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer },
-    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist },
-    { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran },
-    { id: "rock-master", icon: "\u{1F31F}", name: "Rock Master", earned: badgeRockMaster },
+    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: "Unlock all 5 break games in one day." },
+    { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak, how: "Unlock any Break Room game once." },
+    { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire, how: "Unlock at least one break game on 3 consecutive days." },
+    { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird || (state.badgeCounts["early-bird"] ?? 0) > 0, daily: true, how: "Play an unlocked break game before 9:00 AM." },
+    { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl || (state.badgeCounts["night-owl"] ?? 0) > 0, daily: true, how: "Play an unlocked break game at or after 10:00 PM." },
+    { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner, daily: true, how: "Unlock your first break after earning a 45-minute break token from one single study or exam session." },
+    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
+    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
+    { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
+    { id: "rock-master", icon: "\u{1F31F}", name: "Rock Master", earned: badgeRockMaster, how: "Pat the pet rock 1000 times." },
   ];
+
+  useEffect(() => {
+    const dailyHits = [
+      ["full-house", badgeFullHouse],
+      ["early-bird", badgeEarlyBird],
+      ["night-owl", badgeNightOwl],
+      ["speedrunner", badgeSpeedrunnerToday],
+      ["perfectionist", badgePerfectionist],
+    ] as const;
+
+    const earnedToday = dailyHits.filter(([id, earned]) => earned && state.badgeCountDates[id] !== todayStr);
+    if (!earnedToday.length) return;
+
+    setState((current) => {
+      const nextCounts = { ...current.badgeCounts };
+      const nextDates = { ...current.badgeCountDates };
+      let changed = false;
+
+      earnedToday.forEach(([id]) => {
+        if (nextDates[id] === todayStr) return;
+        nextCounts[id] = (nextCounts[id] ?? 0) + 1;
+        nextDates[id] = todayStr;
+        changed = true;
+      });
+
+      return changed ? { ...current, badgeCounts: nextCounts, badgeCountDates: nextDates } : current;
+    });
+  }, [badgeEarlyBird, badgeFullHouse, badgeNightOwl, badgePerfectionist, badgeSpeedrunnerToday, state.badgeCountDates, todayStr]);
   const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
@@ -2805,6 +2913,48 @@ function App() {
       visibleMinutes,
     };
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
+
+  const profileBadgeGroups: Array<{ category: string; source: string; badges: ProfileBadge[] }> = [
+    {
+      category: "Break Room",
+      source: "Unlock and play break games from the Break Room.",
+      badges: badges.map((badge) => ({
+        ...badge,
+        count: badge.daily ? state.badgeCounts[badge.id] ?? 0 : undefined,
+      })),
+    },
+    {
+      category: "Focus Fossil",
+      source: "Earn these by building all-time study hours.",
+      badges: focusMilestones.map((milestone) => ({
+        id: `fossil-${milestone.hours}`,
+        icon: "◆",
+        name: milestone.label,
+        how: milestone.desc,
+        earned: totalAllTimeMinutes >= milestone.hours * 60,
+      })),
+    },
+    {
+      category: "Garden of Knowledge",
+      source: "Earn these by keeping your study garden alive.",
+      badges: [
+        {
+          id: "garden-streak-bloom",
+          icon: "✺",
+          name: "Streak Bloom",
+          how: "Maintain a 5-day study streak.",
+          earned: streakDays >= 5,
+        },
+        {
+          id: "garden-wise-tree",
+          icon: "♣",
+          name: "The Wise Tree",
+          how: "Reach 720 minutes in the last 7 days, or maintain a 10-day study streak.",
+          earned: gardenStage >= 5 || streakDays >= 10,
+        },
+      ],
+    },
+  ];
 
   function setActiveTab(activeTab: TabKey) {
     if (activeTab === "friends") setHasUnreadSocial(false);
@@ -3006,7 +3156,78 @@ function App() {
     if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
   }
 
-  function postLatestSessionToFeed(event: FormEvent<HTMLFormElement>) {
+  function applyFeedPostImage(postId: string, image: Pick<SocialFeedPost, "imageUrl" | "imageMimeType" | "imageExpiresAt" | "imageExpiredAt">) {
+    const updatePost = (post: SocialFeedPost) => post.id === postId ? { ...post, ...image } : post;
+    setState((current) => ({
+      ...current,
+      social: {
+        ...current.social,
+        cachedFeeds: {
+          global: current.social.cachedFeeds.global.map(updatePost),
+          friends: current.social.cachedFeeds.friends.map(updatePost),
+        },
+        pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost),
+      },
+    }));
+    setFailedFeedImages((current) => {
+      if (!current.has(postId)) return current;
+      const next = new Set(current);
+      next.delete(postId);
+      return next;
+    });
+  }
+
+  async function uploadImageForFeedPost(postId: string, image: PreparedFeedImage) {
+    const result = await uploadFeedPostImage(state.social, postId, image.blob);
+    if (canViewR2Usage && result.r2Usage) setR2UsageStatus(result.r2Usage);
+    applyFeedPostImage(postId, {
+      imageUrl: result.imageUrl,
+      imageMimeType: result.imageMimeType,
+      imageExpiresAt: result.imageExpiresAt,
+      imageExpiredAt: result.imageExpiredAt,
+    });
+  }
+
+  async function handleFeedImageDraftChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (canViewR2Usage && r2UsageStatus?.paused) {
+      setMessage("Image uploads are paused to stay below the free R2 limits.");
+      return;
+    }
+    try {
+      const image = await prepareFeedImage(file);
+      setFeedImageDraft((current) => {
+        if (current) URL.revokeObjectURL(current.previewUrl);
+        return image;
+      });
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error, "Could not prepare image."));
+    }
+  }
+
+  async function handleEditingFeedPostImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (canViewR2Usage && r2UsageStatus?.paused) {
+      setMessage("Image uploads are paused to stay below the free R2 limits.");
+      return;
+    }
+    try {
+      const image = await prepareFeedImage(file);
+      setEditingFeedPostImage((current) => {
+        if (current) URL.revokeObjectURL(current.previewUrl);
+        return image;
+      });
+      setEditingFeedPostRemoveImage(false);
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error, "Could not prepare image."));
+    }
+  }
+
+  async function postLatestSessionToFeed(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!latestFeedSession) {
       setMessage("Finish a study session before posting to the feed.");
@@ -3017,9 +3238,33 @@ function App() {
       return;
     }
 
-    setState((current) => queueFeedPost(current, latestFeedSession, getSessionCourseName(current, latestFeedSession), feedNoteDraft));
+    let nextState: AppState | null = null;
+    setState((current) => {
+      nextState = queueFeedPost(current, latestFeedSession, getSessionCourseName(current, latestFeedSession), feedNoteDraft);
+      return nextState;
+    });
+    const image = feedImageDraft;
     setFeedNoteDraft("");
-    setMessage(socialConfigured ? "Post queued. Sync to publish it to the feed." : "Post queued locally. Configure sync to publish it.");
+    setFeedImageDraft(null);
+    if (!image) {
+      setMessage(socialConfigured ? "Post queued. Sync to publish it to the feed." : "Post queued locally. Configure sync to publish it.");
+      return;
+    }
+    if (!socialConfigured || !nextState) {
+      setMessage("Post queued locally. Configure sync before adding images.");
+      return;
+    }
+    setMessage("Publishing post image...");
+    await runSocialSync({ silent: true, stateOverride: nextState });
+    try {
+      await uploadImageForFeedPost(latestFeedSession.id, image);
+      setMessage("Post published with image.");
+    } catch (error: unknown) {
+      console.warn("Could not upload feed image.", error);
+      setMessage(getErrorMessage(error, "Post queued, but image upload failed."));
+    } finally {
+      URL.revokeObjectURL(image.previewUrl);
+    }
   }
 
   function toggleProfilePrivacy() {
@@ -3193,11 +3438,21 @@ function App() {
   function startEditingFeedPost(post: SocialFeedPost) {
     setEditingFeedPostId(post.id);
     setEditingFeedPostNote(post.note ?? "");
+    setEditingFeedPostImage((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+    setEditingFeedPostRemoveImage(false);
   }
 
   function cancelEditingFeedPost() {
     setEditingFeedPostId(null);
     setEditingFeedPostNote("");
+    setEditingFeedPostImage((current) => {
+      if (current) URL.revokeObjectURL(current.previewUrl);
+      return null;
+    });
+    setEditingFeedPostRemoveImage(false);
   }
 
   async function saveFeedPostEdit(postId: string) {
@@ -3207,16 +3462,22 @@ function App() {
     try {
       if (socialConfigured && !state.social.pendingFeedPosts.some((post) => post.id === postId)) {
         await updateFeedPost(state.social, postId, note);
+        if (editingFeedPostImage) {
+          await uploadImageForFeedPost(postId, editingFeedPostImage);
+        } else if (editingFeedPostRemoveImage) {
+          const result = await deleteFeedPostImage(state.social, postId);
+          if (canViewR2Usage && result.r2Usage) setR2UsageStatus(result.r2Usage);
+        }
       }
       setState((current) => ({
         ...current,
         social: {
           ...current.social,
           cachedFeeds: {
-            global: current.social.cachedFeeds.global.map(updatePost),
-            friends: current.social.cachedFeeds.friends.map(updatePost),
+            global: current.social.cachedFeeds.global.map(updatePost).map((post) => post.id === postId && editingFeedPostRemoveImage ? { ...post, imageUrl: null, imageMimeType: null, imageExpiresAt: null, imageExpiredAt: null } : post),
+            friends: current.social.cachedFeeds.friends.map(updatePost).map((post) => post.id === postId && editingFeedPostRemoveImage ? { ...post, imageUrl: null, imageMimeType: null, imageExpiresAt: null, imageExpiredAt: null } : post),
           },
-          pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost),
+          pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost).map((post) => post.id === postId && editingFeedPostRemoveImage ? { ...post, imageUrl: null, imageMimeType: null, imageExpiresAt: null, imageExpiredAt: null } : post),
         },
       }));
       cancelEditingFeedPost();
@@ -3449,6 +3710,14 @@ function App() {
     setFeedLoading(true);
     try {
       const result = await getSocialFeed(state.social, feedScope);
+      if (canViewR2Usage && result.r2Usage) setR2UsageStatus(result.r2Usage);
+      else if (!canViewR2Usage) setR2UsageStatus(null);
+      setFailedFeedImages((current) => {
+        if (!current.size) return current;
+        const liveImageIds = new Set(result.feed.filter((post) => post.imageUrl).map((post) => post.id));
+        const next = new Set([...current].filter((id) => liveImageIds.has(id)));
+        return next.size === current.size ? current : next;
+      });
       setState((current) => ({
         ...current,
         social: {
@@ -4009,7 +4278,11 @@ function App() {
     setState((current) => {
       const freshUnlocked = current.unlockedGamesDate === t ? current.unlockedGames : [];
       const isFirstUnlockToday = freshUnlocked.length === 0;
-      const todayMin = getTodayMinutes(current);
+      const alreadySpeedrunnerToday = current.lastUnlockDate === t && current.speedrunnerToday;
+      const earnedFirstTokenInOneSession = current.sessions.some((session) => {
+        if (session.kind !== "study" && session.kind !== "exam") return false;
+        return isoDate(new Date(session.endedAt)) === t && session.minutes >= 45;
+      });
 
       const newStreak = (() => {
         if (!current.lastUnlockDate) return 1;
@@ -4026,7 +4299,7 @@ function App() {
         unlockedGamesDate: t,
         unlockedGames: [...freshUnlocked, name],
         totalUnlocks: current.totalUnlocks + 1,
-        speedrunnerToday: current.speedrunnerToday || (isFirstUnlockToday && todayMin < 45),
+        speedrunnerToday: alreadySpeedrunnerToday || (isFirstUnlockToday && earnedFirstTokenInOneSession),
         unlockStreak: newStreak,
         lastUnlockDate: t,
       };
@@ -5217,7 +5490,7 @@ function App() {
     );
   }
   function renderTodayCard() {
-    const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date());
+    const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "long" }).format(new Date(`${calendarToday}T00:00:00`));
     const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
     const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
     return (
@@ -7821,6 +8094,16 @@ function App() {
                 <small>{liveFriends.slice(0, 3).map((friend) => friend.displayName).join(" · ") || "Sync to update live status"}</small>
               </div>
 
+              {canViewR2Usage && (r2UsageStatus?.warning || r2UsageStatus?.paused) ? (
+                <div className={`feed-r2-safety ${r2UsageStatus.paused ? "feed-r2-safety--paused" : ""}`}>
+                  <strong>{r2UsageStatus.paused ? "Image uploads paused" : "Image usage close to safety limit"}</strong>
+                  <span>
+                    Storage {formatBytes(r2UsageStatus.storageBytes)} / {formatBytes(r2UsageStatus.limits.storageHardBytes)} · Writes {formatCompactNumber(r2UsageStatus.classAOps)} / {formatCompactNumber(r2UsageStatus.limits.classAHardMonthly)} · Reads {formatCompactNumber(r2UsageStatus.classBOps)} / {formatCompactNumber(r2UsageStatus.limits.classBHardMonthly)}
+                  </span>
+                  <small>These strict app limits are far below Cloudflare R2's free tier to avoid overage risk.</small>
+                </div>
+              ) : null}
+
               <form className="feed-composer" onSubmit={postLatestSessionToFeed}>
                 <div>
                   <span className="arena-kicker">Share latest session</span>
@@ -7828,7 +8111,17 @@ function App() {
                   <p>{latestFeedSession ? "Write one sentence, or leave it blank for a chaotic default." : "Finish a study or exam block, then publish it here."}</p>
                 </div>
                 <input className="arena-input" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
+                <label className="feed-image-picker">
+                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
+                  <span>{feedImageDraft ? "Change image" : "Add image"}</span>
+                </label>
                 <button type="submit" className="arena-btn arena-btn--send" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
+                {feedImageDraft ? (
+                  <div className="feed-image-draft">
+                    <img src={feedImageDraft.previewUrl} alt="Selected feed post preview" />
+                    <button type="button" className="ghost-button small-button" onClick={() => setFeedImageDraft((current) => { if (current) URL.revokeObjectURL(current.previewUrl); return null; })}>Remove image</button>
+                  </div>
+                ) : null}
               </form>
 
               <div className="section-label">Activity {feedLoading ? "· Refreshing" : ""}</div>
@@ -7866,6 +8159,20 @@ function App() {
                       {editingFeedPostId === item.id ? (
                         <div className="feed-edit-panel">
                           <textarea className="arena-input feed-edit-textarea" value={editingFeedPostNote} onChange={(event) => setEditingFeedPostNote(event.target.value)} maxLength={220} autoFocus />
+                          <div className="feed-image-edit-row">
+                            <label className="feed-image-picker">
+                              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleEditingFeedPostImageChange(event)} disabled={feedPostSaving || (canViewR2Usage && Boolean(r2UsageStatus?.paused)) || state.social.pendingFeedPosts.some((post) => post.id === item.id)} />
+                              <span>{item.imageUrl || item.imageExpiredAt || editingFeedPostImage ? "Replace image" : "Add image"}</span>
+                            </label>
+                            {item.imageUrl && !editingFeedPostImage ? <button type="button" className="ghost-button small-button" onClick={() => setEditingFeedPostRemoveImage(true)} disabled={feedPostSaving}>Remove image</button> : null}
+                          </div>
+                          {state.social.pendingFeedPosts.some((post) => post.id === item.id) ? <p className="feed-image-hint">Sync this post before adding an image.</p> : null}
+                          {editingFeedPostImage ? (
+                            <div className="feed-image-draft feed-image-draft--edit">
+                              <img src={editingFeedPostImage.previewUrl} alt="Replacement feed post preview" />
+                              <button type="button" className="ghost-button small-button" onClick={() => setEditingFeedPostImage((current) => { if (current) URL.revokeObjectURL(current.previewUrl); return null; })}>Clear replacement</button>
+                            </div>
+                          ) : editingFeedPostRemoveImage ? <p className="feed-image-hint">Image will be removed when you save.</p> : null}
                           <div className="feed-edit-actions">
                             <button type="button" className="arena-btn arena-btn--send" onClick={() => void saveFeedPostEdit(item.id)} disabled={feedPostSaving}>Save</button>
                             <button type="button" className="ghost-button small-button" onClick={cancelEditingFeedPost} disabled={feedPostSaving}>Cancel</button>
@@ -7873,6 +8180,11 @@ function App() {
                           </div>
                         </div>
                       ) : item.note ? <p>"{item.note}"</p> : null}
+                      {item.imageUrl && !failedFeedImages.has(item.id) ? (
+                        <div className="feed-card__image">
+                          <img src={`${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.imageExpiresAt ?? item.createdAt)}`} alt={`${item.displayName}'s feed post image`} loading="lazy" onLoad={() => setFailedFeedImages((current) => { if (!current.has(item.id)) return current; const next = new Set(current); next.delete(item.id); return next; })} onError={() => setFailedFeedImages((current) => new Set(current).add(item.id))} />
+                        </div>
+                      ) : item.imageUrl && failedFeedImages.has(item.id) ? <p className="feed-card__image-expired">Image could not load</p> : item.imageExpiredAt ? <p className="feed-card__image-expired">Image expired</p> : null}
                     </div>
                     <div className="feed-card__reactions">
                       {(() => {
@@ -7991,6 +8303,11 @@ function App() {
                           <span className="arena-code-key">↗</span>
                           <span>Invite link</span>
                           <span className="arena-code-copy">⧉</span>
+                        </button>
+                        <button type="button" className="arena-code-plate profile-badges-button" onClick={() => setBadgesOpen(true)} title="View badges">
+                          <span className="arena-code-key">★</span>
+                          <span>Badges</span>
+                          <span className="arena-code-copy">↗</span>
                         </button>
                         <span className={`arena-sync-pill ${state.social.lastSyncError ? "arena-sync-pill--error" : socialConfigured ? "arena-sync-pill--ready" : "arena-sync-pill--local"}`}>
                           <span />{state.social.lastSyncError ? "Sync Issue" : socialConfigured ? "Arena Synced" : "Local Only"}
@@ -8225,6 +8542,45 @@ function App() {
               ) : (
                 <div className="arena-error">Could not load stats.</div>
               )}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {badgesOpen ? (
+        <div className="calendar-drawer-backdrop profile-badges-backdrop" onClick={() => setBadgesOpen(false)} role="presentation">
+          <article className="profile-badges-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Profile badges">
+            <div className="profile-badges-head">
+              <div>
+                <span className="arena-kicker">Profile collection</span>
+                <h3>Badges</h3>
+                <p>Hover or focus a badge to see how to unlock it.</p>
+              </div>
+              <button type="button" className="arena-icon-button" onClick={() => setBadgesOpen(false)} title="Close">×</button>
+            </div>
+
+            <div className="profile-badges-groups">
+              {profileBadgeGroups.map((group) => (
+                <section key={group.category} className="profile-badge-group">
+                  <div className="profile-badge-group-head">
+                    <h4>{group.category}</h4>
+                    <span>{group.source}</span>
+                  </div>
+                  <div className="profile-badge-grid">
+                    {group.badges.map((badge) => (
+                      <button key={badge.id} type="button" className={`profile-badge-card ${badge.earned ? "earned" : "locked"}`}>
+                        <span className="profile-badge-icon">{badge.icon}</span>
+                        <span className="profile-badge-name">{badge.name}</span>
+                        {badge.daily ? <span className="profile-badge-count">×{badge.count ?? 0}</span> : null}
+                        <span className="profile-badge-tip" role="tooltip">
+                          <strong>{badge.earned ? "Unlocked" : "Locked"}</strong>
+                          <small>{badge.how}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
           </article>
         </div>
