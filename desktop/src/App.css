@@ -4333,6 +4333,10 @@ button:hover:not(:disabled) {
   animation: update-notice-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.update-notice + .comment-notice {
+  top: 168px;
+}
+
 .update-notice strong,
 .update-notice span {
   display: block;
@@ -4391,6 +4395,10 @@ button:hover:not(:disabled) {
     right: 16px;
     left: 16px;
     width: auto;
+  }
+
+  .update-notice + .comment-notice {
+    top: 152px;
   }
 }
 

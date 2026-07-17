@@ -54,6 +54,13 @@ type ProfileBadge = {
   count?: number;
 };
 
+type FeedCommentNotice = {
+  postId: string;
+  scope: SocialFeedScope;
+  commenterName: string;
+  body: string;
+};
+
 const bellSound = new Audio("/bell.mp3");
 bellSound.preload = "auto";
 let bellAudioContext: AudioContext | null = null;
@@ -2037,11 +2044,13 @@ function App() {
   const pendingUpdateRef = useRef<Update | null>(null);
   const latestStateRef = useRef(state);
   const saveStateTimeoutRef = useRef<number | null>(null);
+  const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
   const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
   const [updateNoticeVisible, setUpdateNoticeVisible] = useState(false);
+  const [feedCommentNotice, setFeedCommentNotice] = useState<FeedCommentNotice | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
     status: "idle",
@@ -2972,6 +2981,48 @@ function App() {
     setState((current) => ({ ...current, activeTab }));
   }
 
+  function updateFeedCommentNoticeFromFeeds(feedsByScope: Array<{ scope: SocialFeedScope; feed: SocialFeedPost[] }>) {
+    const currentState = latestStateRef.current;
+    let seenCommentIds = seenFeedCommentIdsRef.current;
+    if (!seenCommentIds) {
+      seenCommentIds = new Set(
+        [...currentState.social.cachedFeeds.global, ...currentState.social.cachedFeeds.friends]
+          .flatMap((post) => post.comments ?? [])
+          .map((comment) => comment.id),
+      );
+      seenFeedCommentIdsRef.current = seenCommentIds;
+    }
+
+    let nextNotice: FeedCommentNotice | null = null;
+    for (const { scope, feed } of feedsByScope) {
+      for (const post of feed) {
+        const isOwnPost = post.userId === currentState.social.userId || post.isSelf;
+        for (const comment of post.comments ?? []) {
+          const isNewComment = !seenCommentIds.has(comment.id);
+          if (isNewComment && isOwnPost && comment.userId !== currentState.social.userId && !comment.isSelf && !nextNotice) {
+            nextNotice = {
+              postId: post.id,
+              scope,
+              commenterName: comment.displayName,
+              body: comment.body,
+            };
+          }
+          seenCommentIds.add(comment.id);
+        }
+      }
+    }
+
+    if (nextNotice) setFeedCommentNotice(nextNotice);
+  }
+
+  function openFeedCommentNotice(notice: FeedCommentNotice) {
+    setActiveTab("friends");
+    setSocialSubtab("feed");
+    setFeedScope(notice.scope);
+    setExpandedFeedComments((current) => new Set(current).add(notice.postId));
+    setFeedCommentNotice(null);
+  }
+
   function toggleTabVisibility(tab: TabKey) {
     setState((current) => {
       const visibleTabs = current.settings.visibleTabs ?? defaultState.settings.visibleTabs;
@@ -3057,6 +3108,10 @@ function App() {
     try {
       const result = await syncSocialState(syncState);
       const syncedAt = new Date().toISOString();
+      updateFeedCommentNoticeFromFeeds([
+        { scope: "global", feed: result.social.cachedFeeds.global },
+        { scope: "friends", feed: result.social.cachedFeeds.friends },
+      ]);
       setState((current) => ({
         ...current,
         social: {
@@ -3678,6 +3733,10 @@ function App() {
     if (!socialConfigured || state.activeTab !== "friends") return;
     try {
       const result = await getFriendStatus(state.social);
+      updateFeedCommentNoticeFromFeeds([
+        { scope: "global", feed: result.social.cachedFeeds.global },
+        { scope: "friends", feed: result.social.cachedFeeds.friends },
+      ]);
       setState((current) => ({
         ...current,
         social: {
@@ -3721,6 +3780,7 @@ function App() {
     setFeedLoading(true);
     try {
       const result = await getSocialFeed(state.social, feedScope);
+      updateFeedCommentNoticeFromFeeds([{ scope: feedScope, feed: result.feed }]);
       if (canViewR2Usage && result.r2Usage) setR2UsageStatus(result.r2Usage);
       else if (!canViewR2Usage) setR2UsageStatus(null);
       setFailedFeedImages((current) => {
@@ -6481,6 +6541,20 @@ function App() {
         </aside>
       ) : null}
 
+      {feedCommentNotice ? (
+        <aside className="update-notice comment-notice" role="status" aria-live="polite">
+          <div>
+            <strong>New comment on your post.</strong>
+            <span>
+              {feedCommentNotice.commenterName}: "{feedCommentNotice.body.length > 72 ? `${feedCommentNotice.body.slice(0, 72)}...` : feedCommentNotice.body}" <button type="button" onClick={() => openFeedCommentNotice(feedCommentNotice)}>View</button>
+            </span>
+          </div>
+          <button type="button" className="update-notice-close" onClick={() => setFeedCommentNotice(null)} aria-label="Dismiss comment notice">
+            X
+          </button>
+        </aside>
+      ) : null}
+
       <nav className="tab-row" aria-label="Primary navigation">
         {primaryTabs.filter(({ id }) => (state.settings.visibleTabs ?? defaultState.settings.visibleTabs)[id] !== false).map(({ id: key, label }) => (
           <button
@@ -8238,7 +8312,7 @@ function App() {
                       <button type="button" className="reaction-btn reaction-btn--add" onClick={() => setEmojiPickerPostId(emojiPickerPostId === item.id ? null : item.id)} title="Add reaction">+</button>
                       {emojiPickerPostId === item.id ? (
                         <div className="emoji-picker">
-                          {["🔥", "🧠", "👏", "⭐", "🎯", "💪", "📚", "⚡", "🎉", "🏆", "✨", "💡", "🎓", "🚀", "💎", "🌟", "📖", "🕐", "💯", "🙌", "🤯", "😤", "👑", "🌊"].map((emj) => (
+                          {["🔥", "🧠", "👏", "⭐", "🎯", "💪", "📚", "⚡", "🎉", "🏆", "✨", "💡", "🎓", "🚀", "💎", "🌟", "📖", "🕐", "💯", "🙌", "🤯", "😤", "👑", "🌊", "😂", "🤣", "😭", "🥲", "😅", "🥹", "❤️", "🙏", "👍", "👎", "😍", "😎"].map((emj) => (
                             <button key={emj} type="button" className={`emoji-picker__item ${item.reacted?.[emj] ? "emoji-picker__item--active" : ""}`} onClick={() => { void toggleLocalFeedReaction(item.id, emj); setEmojiPickerPostId(null); }}>{emj}</button>
                           ))}
                         </div>
