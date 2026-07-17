@@ -1,6 +1,10 @@
+#[cfg(target_os = "linux")]
 use std::collections::HashMap;
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -8,9 +12,11 @@ use tauri::{
     AppHandle, Manager,
 };
 
+#[cfg(target_os = "linux")]
 const LATEST_UPDATE_JSON_URL: &str =
     "https://github.com/damcha02/destudydracker/releases/latest/download/latest.json";
 const TIMER_TRAY_ID: &str = "study-tracker-timer";
+static LAST_TRAY_ICON_PHASE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,12 +27,14 @@ struct UpdateInstallSupport {
     message: String,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(serde::Deserialize)]
 struct LatestUpdateJson {
     version: String,
     platforms: HashMap<String, UpdatePlatform>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(serde::Deserialize)]
 struct UpdatePlatform {
     url: String,
@@ -275,8 +283,19 @@ fn set_timer_tray_state(
     } else {
         phase.as_str()
     };
-    tray.set_icon(Some(tray_icon_for_phase(icon_phase)))
-        .map_err(|error| error.to_string())?;
+    let icon_phase = icon_phase.to_string();
+    let icon_phase_lock = LAST_TRAY_ICON_PHASE.get_or_init(|| Mutex::new(None));
+    let should_update_icon = icon_phase_lock
+        .lock()
+        .map(|current| current.as_deref() != Some(icon_phase.as_str()))
+        .unwrap_or(true);
+    if should_update_icon {
+        tray.set_icon(Some(tray_icon_for_phase(&icon_phase)))
+            .map_err(|error| error.to_string())?;
+        if let Ok(mut current) = icon_phase_lock.lock() {
+            *current = Some(icon_phase);
+        }
+    }
     tray.set_tooltip(Some(timer_tray_tooltip(&phase, running, remaining_seconds)))
         .map_err(|error| error.to_string())?;
     Ok(())
@@ -559,7 +578,7 @@ fn list_summary_files(
         });
     }
 
-    files.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    files.sort_by_key(|file| file.name.to_lowercase());
     Ok(files)
 }
 
@@ -716,6 +735,7 @@ fn runtime_channel() -> String {
     "source-build".into()
 }
 
+#[cfg(target_os = "linux")]
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -746,6 +766,7 @@ fn linux_distribution_family() -> String {
     "source".into()
 }
 
+#[cfg(target_os = "linux")]
 fn file_name_from_url(url: &str) -> Result<String, String> {
     url.rsplit('/')
         .next()
@@ -797,17 +818,22 @@ async fn download_linux_update_package() -> Result<LinuxUpdateDownload, String> 
             .map_err(|error| format!("Could not create Downloads folder: {error}"))?;
         let file_path = downloads_dir.join(file_name);
 
-        let bytes = reqwest::get(&platform.url)
+        let mut response = reqwest::get(&platform.url)
             .await
             .map_err(|error| format!("Could not download update package: {error}"))?
             .error_for_status()
-            .map_err(|error| format!("GitHub returned a download error: {error}"))?
-            .bytes()
-            .await
-            .map_err(|error| format!("Could not read update package download: {error}"))?;
+            .map_err(|error| format!("GitHub returned a download error: {error}"))?;
 
-        fs::write(&file_path, &bytes)
+        let mut file = fs::File::create(&file_path)
             .map_err(|error| format!("Could not save update package: {error}"))?;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("Could not read update package download: {error}"))?
+        {
+            file.write_all(&chunk)
+                .map_err(|error| format!("Could not save update package: {error}"))?;
+        }
 
         let file_path_string = file_path.to_string_lossy().to_string();
         let quoted_path = shell_quote(&file_path_string);

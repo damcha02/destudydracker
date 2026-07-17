@@ -2056,6 +2056,7 @@ function App() {
   const [feedImageDraft, setFeedImageDraft] = useState<PreparedFeedImage | null>(null);
   const [r2UsageStatus, setR2UsageStatus] = useState<R2UsageStatus | null>(null);
   const [failedFeedImages, setFailedFeedImages] = useState<Set<string>>(() => new Set());
+  const [expandedFeedImageId, setExpandedFeedImageId] = useState<string | null>(null);
   const [feedLoading, setFeedLoading] = useState(false);
   const [expandedFeedComments, setExpandedFeedComments] = useState<Set<string>>(() => new Set());
   const [feedCommentDrafts, setFeedCommentDrafts] = useState<Record<string, string>>({});
@@ -2111,6 +2112,15 @@ function App() {
   useEffect(() => () => {
     if (editingFeedPostImage) URL.revokeObjectURL(editingFeedPostImage.previewUrl);
   }, [editingFeedPostImage]);
+
+  useEffect(() => {
+    if (!expandedFeedImageId) return;
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setExpandedFeedImageId(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedFeedImageId]);
 
   useLayoutEffect(() => {
     document.documentElement.dataset.backgroundEffect = state.settings.backgroundEffect === false ? "off" : "on";
@@ -2653,6 +2663,7 @@ function App() {
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
+  const expandedFeedImage = expandedFeedImageId ? socialFeed.find((post) => post.id === expandedFeedImageId && post.imageUrl) : null;
   const friendInviteLink = makeFriendInviteLink(state.social.friendCode);
   const incomingFriendRequestCount = state.social.incomingFriendRequests.length;
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
@@ -8201,9 +8212,9 @@ function App() {
                         </div>
                       ) : item.note ? <p>"{item.note}"</p> : null}
                       {item.imageUrl && !failedFeedImages.has(item.id) ? (
-                        <div className="feed-card__image">
+                        <button type="button" className="feed-card__image" onClick={() => setExpandedFeedImageId(item.id)} aria-label="Open feed image fullscreen">
                           <img src={`${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.imageExpiresAt ?? item.createdAt)}`} alt={`${item.displayName}'s feed post image`} loading="lazy" onLoad={() => setFailedFeedImages((current) => { if (!current.has(item.id)) return current; const next = new Set(current); next.delete(item.id); return next; })} onError={() => setFailedFeedImages((current) => new Set(current).add(item.id))} />
-                        </div>
+                        </button>
                       ) : item.imageUrl && failedFeedImages.has(item.id) ? <p className="feed-card__image-expired">Image could not load</p> : item.imageExpiredAt ? <p className="feed-card__image-expired">Image expired</p> : null}
                     </div>
                     <div className="feed-card__reactions">
@@ -8527,6 +8538,14 @@ function App() {
             </article>
           ) : null}
         </section>
+      ) : null}
+
+      {expandedFeedImage?.imageUrl ? (
+        <div className="feed-image-lightbox" onClick={() => setExpandedFeedImageId(null)} role="presentation">
+          <button type="button" className="feed-image-lightbox__frame" onClick={() => setExpandedFeedImageId(null)} aria-label="Close fullscreen feed image">
+            <img src={`${expandedFeedImage.imageUrl}${expandedFeedImage.imageUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(expandedFeedImage.imageExpiresAt ?? expandedFeedImage.createdAt)}`} alt={`${expandedFeedImage.displayName}'s feed post image`} />
+          </button>
+        </div>
       ) : null}
 
       {viewingFriend ? (
