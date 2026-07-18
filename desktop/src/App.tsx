@@ -2131,6 +2131,10 @@ function App() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [expandedFeedImageId]);
 
+  useEffect(() => {
+    if (state.settings.hideFeedImages) setExpandedFeedImageId(null);
+  }, [state.settings.hideFeedImages]);
+
   useLayoutEffect(() => {
     document.documentElement.dataset.backgroundEffect = state.settings.backgroundEffect === false ? "off" : "on";
   }, [state.settings.backgroundEffect]);
@@ -2672,7 +2676,8 @@ function App() {
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
-  const expandedFeedImage = expandedFeedImageId ? socialFeed.find((post) => post.id === expandedFeedImageId && post.imageUrl) : null;
+  const feedImagesVisible = !state.settings.hideFeedImages;
+  const expandedFeedImage = feedImagesVisible && expandedFeedImageId ? socialFeed.find((post) => post.id === expandedFeedImageId && post.imageUrl) : null;
   const friendInviteLink = makeFriendInviteLink(state.social.friendCode);
   const incomingFriendRequestCount = state.social.incomingFriendRequests.length;
   const latestFeedSession = state.sessions.find((session) => session.kind === "study" || session.kind === "exam") ?? null;
@@ -3055,6 +3060,17 @@ function App() {
         backgroundEffect: current.settings.backgroundEffect === false,
       },
     }));
+  }
+
+  function toggleFeedImages() {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        hideFeedImages: !current.settings.hideFeedImages,
+      },
+    }));
+    if (!state.settings.hideFeedImages) setExpandedFeedImageId(null);
   }
 
   async function copyFriendCode() {
@@ -6279,6 +6295,18 @@ function App() {
                   />
                   <span className="ios-switch" aria-hidden="true" />
                 </label>
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Feed images</strong>
+                    <small>{state.settings.hideFeedImages ? "Hidden" : "Shown"} · social feed post images on this device</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={!state.settings.hideFeedImages}
+                    onChange={toggleFeedImages}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
               </div>
               <button
                 type="button"
@@ -8285,11 +8313,11 @@ function App() {
                           </div>
                         </div>
                       ) : item.note ? <p>"{item.note}"</p> : null}
-                      {item.imageUrl && !failedFeedImages.has(item.id) ? (
+                      {feedImagesVisible && item.imageUrl && !failedFeedImages.has(item.id) ? (
                         <button type="button" className="feed-card__image" onClick={() => setExpandedFeedImageId(item.id)} aria-label="Open feed image fullscreen">
                           <img src={`${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.imageExpiresAt ?? item.createdAt)}`} alt={`${item.displayName}'s feed post image`} loading="lazy" onLoad={() => setFailedFeedImages((current) => { if (!current.has(item.id)) return current; const next = new Set(current); next.delete(item.id); return next; })} onError={() => setFailedFeedImages((current) => new Set(current).add(item.id))} />
                         </button>
-                      ) : item.imageUrl && failedFeedImages.has(item.id) ? <p className="feed-card__image-expired">Image could not load</p> : item.imageExpiredAt ? <p className="feed-card__image-expired">Image expired</p> : null}
+                      ) : feedImagesVisible && item.imageUrl && failedFeedImages.has(item.id) ? <p className="feed-card__image-expired">Image could not load</p> : feedImagesVisible && item.imageExpiredAt ? <p className="feed-card__image-expired">Image expired</p> : null}
                     </div>
                     <div className="feed-card__reactions">
                       {(() => {

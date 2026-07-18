@@ -96,6 +96,7 @@ export interface Settings {
   dailyGoalMinutes: number;
   themeFamily: "normal";
   backgroundEffect: boolean;
+  hideFeedImages: boolean;
   vaultPath: string | null;
   vaultName: string;
   visibleTabs: Record<TabKey, boolean>;
