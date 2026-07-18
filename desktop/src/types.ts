@@ -225,7 +225,7 @@ export interface DurakPuzzleState {
   playerHand: string[];
   cpuHand: string[];
   trumpSuit: string;
-  table: Array<{ attack: string; defense?: string }>;
+  table: Array<{ attack: string; defense?: string; attackBy?: "player" | "cpu"; defenseBy?: "player" | "cpu" }>;
   discardPile: string[];
   phase: string;
   winner?: string;

@@ -41,7 +41,7 @@ import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
-import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getSlideRanks, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -4453,9 +4453,8 @@ function App() {
 
     if (durakGameState.phase === "player_defense") {
       const target = durakGameState.table.find((e) => !e.defense);
-      const tableRanks = new Set(durakGameState.table.map((e) => e.attack.rank));
       const canBeatCard = target ? canBeat(card, target.attack, durakGameState.trumpSuit) : false;
-      const canSlideCard = tableRanks.has(card.rank);
+      const canSlideCard = getLegalSlideCards(durakGameState, "player").some((slideCard) => slideCard.suit === card.suit && slideCard.rank === card.rank);
       if (!canBeatCard && !canSlideCard) return;
       setDurakSelected((prev) => prev.includes(idx) ? [] : [idx]);
       return;
@@ -4530,14 +4529,10 @@ function App() {
     resetDurakAfterFail();
   }
 
-  function handleDurakSlide(card: Card | null) {
+  function handleDurakSlide(card: Card) {
     if (!durakGameState || durakGameState.phase !== "player_defense") return;
-    if (card) {
-      const ranks = getSlideRanks(durakGameState.table);
-      if (!ranks.has(card.rank)) return;
-    } else {
-      return;
-    }
+    const canSlide = getLegalSlideCards(durakGameState, "player").some((slideCard) => slideCard.suit === card.suit && slideCard.rank === card.rank);
+    if (!canSlide) return;
     handleDurakFinished(processCpuTurn(executeSlide(durakGameState, card)));
     setDurakSelected([]);
   }
@@ -9167,14 +9162,13 @@ function App() {
                     const selectedCard = durakSelected.length > 0 ? durakGameState!.playerHand[durakSelected[0]] : null;
                     const target = durakGameState!.table.find((e) => !e.defense);
                     const canDefend = selectedCard !== null && target != null && canBeat(selectedCard, target.attack, durakGameState!.trumpSuit);
-                    const tableRanks = new Set(durakGameState!.table.map((e) => e.attack.rank));
-                    const canSlide = selectedCard !== null && tableRanks.has(selectedCard.rank);
+                    const canSlide = selectedCard !== null && getLegalSlideCards(durakGameState!, "player").some((slideCard) => slideCard.suit === selectedCard.suit && slideCard.rank === selectedCard.rank);
                     return (
                       <>
                         <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakDefend} disabled={!canDefend}>
                           Defend
                         </button>
-                        <button type="button" className="durak-btn durak-btn--accent" onClick={() => handleDurakSlide(selectedCard)} disabled={!canSlide}>
+                        <button type="button" className="durak-btn durak-btn--accent" onClick={() => { if (selectedCard) handleDurakSlide(selectedCard); }} disabled={!canSlide}>
                           Slide
                         </button>
                         <button type="button" className="durak-btn durak-btn--danger" onClick={() => { setDurakSelected([]); handleDurakPickUp(); }}>

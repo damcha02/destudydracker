@@ -248,25 +248,27 @@ export function getSlideCards(hand: Card[], table: TableEntry[]): Card[] {
   return hand.filter((c) => ranks.has(c.rank));
 }
 
-export function executeSlide(state: DurakGameState, slideCard: Card | null): DurakGameState {
+export function getLegalSlideCards(state: DurakGameState, slideBy: "player" | "cpu"): Card[] {
+  const hand = slideBy === "player" ? state.playerHand : state.cpuHand;
+  const receiverHand = slideBy === "player" ? state.cpuHand : state.playerHand;
+  const undefendedAfterSlide = state.table.filter((entry) => !entry.defense).length + 1;
+  if (hand.length <= 1 || receiverHand.length < undefendedAfterSlide) return [];
+  return getSlideCards(hand, state.table);
+}
+
+export function executeSlide(state: DurakGameState, slideCard: Card): DurakGameState {
   const next = copyState(state);
-  if (slideCard) {
-    const slideBy = next.phase === "cpu_defense" ? "cpu" : "player";
-    next.table.push({ attack: { ...slideCard }, attackBy: slideBy });
-    const hand = next.phase === "cpu_defense" ? next.cpuHand : next.playerHand;
-    const idx = hand.findIndex((c) => c.suit === slideCard.suit && c.rank === slideCard.rank);
-    if (idx !== -1) hand.splice(idx, 1);
-  }
+  const slideBy = next.phase === "cpu_defense" ? "cpu" : "player";
+  next.table.push({ attack: { ...slideCard }, attackBy: slideBy });
+  const hand = next.phase === "cpu_defense" ? next.cpuHand : next.playerHand;
+  const idx = hand.findIndex((c) => c.suit === slideCard.suit && c.rank === slideCard.rank);
+  if (idx !== -1) hand.splice(idx, 1);
   if (next.phase === "cpu_defense") {
     next.phase = "player_defense";
-    next.message = slideCard
-      ? `CPU slides with ${cardToString(slideCard)}! You must defend.`
-      : `CPU slides with a trump! You must defend.`;
+    next.message = `CPU slides with ${cardToString(slideCard)}! You must defend.`;
   } else if (next.phase === "player_defense") {
     next.phase = "cpu_defense";
-    next.message = slideCard
-      ? `You slide with ${cardToString(slideCard)}! CPU must defend.`
-      : `You slide with a trump! CPU must defend.`;
+    next.message = `You slide with ${cardToString(slideCard)}! CPU must defend.`;
   }
   checkWin(next);
   return next;
@@ -412,7 +414,7 @@ export function processCpuTurn(state: DurakGameState): DurakGameState {
     case "cpu_defense": {
       const result = cpuDefend(state);
       if (result.phase !== "player_attack") return result;
-      const slideCards = getSlideCards(state.cpuHand, state.table);
+      const slideCards = getLegalSlideCards(state, "cpu");
       if (slideCards.length > 0) return executeSlide(state, slideCards[0]);
       return result;
     }
@@ -491,7 +493,7 @@ export function solver(state: DurakGameState): WinResult {
       case "cpu_defense": {
         const n = cpuDefend(next);
         if (dfs(n, depth + 1)) return true;
-        const slideOpts = getSlideCards(next.cpuHand, next.table);
+        const slideOpts = getLegalSlideCards(next, "cpu");
         for (const sc of slideOpts) {
           const ns = executeSlide(next, sc);
           seq.push(`cpu slide ${cardToString(sc)}`);
@@ -549,7 +551,7 @@ export function solver(state: DurakGameState): WinResult {
         seq.push(`pick up`);
         if (dfs(n, depth + 1)) return true;
         seq.pop();
-        const slideOpts = getSlideCards(next.playerHand, next.table);
+        const slideOpts = getLegalSlideCards(next, "player");
         for (const sc of slideOpts) {
           const ns = executeSlide(next, sc);
           seq.push(`slide ${cardToString(sc)}`);
