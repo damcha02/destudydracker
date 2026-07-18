@@ -258,7 +258,10 @@ export function getLegalSlideCards(state: DurakGameState, slideBy: "player" | "c
 
 export function executeSlide(state: DurakGameState, slideCard: Card): DurakGameState {
   const next = copyState(state);
+  if (next.phase !== "cpu_defense" && next.phase !== "player_defense") return next;
   const slideBy = next.phase === "cpu_defense" ? "cpu" : "player";
+  const legalSlide = getLegalSlideCards(next, slideBy).some((card) => card.suit === slideCard.suit && card.rank === slideCard.rank);
+  if (!legalSlide) return next;
   next.table.push({ attack: { ...slideCard }, attackBy: slideBy });
   const hand = next.phase === "cpu_defense" ? next.cpuHand : next.playerHand;
   const idx = hand.findIndex((c) => c.suit === slideCard.suit && c.rank === slideCard.rank);
