@@ -41,7 +41,7 @@ import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
-import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getSlideRanks, hasFreeSlide, gameStateToPuzzle, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getSlideRanks, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -3887,6 +3887,25 @@ function App() {
     }
   }, [state.activeTab, socialSubtab]);
 
+  const initDurakPuzzle = useEffectEvent(() => {
+    const today = isoDate();
+    if (durakGameState && state.durakPuzzle.seed === today) return;
+    if (state.durakPuzzle.seed === today) {
+      const saved = puzzleToGameState(state.durakPuzzle);
+      if (saved) {
+        setDurakGameState(saved);
+        setDurakSelected([]);
+        return;
+      }
+    }
+    const seed = today;
+    const puzzle = findDailyPuzzle(seed);
+    if (!puzzle) return;
+    setDurakGameState(puzzle.initialState);
+    const serialized = gameStateToPuzzle(puzzle.initialState, 0, false, puzzle.hint, seed);
+    setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, ...serialized } }));
+  });
+
   useEffect(() => {
     if (showDurakPuzzle) {
       initDurakPuzzle();
@@ -4420,16 +4439,6 @@ function App() {
     }));
   }
 
-  function initDurakPuzzle() {
-    const today = isoDate();
-    const seed = `${today}_${Date.now()}`;
-    const puzzle = findDailyPuzzle(seed);
-    if (!puzzle) return;
-    setDurakGameState(puzzle.initialState);
-    const serialized = gameStateToPuzzle(puzzle.initialState, 0, false, puzzle.hint, seed);
-    setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, ...serialized } }));
-  }
-
   function saveDurakState(gs: DurakGameState, failures?: number, completed?: boolean) {
     setDurakGameState(gs);
     const today = state.durakPuzzle.seed ?? isoDate();
@@ -4526,7 +4535,7 @@ function App() {
     if (card) {
       const ranks = getSlideRanks(durakGameState.table);
       if (!ranks.has(card.rank)) return;
-    } else if (!hasFreeSlide(durakGameState.playerHand, durakGameState.table, durakGameState.trumpSuit)) {
+    } else {
       return;
     }
     handleDurakFinished(processCpuTurn(executeSlide(durakGameState, card)));
@@ -9160,7 +9169,6 @@ function App() {
                     const canDefend = selectedCard !== null && target != null && canBeat(selectedCard, target.attack, durakGameState!.trumpSuit);
                     const tableRanks = new Set(durakGameState!.table.map((e) => e.attack.rank));
                     const canSlide = selectedCard !== null && tableRanks.has(selectedCard.rank);
-                    const freeSlideAvail = hasFreeSlide(durakGameState!.playerHand, durakGameState!.table, durakGameState!.trumpSuit);
                     return (
                       <>
                         <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakDefend} disabled={!canDefend}>
@@ -9169,11 +9177,6 @@ function App() {
                         <button type="button" className="durak-btn durak-btn--accent" onClick={() => handleDurakSlide(selectedCard)} disabled={!canSlide}>
                           Slide
                         </button>
-                        {freeSlideAvail && (
-                          <button type="button" className="durak-btn durak-btn--accent" onClick={() => handleDurakSlide(null)}>
-                            Slide (free)
-                          </button>
-                        )}
                         <button type="button" className="durak-btn durak-btn--danger" onClick={() => { setDurakSelected([]); handleDurakPickUp(); }}>
                           Pick up
                         </button>

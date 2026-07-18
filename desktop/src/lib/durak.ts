@@ -248,11 +248,6 @@ export function getSlideCards(hand: Card[], table: TableEntry[]): Card[] {
   return hand.filter((c) => ranks.has(c.rank));
 }
 
-export function hasFreeSlide(hand: Card[], table: TableEntry[], trumpSuit: Suit): boolean {
-  const ranks = getSlideRanks(table);
-  return hand.some((c) => c.suit === trumpSuit && ranks.has(c.rank));
-}
-
 export function executeSlide(state: DurakGameState, slideCard: Card | null): DurakGameState {
   const next = copyState(state);
   if (slideCard) {
@@ -278,7 +273,7 @@ export function executeSlide(state: DurakGameState, slideCard: Card | null): Dur
 }
 
 function cpuDefend(state: DurakGameState): DurakGameState {
-  let next = copyState(state);
+  const next = copyState(state);
   const undefended = next.table.filter((e) => !e.defense);
   for (const entry of undefended) {
     const best = getBestDefense(next.cpuHand, entry.attack, next.trumpSuit);
@@ -297,7 +292,7 @@ function cpuDefend(state: DurakGameState): DurakGameState {
 }
 
 function cpuAttack(state: DurakGameState): DurakGameState {
-  let next = copyState(state);
+  const next = copyState(state);
   const attacks = getValidAttacks(next.cpuHand);
   if (attacks.length === 0) {
     next.phase = "finished";
@@ -340,9 +335,9 @@ function cpuThrowCards(state: DurakGameState): DurakGameState {
 }
 
 export function executePlayerAttack(state: DurakGameState, cards: Card[]): DurakGameState {
-  let next = copyState(state);
+  const next = copyState(state);
   if (cards.length === 0) return next;
-    for (const card of cards) {
+  for (const card of cards) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
   }
@@ -353,7 +348,7 @@ export function executePlayerAttack(state: DurakGameState, cards: Card[]): Durak
 }
 
 export function executePlayerThrow(state: DurakGameState, cards: Card[]): DurakGameState {
-  let next = copyState(state);
+  const next = copyState(state);
   for (const card of cards) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
@@ -365,7 +360,7 @@ export function executePlayerThrow(state: DurakGameState, cards: Card[]): DurakG
 }
 
 export function executePlayerDefend(state: DurakGameState, defenseMap: Map<number, Card>): DurakGameState {
-  let next = copyState(state);
+  const next = copyState(state);
   const undefended = next.table.map((e, i) => ({ entry: e, idx: i })).filter((e) => !e.entry.defense);
   for (const { idx } of undefended) {
     const defCard = defenseMap.get(idx);
@@ -401,7 +396,7 @@ export function defendOneCard(state: DurakGameState, card: Card): DurakGameState
 }
 
 export function playerPassThrow(state: DurakGameState): DurakGameState {
-  let next = clearTable(state);
+  const next = clearTable(state);
   next.phase = "cpu_attack";
   next.message = "CPU's turn to attack.";
   checkWin(next);
@@ -419,7 +414,6 @@ export function processCpuTurn(state: DurakGameState): DurakGameState {
       if (result.phase !== "player_attack") return result;
       const slideCards = getSlideCards(state.cpuHand, state.table);
       if (slideCards.length > 0) return executeSlide(state, slideCards[0]);
-      if (hasFreeSlide(state.cpuHand, state.table, state.trumpSuit)) return executeSlide(state, null);
       return result;
     }
     case "cpu_attack":
@@ -481,7 +475,7 @@ export function solver(state: DurakGameState): WinResult {
     if (s.winner === "player") return true;
     if (s.winner === "cpu") return false;
 
-    let next = copyState(s);
+    const next = copyState(s);
 
     switch (next.phase) {
       case "player_attack": {
@@ -501,12 +495,6 @@ export function solver(state: DurakGameState): WinResult {
         for (const sc of slideOpts) {
           const ns = executeSlide(next, sc);
           seq.push(`cpu slide ${cardToString(sc)}`);
-          if (dfs(ns, depth + 1)) return true;
-          seq.pop();
-        }
-        if (hasFreeSlide(next.cpuHand, next.table, next.trumpSuit)) {
-          const ns = executeSlide(next, null);
-          seq.push(`cpu free slide`);
           if (dfs(ns, depth + 1)) return true;
           seq.pop();
         }
@@ -568,12 +556,6 @@ export function solver(state: DurakGameState): WinResult {
           if (dfs(ns, depth + 1)) return true;
           seq.pop();
         }
-        if (hasFreeSlide(next.playerHand, next.table, next.trumpSuit)) {
-          const ns = executeSlide(next, null);
-          seq.push(`free slide`);
-          if (dfs(ns, depth + 1)) return true;
-          seq.pop();
-        }
         return false;
       }
       case "cpu_throw": {
@@ -621,7 +603,7 @@ export function findDailyPuzzle(dateStr: string): DailyPuzzle | null {
     let ptr = 0;
     const playerHand = deck2.slice(ptr, ptr + playerCount);
     ptr += playerCount;
-    let cpuHand = deck2.slice(ptr, ptr + cpuCount);
+    const cpuHand = deck2.slice(ptr, ptr + cpuCount);
 
     playerHand.sort((a, b) => RANK_ORDER[b.rank] - RANK_ORDER[a.rank]);
     cpuHand.sort((a, b) => RANK_ORDER[a.rank] - RANK_ORDER[b.rank]);
@@ -699,24 +681,35 @@ export function puzzleToGameState(puzzle: {
   winner?: string;
   message: string;
 }): DurakGameState | null {
+  if (!Array.isArray(puzzle.playerHand) || !Array.isArray(puzzle.cpuHand) || !Array.isArray(puzzle.table) || !Array.isArray(puzzle.discardPile)) return null;
+  if (typeof puzzle.trumpSuit !== "string" || typeof puzzle.phase !== "string" || typeof puzzle.message !== "string") return null;
+  if (!puzzle.playerHand.every((key) => typeof key === "string") || !puzzle.cpuHand.every((key) => typeof key === "string") || !puzzle.discardPile.every((key) => typeof key === "string")) return null;
   const parseList = (keys: string[]) => keys.map(parseCardKey).filter((c): c is Card => c !== null);
   const playerHand = parseList(puzzle.playerHand);
   const cpuHand = parseList(puzzle.cpuHand);
-  const table: TableEntry[] = puzzle.table.map((e, i) => {
+  const table = puzzle.table.map((e, i): TableEntry | null => {
+    if (!e || typeof e !== "object" || typeof e.attack !== "string") return null;
+    if (e.defense !== undefined && typeof e.defense !== "string") return null;
     const attack = parseCardKey(e.attack);
     const defense = e.defense ? parseCardKey(e.defense) : undefined;
     const attackBy = e.attackBy ?? (i === 0 ? "cpu" : "player");
-    return { attack: attack!, defense: defense ?? undefined, attackBy, defenseBy: e.defenseBy };
+    if (!attack || (e.defense && !defense)) return null;
+    if (attackBy !== "player" && attackBy !== "cpu") return null;
+    if (e.defenseBy && e.defenseBy !== "player" && e.defenseBy !== "cpu") return null;
+    return { attack, defense: defense ?? undefined, attackBy, defenseBy: e.defenseBy };
   });
   const discardPile = parseList(puzzle.discardPile);
   if (playerHand.length !== puzzle.playerHand.length || cpuHand.length !== puzzle.cpuHand.length) return null;
+  if (table.some((entry) => entry === null)) return null;
+  if (discardPile.length !== puzzle.discardPile.length) return null;
   if (!SUITS.includes(puzzle.trumpSuit as Suit)) return null;
   if (!["player_attack", "player_defense", "player_throw", "cpu_defense", "cpu_attack", "cpu_throw", "finished"].includes(puzzle.phase)) return null;
+  if (puzzle.winner && puzzle.winner !== "player" && puzzle.winner !== "cpu") return null;
 
   return {
     playerHand,
     cpuHand,
-    table,
+    table: table as TableEntry[],
     trumpSuit: puzzle.trumpSuit as Suit,
     discardPile,
     phase: puzzle.phase as DurakPhase,
