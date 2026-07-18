@@ -9810,3 +9810,332 @@ input[type="color"] {
     display: grid;
   }
 }
+
+.durak-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: 16px;
+}
+
+.durak-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+  width: min(480px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+
+.durak-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.durak-hint-area {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+}
+
+.durak-hint-label {
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.durak-hint {
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.durak-trump-area {
+  display: grid;
+  gap: 2px;
+  text-align: center;
+}
+
+.durak-trump-label {
+  font-size: 0.6rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.durak-trump-card {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.durak-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.durak-close-btn:hover {
+  background: color-mix(in oklch, var(--accent) 15%, transparent);
+  color: var(--text);
+}
+
+.durak-cpu-area {
+  display: grid;
+  gap: 6px;
+}
+
+.durak-cpu-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.durak-cpu-cards {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.durak-message {
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+}
+
+.durak-table-area {
+  min-height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.durak-table-empty {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.durak-table-grid {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+}
+
+.durak-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.durak-col--active > .durak-card--undefended {
+  filter: drop-shadow(0 0 6px var(--accent));
+}
+
+.durak-card {
+  width: 56px;
+  height: 78px;
+  border-radius: 8px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  position: relative;
+  user-select: none;
+}
+
+.durak-rank {
+  font-size: 1rem;
+}
+
+.durak-suit {
+  font-size: 1.2rem;
+}
+
+.durak-card--back {
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border-color: #1a252f;
+}
+
+.durak-card-back-inner {
+  color: rgba(255,255,255,0.3);
+  font-size: 1.4rem;
+}
+
+.durak-card--hand {
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.durak-card--hand:hover {
+  transform: translateY(-4px);
+}
+
+.durak-card--playable {
+  border-color: var(--accent);
+}
+
+.durak-card--selected {
+  transform: translateY(-10px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+}
+
+.durak-card--table {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.durak-card--undefended {
+  border-style: dashed;
+  border-color: var(--muted);
+  background: color-mix(in oklch, var(--muted) 8%, transparent);
+}
+
+.durak-card-empty {
+  color: var(--muted);
+  font-size: 1.2rem;
+}
+
+.durak-hand-area {
+  display: grid;
+  gap: 6px;
+}
+
+.durak-hand-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.durak-hand-cards {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.durak-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.durak-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.durak-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.durak-btn--primary {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.durak-btn--secondary {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.durak-btn--danger {
+  background: #e74c3c;
+  color: #fff;
+}
+
+.durak-btn--accent {
+  background: #f39c12;
+  color: #fff;
+}
+
+.durak-btn--close {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.durak-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.durak-footer {
+  text-align: center;
+  padding-top: 4px;
+}
+
+.durak-failures {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.durak-finished {
+  display: grid;
+  gap: 12px;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.durak-result {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.durak-result-icon {
+  font-size: 1.6rem;
+}
+
+.durak-result-text {
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.durak-result--win {
+  color: #27ae60;
+}
+
+.durak-result--lose {
+  color: #e74c3c;
+}
+
+.durak-failures-display {
+  font-size: 0.82rem;
+  color: var(--muted);
+}

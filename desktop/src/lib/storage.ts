@@ -143,6 +143,19 @@ export const defaultState: AppState = {
   waterGlasses: 0,
   waterDate: "",
   petRockPats: 0,
+  durakPuzzle: {
+    seed: null,
+    hint: "",
+    playerHand: [],
+    cpuHand: [],
+    trumpSuit: "hearts",
+    table: [],
+    discardPile: [],
+    phase: "player_attack",
+    message: "",
+    failures: 0,
+    completed: false,
+  },
 };
 
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {

@@ -219,6 +219,21 @@ export interface PlayedBreak {
   playedAt: string;
 }
 
+export interface DurakPuzzleState {
+  seed: string | null;
+  hint: string;
+  playerHand: string[];
+  cpuHand: string[];
+  trumpSuit: string;
+  table: Array<{ attack: string; defense?: string }>;
+  discardPile: string[];
+  phase: string;
+  winner?: string;
+  message: string;
+  failures: number;
+  completed: boolean;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -245,4 +260,5 @@ export interface AppState {
   waterGlasses: number;
   waterDate: string;
   petRockPats: number;
+  durakPuzzle: DurakPuzzleState;
 }

@@ -40,6 +40,8 @@ import { commentOnFeedPost, createFriendRequest, deleteFeedPost, deleteFeedPostI
 import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { Card, DurakGameState } from "./lib/durak";
+import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getSlideRanks, hasFreeSlide, gameStateToPuzzle, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -297,6 +299,7 @@ function formatCompletedUnits(units: number) {
 }
 
 const studyBreakGames = [
+  { name: "Daily Durak", url: "", desc: "Solve today's Durak endgame puzzle" },
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
   { name: "Travle", url: "https://travle.earth", desc: "Travel from one country to another" },
   { name: "Flaggle", url: "https://flaggle.net", desc: "Identify the flag one clue at a time" },
@@ -2089,6 +2092,9 @@ function App() {
   const [feedPostSaving, setFeedPostSaving] = useState(false);
   const [badgesOpen, setBadgesOpen] = useState(false);
   const canViewR2Usage = state.social.friendCode === R2_OWNER_FRIEND_CODE;
+  const [showDurakPuzzle, setShowDurakPuzzle] = useState(false);
+  const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
+  const [durakSelected, setDurakSelected] = useState<number[]>([]);
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -3881,6 +3887,12 @@ function App() {
     }
   }, [state.activeTab, socialSubtab]);
 
+  useEffect(() => {
+    if (showDurakPuzzle) {
+      initDurakPuzzle();
+    }
+  }, [showDurakPuzzle]);
+
   async function installPendingUpdate() {
     if (!isTauriApp()) {
       openExternalLink(RELEASES_PAGE_URL);
@@ -4406,6 +4418,119 @@ function App() {
         ? s.playedGamesAllTime
         : [...s.playedGamesAllTime, name],
     }));
+  }
+
+  function initDurakPuzzle() {
+    const today = isoDate();
+    const seed = `${today}_${Date.now()}`;
+    const puzzle = findDailyPuzzle(seed);
+    if (!puzzle) return;
+    setDurakGameState(puzzle.initialState);
+    const serialized = gameStateToPuzzle(puzzle.initialState, 0, false, puzzle.hint, seed);
+    setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, ...serialized } }));
+  }
+
+  function saveDurakState(gs: DurakGameState, failures?: number, completed?: boolean) {
+    setDurakGameState(gs);
+    const today = state.durakPuzzle.seed ?? isoDate();
+    const hint = state.durakPuzzle.hint;
+    const serialized = gameStateToPuzzle(gs, failures ?? state.durakPuzzle.failures, completed ?? state.durakPuzzle.completed, hint, today);
+    setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, ...serialized } }));
+  }
+
+  function handleDurakCardClick(idx: number) {
+    if (!durakGameState) return;
+    const card = durakGameState.playerHand[idx];
+
+    if (durakGameState.phase === "player_defense") {
+      const target = durakGameState.table.find((e) => !e.defense);
+      const tableRanks = new Set(durakGameState.table.map((e) => e.attack.rank));
+      const canBeatCard = target ? canBeat(card, target.attack, durakGameState.trumpSuit) : false;
+      const canSlideCard = tableRanks.has(card.rank);
+      if (!canBeatCard && !canSlideCard) return;
+      setDurakSelected((prev) => prev.includes(idx) ? [] : [idx]);
+      return;
+    }
+
+    if (durakGameState.phase === "player_attack" || durakGameState.phase === "player_throw") {
+      const tableRanks = durakGameState.phase === "player_throw"
+        ? new Set(durakGameState.table.flatMap((e) => [e.attack.rank, e.defense?.rank].filter(Boolean)))
+        : null;
+
+      if (durakGameState.phase === "player_throw" && tableRanks && !tableRanks.has(card.rank)) return;
+
+      setDurakSelected((prev) => {
+        if (prev.includes(idx)) return prev.filter((i) => i !== idx);
+        if (prev.length === 0) return [idx];
+        const firstCard = durakGameState.playerHand[prev[0]];
+        if (firstCard.rank !== card.rank) return [idx];
+        return [...prev, idx];
+      });
+    }
+  }
+
+  function resetDurakAfterFail() {
+    const failures = state.durakPuzzle.failures + 1;
+    const seed = state.durakPuzzle.seed ?? isoDate();
+    const puzzle = findDailyPuzzle(seed);
+    if (puzzle) {
+      setDurakGameState(puzzle.initialState);
+      const serialized = gameStateToPuzzle(puzzle.initialState, failures, false, puzzle.hint, seed);
+      setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, ...serialized } }));
+    }
+    setDurakSelected([]);
+  }
+
+  function handleDurakFinished(next: DurakGameState) {
+    if (next.phase !== "finished") return saveDurakState(next);
+    if (next.winner === "player") {
+      saveDurakState(next, state.durakPuzzle.failures, true);
+    } else {
+      setDurakGameState(next);
+      saveDurakState(next, state.durakPuzzle.failures, false);
+    }
+  }
+
+  function handleDurakAttack() {
+    if (!durakGameState || durakSelected.length === 0 || durakGameState.phase !== "player_attack") return;
+    const cards = durakSelected.map((i) => durakGameState.playerHand[i]);
+    handleDurakFinished(processCpuTurn(executePlayerAttack(durakGameState, cards)));
+    setDurakSelected([]);
+  }
+
+  function handleDurakThrow() {
+    if (!durakGameState || durakGameState.phase !== "player_throw") return;
+    if (durakSelected.length > 0) {
+      const cards = durakSelected.map((i) => durakGameState.playerHand[i]);
+      handleDurakFinished(processCpuTurn(executePlayerThrow(durakGameState, cards)));
+    } else {
+      handleDurakFinished(processCpuTurn(playerPassThrow(durakGameState)));
+    }
+    setDurakSelected([]);
+  }
+
+  function handleDurakDefend() {
+    if (!durakGameState || durakSelected.length === 0 || durakGameState.phase !== "player_defense") return;
+    const card = durakGameState.playerHand[durakSelected[0]];
+    handleDurakFinished(processCpuTurn(defendOneCard(durakGameState, card)));
+    setDurakSelected([]);
+  }
+
+  function handleDurakPickUp() {
+    if (!durakGameState || durakGameState.phase !== "player_defense") return;
+    resetDurakAfterFail();
+  }
+
+  function handleDurakSlide(card: Card | null) {
+    if (!durakGameState || durakGameState.phase !== "player_defense") return;
+    if (card) {
+      const ranks = getSlideRanks(durakGameState.table);
+      if (!ranks.has(card.rank)) return;
+    } else if (!hasFreeSlide(durakGameState.playerHand, durakGameState.table, durakGameState.trumpSuit)) {
+      return;
+    }
+    handleDurakFinished(processCpuTurn(executeSlide(durakGameState, card)));
+    setDurakSelected([]);
   }
 
   function addWater() {
@@ -8835,9 +8960,15 @@ function App() {
                     </div>
                     <div className="break-game-side">
                       {unlocked ? (
-                        <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" onClick={() => logPlayedBreak(game.name)}>
-                          Play
-                        </a>
+                        game.name === "Daily Durak" ? (
+                          <button type="button" className="design-chip" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>
+                            Play
+                          </button>
+                        ) : (
+                          <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" onClick={() => logPlayedBreak(game.name)}>
+                            Play
+                          </a>
+                        )
                       ) : canUnlockMore ? (
                         <button type="button" className="break-unlock-btn" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>
                           Unlock
@@ -8891,6 +9022,172 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {showDurakPuzzle && durakGameState ? (
+        <div className="durak-overlay" onClick={() => setShowDurakPuzzle(false)} role="presentation">
+          <div className="durak-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Daily Durak puzzle">
+            <div className="durak-head">
+              <div className="durak-hint-area">
+                <span className="durak-hint-label">Hint</span>
+                <span className="durak-hint">{state.durakPuzzle.hint || "CPU has some strong cards..."}</span>
+              </div>
+              <div className="durak-trump-area">
+                <span className="durak-trump-label">Trump</span>
+                <span className="durak-trump-card">{SUIT_SYMBOL[durakGameState.trumpSuit]}</span>
+              </div>
+              <button type="button" className="durak-close-btn" onClick={() => setShowDurakPuzzle(false)} aria-label="Close puzzle">✕</button>
+            </div>
+
+            <div className="durak-cpu-area">
+              <div className="durak-cpu-label">CPU ({durakGameState.cpuHand.length})</div>
+              <div className="durak-cpu-cards">
+                {durakGameState.cpuHand.map((_, i) => (
+                  <div key={i} className="durak-card durak-card--back">
+                    <span className="durak-card-back-inner">?</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="durak-message">{durakGameState.message}</div>
+
+            <div className="durak-table-area">
+              {durakGameState.table.length === 0 ? (
+                <div className="durak-table-empty">Play your cards to attack</div>
+              ) : (
+                <div className="durak-table-grid">
+                  {durakGameState.table.map((entry, i) => {
+                    const cpuCard = entry.attackBy === "cpu" ? entry.attack : (entry.defenseBy === "cpu" ? entry.defense : null);
+                    const playerCard = entry.attackBy === "player" ? entry.attack : (entry.defenseBy === "player" ? entry.defense : null);
+                    const isActive = !entry.defense;
+                    return (
+                      <div key={i} className={`durak-col ${isActive ? "durak-col--active" : ""}`}>
+                        {cpuCard ? (
+                          <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[cpuCard.suit] }}>
+                            <span className="durak-rank">{cpuCard.rank}</span>
+                            <span className="durak-suit">{SUIT_SYMBOL[cpuCard.suit]}</span>
+                          </div>
+                        ) : (
+                          <div className="durak-card durak-card--undefended">
+                            <span className="durak-card-empty">?</span>
+                          </div>
+                        )}
+                        {playerCard ? (
+                          <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[playerCard.suit] }}>
+                            <span className="durak-rank">{playerCard.rank}</span>
+                            <span className="durak-suit">{SUIT_SYMBOL[playerCard.suit]}</span>
+                          </div>
+                        ) : (
+                          <div className="durak-card durak-card--undefended">
+                            <span className="durak-card-empty">?</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="durak-hand-area">
+              <div className="durak-hand-label">Your hand ({durakGameState.playerHand.length})</div>
+              <div className="durak-hand-cards">
+                {durakGameState.playerHand.map((card, i) => {
+                  const isSelected = durakSelected.includes(i);
+                  const canPlay = durakGameState.phase === "player_attack" || durakGameState.phase === "player_throw"
+                    ? true
+                    : durakGameState.phase === "player_defense"
+                      ? durakGameState.table.some((e) => !e.defense) && canBeat(card, durakGameState.table.find((e) => !e.defense)!.attack, durakGameState.trumpSuit)
+                      : false;
+                  return (
+                    <div
+                      key={i}
+                      className={`durak-card durak-card--hand ${isSelected ? "durak-card--selected" : ""} ${canPlay ? "durak-card--playable" : ""}`}
+                      style={{ color: SUIT_COLOR[card.suit] }}
+                      onClick={() => handleDurakCardClick(i)}
+                    >
+                      <span className="durak-rank">{card.rank}</span>
+                      <span className="durak-suit">{SUIT_SYMBOL[card.suit]}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {durakGameState.phase === "finished" ? (
+              <div className="durak-finished">
+                {durakGameState.winner === "player" ? (
+                  <>
+                    <div className="durak-result durak-result--win">
+                      <span className="durak-result-icon">🎉</span>
+                      <span className="durak-result-text">You solved the puzzle!</span>
+                    </div>
+                    <div className="durak-failures-display">{'\u{274C}'} Failures: {state.durakPuzzle.failures}</div>
+                    <button type="button" className="durak-btn durak-btn--close" onClick={() => setShowDurakPuzzle(false)}>Close</button>
+                  </>
+                ) : (
+                  <>
+                    <div className="durak-result durak-result--lose">
+                      <span className="durak-result-icon">💀</span>
+                      <span className="durak-result-text">CPU wins! Try a different approach.</span>
+                    </div>
+                    <button type="button" className="durak-btn durak-btn--primary" onClick={resetDurakAfterFail}>Try Again</button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="durak-actions">
+                  {(durakGameState.phase === "player_attack") && (
+                    <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakAttack} disabled={durakSelected.length === 0}>
+                      Attack
+                    </button>
+                  )}
+                  {durakGameState.phase === "player_throw" && (
+                    <>
+                      <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakThrow} disabled={durakSelected.length === 0}>
+                        Throw
+                      </button>
+                      <button type="button" className="durak-btn durak-btn--secondary" onClick={() => { setDurakSelected([]); handleDurakThrow(); }}>
+                        Pass
+                      </button>
+                    </>
+                  )}
+                  {durakGameState.phase === "player_defense" && (() => {
+                    const selectedCard = durakSelected.length > 0 ? durakGameState!.playerHand[durakSelected[0]] : null;
+                    const target = durakGameState!.table.find((e) => !e.defense);
+                    const canDefend = selectedCard !== null && target != null && canBeat(selectedCard, target.attack, durakGameState!.trumpSuit);
+                    const tableRanks = new Set(durakGameState!.table.map((e) => e.attack.rank));
+                    const canSlide = selectedCard !== null && tableRanks.has(selectedCard.rank);
+                    const freeSlideAvail = hasFreeSlide(durakGameState!.playerHand, durakGameState!.table, durakGameState!.trumpSuit);
+                    return (
+                      <>
+                        <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakDefend} disabled={!canDefend}>
+                          Defend
+                        </button>
+                        <button type="button" className="durak-btn durak-btn--accent" onClick={() => handleDurakSlide(selectedCard)} disabled={!canSlide}>
+                          Slide
+                        </button>
+                        {freeSlideAvail && (
+                          <button type="button" className="durak-btn durak-btn--accent" onClick={() => handleDurakSlide(null)}>
+                            Slide (free)
+                          </button>
+                        )}
+                        <button type="button" className="durak-btn durak-btn--danger" onClick={() => { setDurakSelected([]); handleDurakPickUp(); }}>
+                          Pick up
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div className="durak-footer">
+                  <span className="durak-failures">{'\u{274C}'} Failures: {state.durakPuzzle.failures}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       ) : null}
 
       {fullscreen && state.timer.phase !== "idle" ? (
