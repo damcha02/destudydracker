@@ -52,6 +52,13 @@ struct LinuxUpdateDownload {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DeviceIdentity {
+    fingerprint_hash: String,
+    label: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SummaryFile {
     name: String,
     path: String,
@@ -226,6 +233,68 @@ fn timer_tray_tooltip(phase: &str, running: bool, remaining_seconds: u32) -> Str
         "Study Tracker - {}",
         timer_tray_title(phase, running, remaining_seconds)
     )
+}
+
+fn fnv1a64(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+#[cfg(target_os = "linux")]
+fn stable_machine_id() -> String {
+    for path in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+        if let Ok(value) = fs::read_to_string(path) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.into();
+            }
+        }
+    }
+    std::env::var("HOSTNAME").unwrap_or_default()
+}
+
+#[cfg(target_os = "macos")]
+fn stable_machine_id() -> String {
+    std::process::Command::new("ioreg")
+        .args(["-rd1", "-c", "IOPlatformExpertDevice"])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|stdout| {
+            stdout.lines().find_map(|line| {
+                let value = line.split("IOPlatformUUID").nth(1)?.split('=').nth(1)?.trim();
+                Some(value.trim_matches('"').to_string())
+            })
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "windows")]
+fn stable_machine_id() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn stable_machine_id() -> String {
+    String::new()
+}
+
+#[tauri::command]
+fn get_device_identity() -> DeviceIdentity {
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let machine_id = stable_machine_id();
+    let fingerprint_source = format!(
+        "study-tracker-social-device-v1\nos={os}\narch={arch}\nmachine={machine_id}"
+    );
+    DeviceIdentity {
+        fingerprint_hash: fnv1a64(&fingerprint_source),
+        label: format!("{os} {arch} {}", runtime_channel()),
+    }
 }
 
 fn setup_timer_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -898,6 +967,7 @@ pub fn run() {
             export_daily_note,
             get_update_install_support,
             download_linux_update_package,
+            get_device_identity,
             set_timer_tray_state
         ])
         .run(tauri::generate_context!())

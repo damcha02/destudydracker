@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
@@ -13,6 +14,11 @@ export interface SocialDailyStat {
 
 interface SocialSyncResponse {
   social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
+}
+
+interface DeviceIdentity {
+  fingerprintHash: string;
+  label: string;
 }
 
 interface SocialStatusResponse {
@@ -140,6 +146,14 @@ export function shouldAutoSyncSocial(social: SocialState) {
   return Date.now() >= new Date(social.nextAutoSyncAt).getTime();
 }
 
+async function getDeviceIdentity() {
+  try {
+    return await invoke<DeviceIdentity>("get_device_identity");
+  } catch {
+    return undefined;
+  }
+}
+
 function assertSocialApiConfigured() {
   if (!SOCIAL_API_URL) throw new Error("Social sync is not configured. Add VITE_SOCIAL_API_URL after deploying the Cloudflare Worker.");
 }
@@ -178,6 +192,7 @@ async function requestSocialForm<T>(path: string, form: FormData): Promise<T> {
 }
 
 export async function syncSocialState(state: AppState) {
+  const device = await getDeviceIdentity();
   const payload = {
     user: {
       userId: state.social.userId,
@@ -186,6 +201,7 @@ export async function syncSocialState(state: AppState) {
       displayName: state.social.displayName,
       avatar: state.social.avatar,
       isPrivate: state.social.isPrivate,
+      device,
     },
     stats: getLocalSocialStats(state.sessions),
     feedPosts: state.social.pendingFeedPosts,

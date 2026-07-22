@@ -19,6 +19,10 @@ interface SyncPayload {
     displayName: string;
     avatar?: unknown;
     isPrivate?: boolean;
+    device?: {
+      fingerprintHash?: string;
+      label?: string;
+    };
   };
   stats: Array<{
     date: string;
@@ -176,6 +180,8 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const displayName = cleanName(payload.displayName);
   const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
+  const deviceFingerprintHash = cleanText(payload.device?.fingerprintHash, 120);
+  const deviceLabel = cleanText(payload.device?.label, 120);
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
   const existing = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
@@ -185,12 +191,23 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   if (codeOwner) throw new Response("Friend code is already in use.", { status: 409, headers: corsHeaders });
 
   if (existing) {
-    await env.DB.prepare("UPDATE users SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(friendCode, displayName, avatar, isPrivate, userId)
+    await env.DB.prepare(`
+      UPDATE users
+      SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?,
+        device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
+        device_label = COALESCE(NULLIF(?, ''), device_label),
+        device_seen_at = CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE device_seen_at END,
+        updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `)
+      .bind(friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, userId)
       .run();
   } else {
-    await env.DB.prepare("INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate)
+    await env.DB.prepare(`
+      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, device_fingerprint_hash, device_label, device_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
+    `)
+      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash)
       .run();
   }
 }
