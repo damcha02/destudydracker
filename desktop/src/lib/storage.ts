@@ -155,6 +155,7 @@ export const defaultState: AppState = {
     message: "",
     failures: 0,
     completed: false,
+    solvedCount: 0,
   },
 };
 

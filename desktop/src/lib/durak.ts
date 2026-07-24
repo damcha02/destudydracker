@@ -496,12 +496,14 @@ export function solver(state: DurakGameState): WinResult {
       case "cpu_defense": {
         const n = cpuDefend(next);
         if (dfs(n, depth + 1)) return true;
-        const slideOpts = getLegalSlideCards(next, "cpu");
-        for (const sc of slideOpts) {
-          const ns = executeSlide(next, sc);
-          seq.push(`cpu slide ${cardToString(sc)}`);
-          if (dfs(ns, depth + 1)) return true;
-          seq.pop();
+        if (n.phase === "player_attack") {
+          const slideOpts = getLegalSlideCards(next, "cpu");
+          for (const sc of slideOpts) {
+            const ns = executeSlide(next, sc);
+            seq.push(`cpu slide ${cardToString(sc)}`);
+            if (dfs(ns, depth + 1)) return true;
+            seq.pop();
+          }
         }
         return false;
       }

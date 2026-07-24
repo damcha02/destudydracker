@@ -232,6 +232,7 @@ export interface DurakPuzzleState {
   message: string;
   failures: number;
   completed: boolean;
+  solvedCount: number;
 }
 
 export interface AppState {

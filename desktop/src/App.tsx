@@ -41,7 +41,7 @@ import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
-import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -3889,8 +3889,11 @@ function App() {
 
   const initDurakPuzzle = useEffectEvent(() => {
     const today = isoDate();
-    if (durakGameState && state.durakPuzzle.seed === today) return;
-    if (state.durakPuzzle.seed === today) {
+    if (state.durakPuzzle.solvedCount >= 3) return;
+    const seedIndex = state.durakPuzzle.solvedCount || 0;
+    const seed = `${today}_${seedIndex}`;
+    if (durakGameState && state.durakPuzzle.seed === seed) return;
+    if (state.durakPuzzle.seed === seed) {
       const saved = puzzleToGameState(state.durakPuzzle);
       if (saved) {
         setDurakGameState(saved);
@@ -3898,7 +3901,6 @@ function App() {
         return;
       }
     }
-    const seed = today;
     const puzzle = findDailyPuzzle(seed);
     if (!puzzle) return;
     setDurakGameState(puzzle.initialState);
@@ -4493,6 +4495,8 @@ function App() {
     if (next.phase !== "finished") return saveDurakState(next);
     if (next.winner === "player") {
       saveDurakState(next, state.durakPuzzle.failures, true);
+      setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, solvedCount: (s.durakPuzzle.solvedCount || 0) + 1 } }));
+      setDurakGameState(null);
     } else {
       setDurakGameState(next);
       saveDurakState(next, state.durakPuzzle.failures, false);
@@ -4526,7 +4530,8 @@ function App() {
 
   function handleDurakPickUp() {
     if (!durakGameState || durakGameState.phase !== "player_defense") return;
-    resetDurakAfterFail();
+    setDurakSelected([]);
+    handleDurakFinished(processCpuTurn(playerPickUp(durakGameState)));
   }
 
   function handleDurakSlide(card: Card) {
@@ -5571,10 +5576,10 @@ function App() {
                         <button type="button" className="ghost-button" onClick={() => setCalendarAddDraft((current) => ({ ...current, noTime: true }))}>
                           Unschedule
                         </button>
-                      </div>
-                    </>
-                  )}
                 </div>
+              </>
+            )}
+          </div>
 
                 <div className="calendar-drawer-actions">
                   <button type="button" className="ghost-button" onClick={closeCalendarAddDrawer}>
@@ -8965,9 +8970,12 @@ function App() {
                     <div className="break-game-side">
                       {unlocked ? (
                         game.name === "Daily Durak" ? (
-                          <button type="button" className="design-chip" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>
-                            Play
-                          </button>
+                          <div className="break-game-durak">
+                            <span className="break-durak-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span>
+                            <button type="button" className="design-chip" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
                         ) : (
                           <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" onClick={() => logPlayedBreak(game.name)}>
                             Play
@@ -9028,9 +9036,18 @@ function App() {
         </section>
       ) : null}
 
-      {showDurakPuzzle && durakGameState ? (
+      {showDurakPuzzle ? (
         <div className="durak-overlay" onClick={() => setShowDurakPuzzle(false)} role="presentation">
           <div className="durak-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Daily Durak puzzle">
+            {state.durakPuzzle.solvedCount >= 3 && !durakGameState ? (
+              <div className="durak-finished">
+                <div className="durak-result durak-result--win">
+                  <span className="durak-result-icon">🎉</span>
+                  <span className="durak-result-text">All 3 puzzles solved for today!</span>
+                </div>
+                <button type="button" className="durak-btn durak-btn--close" onClick={() => setShowDurakPuzzle(false)}>Close</button>
+              </div>
+            ) : durakGameState ? (<div className="durak-game">
             <div className="durak-head">
               <div className="durak-hint-area">
                 <span className="durak-hint-label">Hint</span>
@@ -9183,6 +9200,8 @@ function App() {
                 </div>
               </>
             )}
+            </div>
+            ) : null}
           </div>
         </div>
       ) : null}
