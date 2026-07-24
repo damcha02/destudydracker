@@ -3889,8 +3889,14 @@ function App() {
 
   const initDurakPuzzle = useEffectEvent(() => {
     const today = isoDate();
-    if (state.durakPuzzle.solvedCount >= 3) return;
-    const seedIndex = state.durakPuzzle.solvedCount || 0;
+    const savedSeed = state.durakPuzzle.seed;
+    let solvedCount = state.durakPuzzle.solvedCount || 0;
+    if (savedSeed && !savedSeed.startsWith(today)) {
+      solvedCount = 0;
+      setState((s) => ({ ...s, durakPuzzle: { ...s.durakPuzzle, solvedCount: 0, seed: null, failures: 0 } }));
+    }
+    if (solvedCount >= 3) return;
+    const seedIndex = solvedCount;
     const seed = `${today}_${seedIndex}`;
     if (durakGameState && state.durakPuzzle.seed === seed) return;
     if (state.durakPuzzle.seed === seed) {
