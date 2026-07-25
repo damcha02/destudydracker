@@ -187,7 +187,7 @@ function checkWin(state: DurakGameState): void {
   }
 }
 
-export function getValidAttacks(hand: Card[]): Card[][] {
+export function getValidAttacks(hand: Card[], maxCards?: number): Card[][] {
   const groups = new Map<Rank, Card[]>();
   for (const card of hand) {
     const list = groups.get(card.rank) ?? [];
@@ -196,7 +196,7 @@ export function getValidAttacks(hand: Card[]): Card[][] {
   }
   const result: Card[][] = [];
   for (const cards of groups.values()) {
-    result.push(cards);
+    result.push(maxCards != null ? cards.slice(0, maxCards) : cards);
   }
   return result;
 }
@@ -298,7 +298,7 @@ function cpuDefend(state: DurakGameState): DurakGameState {
 
 function cpuAttack(state: DurakGameState): DurakGameState {
   const next = copyState(state);
-  const attacks = getValidAttacks(next.cpuHand);
+  const attacks = getValidAttacks(next.cpuHand, Math.min(6, next.playerHand.length));
   if (attacks.length === 0) {
     next.phase = "finished";
     next.winner = "player";
@@ -342,12 +342,14 @@ function cpuThrowCards(state: DurakGameState): DurakGameState {
 export function executePlayerAttack(state: DurakGameState, cards: Card[]): DurakGameState {
   const next = copyState(state);
   if (cards.length === 0) return next;
-  for (const card of cards) {
+  const maxAttack = Math.min(6, next.cpuHand.length);
+  const used = cards.slice(0, maxAttack);
+  for (const card of used) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
   }
   next.phase = "cpu_defense";
-  next.message = `You attack with ${cards.map(cardToString).join(", ")}.`;
+  next.message = `You attack with ${used.map(cardToString).join(", ")}.`;
   checkWin(next);
   return next;
 }
@@ -484,7 +486,7 @@ export function solver(state: DurakGameState): WinResult {
 
     switch (next.phase) {
       case "player_attack": {
-        const attacks = getValidAttacks(next.playerHand);
+        const attacks = getValidAttacks(next.playerHand, Math.min(6, next.cpuHand.length));
         for (const atk of attacks) {
           const n = executePlayerAttack(next, atk);
           seq.push(`play ${atk.map(cardToString).join(",")}`);
