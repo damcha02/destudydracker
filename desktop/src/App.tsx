@@ -4477,11 +4477,12 @@ function App() {
 
       setDurakSelected((prev) => {
         if (prev.includes(idx)) return prev.filter((i) => i !== idx);
-        const maxCards = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
-        if (prev.length >= maxCards) return prev;
         if (prev.length === 0) return [idx];
         const firstCard = durakGameState.playerHand[prev[0]];
         if (firstCard.rank !== card.rank) return [idx];
+
+        const maxCards = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
+        if (prev.length >= maxCards) return prev;
 
         return [...prev, idx];
       });

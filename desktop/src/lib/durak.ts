@@ -423,11 +423,9 @@ export function playerPickUp(state: DurakGameState): DurakGameState {
 export function processCpuTurn(state: DurakGameState): DurakGameState {
   switch (state.phase) {
     case "cpu_defense": {
-      const result = cpuDefend(state);
-      if (result.phase !== "player_attack") return result;
       const slideCards = getLegalSlideCards(state, "cpu");
       if (slideCards.length > 0) return executeSlide(state, slideCards[0]);
-      return result;
+      return cpuDefend(state);
     }
     case "cpu_attack":
       return cpuAttack(state);
@@ -502,17 +500,15 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "cpu_defense": {
+        const slideOpts = getLegalSlideCards(next, "cpu");
+        for (const sc of slideOpts) {
+          const ns = executeSlide(next, sc);
+          seq.push(`cpu slide ${cardToString(sc)}`);
+          if (dfs(ns, depth + 1)) return true;
+          seq.pop();
+        }
         const n = cpuDefend(next);
         if (dfs(n, depth + 1)) return true;
-        if (n.phase === "player_attack") {
-          const slideOpts = getLegalSlideCards(next, "cpu");
-          for (const sc of slideOpts) {
-            const ns = executeSlide(next, sc);
-            seq.push(`cpu slide ${cardToString(sc)}`);
-            if (dfs(ns, depth + 1)) return true;
-            seq.pop();
-          }
-        }
         return false;
       }
       case "player_throw": {
