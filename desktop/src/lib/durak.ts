@@ -253,6 +253,7 @@ export function getLegalSlideCards(state: DurakGameState, slideBy: "player" | "c
   const receiverHand = slideBy === "player" ? state.cpuHand : state.playerHand;
   const undefendedAfterSlide = state.table.filter((entry) => !entry.defense).length + 1;
   if (hand.length <= 1 || receiverHand.length < undefendedAfterSlide) return [];
+  if (state.table.some((entry) => entry.defense)) return [];
   return getSlideCards(hand, state.table);
 }
 
@@ -320,7 +321,7 @@ function cpuAttack(state: DurakGameState): DurakGameState {
 
 function cpuThrowCards(state: DurakGameState): DurakGameState {
   let next = copyState(state);
-  const maxTotal = Math.min(6, next.playerHand.length + 6);
+  const maxTotal = Math.min(12, next.table.length * 2 + next.playerHand.length);
   const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
   if (throws.length > 0) {
     const chosen = throws[0];
@@ -356,12 +357,14 @@ export function executePlayerAttack(state: DurakGameState, cards: Card[]): Durak
 
 export function executePlayerThrow(state: DurakGameState, cards: Card[]): DurakGameState {
   const next = copyState(state);
-  for (const card of cards) {
+  const maxCards = next.cpuHand.length;
+  const used = cards.slice(0, maxCards);
+  for (const card of used) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
   }
   next.phase = "cpu_defense";
-  next.message = `You throw in ${cards.map(cardToString).join(", ")}.`;
+  next.message = `You throw in ${used.map(cardToString).join(", ")}.`;
   checkWin(next);
   return next;
 }
@@ -510,7 +513,7 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "player_throw": {
-        const maxTotal = Math.min(6, next.cpuHand.length + 6);
+        const maxTotal = Math.min(12, next.table.length * 2 + next.cpuHand.length);
         const throws = getValidThrows(next.playerHand, next.table, maxTotal);
         if (throws.length === 0 || depth > 3) {
           const n = clearTable(next);

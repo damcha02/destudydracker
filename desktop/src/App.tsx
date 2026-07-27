@@ -4480,7 +4480,7 @@ function App() {
         if (prev.length === 0) return [idx];
         const firstCard = durakGameState.playerHand[prev[0]];
         if (firstCard.rank !== card.rank) return [idx];
-        const maxAttack = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : 6;
+        const maxAttack = Math.min(6, durakGameState.cpuHand.length);
         if (prev.length >= maxAttack) return prev;
         return [...prev, idx];
       });
@@ -4522,7 +4522,8 @@ function App() {
   function handleDurakThrow() {
     if (!durakGameState || durakGameState.phase !== "player_throw") return;
     if (durakSelected.length > 0) {
-      const cards = durakSelected.map((i) => durakGameState.playerHand[i]);
+      const maxCards = durakGameState.cpuHand.length;
+      const cards = durakSelected.map((i) => durakGameState.playerHand[i]).slice(0, maxCards);
       handleDurakFinished(processCpuTurn(executePlayerThrow(durakGameState, cards)));
     } else {
       handleDurakFinished(processCpuTurn(playerPassThrow(durakGameState)));
