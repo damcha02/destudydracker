@@ -2701,7 +2701,12 @@ function App() {
   const viewingIsSelf = viewingFriend?.userId === state.social.userId;
   const viewingIsFriend = viewingFriend ? socialFriendIds.has(viewingFriend.userId) : false;
   const viewingRequestPending = viewingFriend ? outgoingFriendRequestCodes.has(viewingFriend.friendCode) : false;
-  const rockStage = state.petRockPats >= 10000 ? { plant: "\u{1FAA8}", label: "Eternal Rock" }
+  const rockStage = state.petRockPats >= 1000000 ? { plant: "\u{1F5FF}", label: "Rock God" }
+    : state.petRockPats >= 500000 ? { plant: "\u{1F48E}", label: "Ancient Starstone" }
+    : state.petRockPats >= 100000 ? { plant: "\u{1F320}", label: "Celestial Rock" }
+    : state.petRockPats >= 50000 ? { plant: "\u{1FA90}", label: "Planetary Rock" }
+    : state.petRockPats >= 20000 ? { plant: "\u{2604}\uFE0F", label: "Meteoric Rock" }
+    : state.petRockPats >= 10000 ? { plant: "\u{1FAA8}", label: "Eternal Rock" }
     : state.petRockPats >= 5000 ? { plant: "\u{1F30C}", label: "Galactic Rock" }
     : state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
     : state.petRockPats >= 500 ? { plant: "\u{1F451}", label: "Royal Rock" }
@@ -2721,7 +2726,7 @@ function App() {
     { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
     { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
     { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
-    { id: "rock-master", icon: state.petRockPats >= 10000 ? "\u{1FAA8}" : "\u{1F31F}", name: state.petRockPats >= 10000 ? "Stone Legend" : "Rock Master", earned: badgeRockMaster, how: state.petRockPats >= 10000 ? "Pat the pet rock 10000 times." : "Pat the pet rock 1000 times." },
+    { id: "rock-master", icon: state.petRockPats >= 1000000 ? "\u{1F5FF}" : state.petRockPats >= 10000 ? "\u{1FAA8}" : "\u{1F31F}", name: state.petRockPats >= 1000000 ? "Rock God" : state.petRockPats >= 10000 ? "Stone Legend" : "Rock Master", earned: badgeRockMaster, how: state.petRockPats >= 1000000 ? "Pat the pet rock 1000000 times." : state.petRockPats >= 10000 ? "Pat the pet rock 10000 times." : "Pat the pet rock 1000 times." },
   ];
 
   useEffect(() => {
