@@ -188,6 +188,7 @@ function checkWin(state: DurakGameState): void {
 }
 
 export function getValidAttacks(hand: Card[], maxCards?: number): Card[][] {
+  if (maxCards != null && maxCards <= 0) return [];
   const groups = new Map<Rank, Card[]>();
   for (const card of hand) {
     const list = groups.get(card.rank) ?? [];
@@ -209,6 +210,7 @@ export function getValidThrows(hand: Card[], table: TableEntry[], maxTotal: numb
   }
   const currentTableCount = table.length * 2;
   const maxAdd = Math.max(0, maxTotal - currentTableCount);
+  if (maxAdd <= 0) return [];
   const result: Card[][] = [];
   for (const rank of tableRanks) {
     const cards = hand.filter((c) => c.rank === rank);
@@ -320,7 +322,7 @@ function cpuAttack(state: DurakGameState): DurakGameState {
 
 function cpuThrowCards(state: DurakGameState): DurakGameState {
   let next = copyState(state);
-  const maxTotal = Math.min(6, next.playerHand.length + 6);
+  const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.playerHand.length);
   const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
   if (throws.length > 0) {
     const chosen = throws[0];
@@ -356,12 +358,15 @@ export function executePlayerAttack(state: DurakGameState, cards: Card[]): Durak
 
 export function executePlayerThrow(state: DurakGameState, cards: Card[]): DurakGameState {
   const next = copyState(state);
-  for (const card of cards) {
+  const maxAdd = Math.max(0, Math.min(6 - next.table.length, next.cpuHand.length));
+  const used = cards.slice(0, maxAdd);
+  if (used.length === 0) return next;
+  for (const card of used) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
   }
   next.phase = "cpu_defense";
-  next.message = `You throw in ${cards.map(cardToString).join(", ")}.`;
+  next.message = `You throw in ${used.map(cardToString).join(", ")}.`;
   checkWin(next);
   return next;
 }
@@ -510,7 +515,7 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "player_throw": {
-        const maxTotal = Math.min(6, next.cpuHand.length + 6);
+        const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.cpuHand.length);
         const throws = getValidThrows(next.playerHand, next.table, maxTotal);
         if (throws.length === 0 || depth > 3) {
           const n = clearTable(next);
@@ -568,7 +573,7 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "cpu_throw": {
-        const maxTotal = Math.min(6, next.playerHand.length + next.table.length * 2);
+        const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.playerHand.length);
         const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
         if (throws.length === 0 || depth > 3) {
           const n = clearTable(next);
