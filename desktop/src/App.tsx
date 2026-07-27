@@ -539,7 +539,7 @@ const avatarStyles: Array<{ id: SocialAvatarStyle; label: string }> = [
   { id: "pixel", label: "Pixel" },
   { id: "mono", label: "Mono" },
 ];
-const avatarIcons = ["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"];
+const avatarIcons = ["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐", "🚀", "🎯", "🏆", "🛡", "🦉", "🐢", "🐺", "🐱", "🍄", "🌙", "🌸", "🍀", "💎", "🎲", "🎧", "📝", "🔮", "🧩", "🕹", "📖", "🧪", "🛰", "🌌", "🦊"];
 const alphabetLetters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
 type UpdateInfo = {
@@ -2063,7 +2063,7 @@ function App() {
   const [hasUnreadSocial, setHasUnreadSocial] = useState(false);
   const [emojiPickerPostId, setEmojiPickerPostId] = useState<string | null>(null);
   const [socialSubtab, setSocialSubtab] = useState<SocialSubtab>("feed");
-  const [feedScope, setFeedScope] = useState<SocialFeedScope>("global");
+  const [feedScope, setFeedScope] = useState<SocialFeedScope>("friends");
   const [feedNoteDraft, setFeedNoteDraft] = useState("");
   const [feedImageDraft, setFeedImageDraft] = useState<PreparedFeedImage | null>(null);
   const [r2UsageStatus, setR2UsageStatus] = useState<R2UsageStatus | null>(null);
@@ -2073,7 +2073,7 @@ function App() {
   const [expandedFeedComments, setExpandedFeedComments] = useState<Set<string>>(() => new Set());
   const [feedCommentDrafts, setFeedCommentDrafts] = useState<Record<string, string>>({});
   const [feedCommentSavingId, setFeedCommentSavingId] = useState<string | null>(null);
-  const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("global");
+  const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("friends");
   const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
   const [friendCodeDraft, setFriendCodeDraft] = useState("");
   const [socialSyncing, setSocialSyncing] = useState(false);
@@ -4477,11 +4477,12 @@ function App() {
 
       setDurakSelected((prev) => {
         if (prev.includes(idx)) return prev.filter((i) => i !== idx);
+        const maxCards = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
+        if (prev.length >= maxCards) return prev;
         if (prev.length === 0) return [idx];
         const firstCard = durakGameState.playerHand[prev[0]];
         if (firstCard.rank !== card.rank) return [idx];
-        const maxAttack = Math.min(6, durakGameState.cpuHand.length);
-        if (prev.length >= maxAttack) return prev;
+
         return [...prev, idx];
       });
     }
@@ -4522,8 +4523,8 @@ function App() {
   function handleDurakThrow() {
     if (!durakGameState || durakGameState.phase !== "player_throw") return;
     if (durakSelected.length > 0) {
-      const maxCards = durakGameState.cpuHand.length;
-      const cards = durakSelected.map((i) => durakGameState.playerHand[i]).slice(0, maxCards);
+      const maxThrow = Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
+      const cards = durakSelected.map((i) => durakGameState.playerHand[i]).slice(0, maxThrow);
       handleDurakFinished(processCpuTurn(executePlayerThrow(durakGameState, cards)));
     } else {
       handleDurakFinished(processCpuTurn(playerPassThrow(durakGameState)));
@@ -8341,7 +8342,7 @@ function App() {
           {socialSubtab === "feed" ? (
             <div className="social-feed-shell">
               <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope">
-                {(["global", "friends"] as SocialFeedScope[]).map((scope) => (
+                {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
                   <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
                     {scope === "global" ? "Global Feed" : "Friends Feed"}
                   </button>
@@ -8728,7 +8729,7 @@ function App() {
               </div>
 
               <div className="arena-scope-toggle" aria-label="Leaderboard scope">
-                {(["global", "friends"] as SocialLeaderboardScope[]).map((scope) => (
+                {(["friends", "global"] as SocialLeaderboardScope[]).map((scope) => (
                   <button key={scope} type="button" className={socialScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setSocialScope(scope)}>
                     {scope === "global" ? "World Arena" : "Friends Arena"}
                   </button>

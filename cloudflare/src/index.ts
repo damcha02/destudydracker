@@ -65,7 +65,7 @@ const R2_CLASS_B_WARNING_MONTHLY = 200_000;
 const R2_CLASS_B_HARD_MONTHLY = 250_000;
 const R2_OWNER_FRIEND_CODE = "ZRWL-WKNF";
 const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
-const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐"]);
+const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐", "🚀", "🎯", "🏆", "🛡", "🦉", "🐢", "🐺", "🐱", "🍄", "🌙", "🌸", "🍀", "💎", "🎲", "🎧", "📝", "🔮", "🧩", "🕹", "📖", "🧪", "🛰", "🌌", "🦊"]);
 const feedImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 function json(data: unknown, status = 200) {
