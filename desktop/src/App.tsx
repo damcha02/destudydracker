@@ -523,6 +523,18 @@ function canEditSquadMember(actorRole: SocialSquadRole, targetRole: SocialSquadR
   return false;
 }
 
+function canKickSquadMember(actorRole: SocialSquadRole, targetRole: SocialSquadRole) {
+  if (actorRole === "leader") return targetRole !== "leader";
+  if (actorRole === "co_leader") return squadRoleRank(targetRole) < squadRoleRank("co_leader");
+  if (actorRole === "elder") return targetRole === "member";
+  return false;
+}
+
+function getAssignableSquadRoles(actorRole: SocialSquadRole, targetRole: SocialSquadRole) {
+  if (!canEditSquadMember(actorRole, targetRole)) return [];
+  return squadRoles.filter((role) => role !== "leader" && (actorRole === "leader" || squadRoleRank(role) < squadRoleRank("co_leader")));
+}
+
 function pickSquadSuggestions(squads: SquadSearchResult[]) {
   const pool = [...squads];
   for (let i = pool.length - 1; i > 0; i -= 1) {
@@ -2133,6 +2145,7 @@ function App() {
   const [squadSearching, setSquadSearching] = useState(false);
   const [squadSuggestionsLoading, setSquadSuggestionsLoading] = useState(false);
   const [squadChatDraft, setSquadChatDraft] = useState("");
+  const [expandedSquadMemberId, setExpandedSquadMemberId] = useState<string | null>(null);
   const [squadSettingsEditing, setSquadSettingsEditing] = useState(false);
   const [squadSettingsNameDraft, setSquadSettingsNameDraft] = useState("");
   const [squadSettingsPrivateDraft, setSquadSettingsPrivateDraft] = useState(false);
@@ -3855,6 +3868,7 @@ function App() {
     try {
       const result = await setSquadMemberRole(state.social, targetUserId, role);
       applySocialSnapshot(result);
+      setExpandedSquadMemberId(null);
       setMessage("Squad rank updated.");
     } catch (error: unknown) {
       console.warn("Could not update squad rank.", error);
@@ -3870,6 +3884,7 @@ function App() {
     try {
       const result = await kickSquadMember(state.social, targetUserId);
       applySocialSnapshot(result);
+      setExpandedSquadMemberId(null);
       setMessage("Member kicked.");
     } catch (error: unknown) {
       console.warn("Could not kick squad member.", error);
@@ -9041,18 +9056,33 @@ function App() {
                       <div className="arena-panel-head"><span className="arena-panel-icon">R</span><div><span className="arena-kicker">Squad roster</span><h3>Members</h3></div></div>
                       <div className="squad-member-list">
                         {currentSquad.members.map((member) => {
-                          const editable = currentSquadRole ? canEditSquadMember(currentSquadRole, member.role) && !member.isSelf : false;
+                          const expanded = expandedSquadMemberId === member.userId;
+                          const assignableRoles = currentSquadRole && !member.isSelf ? getAssignableSquadRoles(currentSquadRole, member.role) : [];
+                          const canKickMember = Boolean(currentSquadRole && !member.isSelf && canKickSquadMember(currentSquadRole, member.role));
+                          const canManageMember = assignableRoles.length > 0 || canKickMember;
                           return (
-                            <div key={member.userId} className="squad-member-card">
-                              <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
-                              <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
-                              <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
-                              {editable ? (
-                                <div className="squad-member-actions">
-                                  <select value={member.role} onChange={(event) => void changeSquadMemberRole(member.userId, event.target.value as SocialSquadRole)} disabled={socialSyncing}>
-                                    {squadRoles.filter((role) => role !== "leader" && (currentSquadRole === "leader" || squadRoleRank(role) < squadRoleRank("co_leader"))).map((role) => <option key={role} value={role}>{squadRoleLabels[role]}</option>)}
-                                  </select>
-                                  <button type="button" className="arena-btn arena-btn--decline" onClick={() => void kickFromSquad(member.userId, member.displayName)} disabled={socialSyncing}>Kick</button>
+                            <div key={member.userId} className={`squad-member-card ${expanded ? "squad-member-card--expanded" : ""}`}>
+                              <button type="button" className="squad-member-summary" onClick={() => setExpandedSquadMemberId((current) => current === member.userId ? null : member.userId)}>
+                                <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                                <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
+                                <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
+                              </button>
+                              {expanded ? (
+                                <div className="squad-member-expanded">
+                                  <div>
+                                    <strong>{canManageMember ? `Manage ${member.displayName}` : member.isSelf ? "This is you" : "No actions available"}</strong>
+                                    <span>{squadRoleLabels[member.role]} · joined {formatProfileSeenAt(member.joinedAt)}</span>
+                                  </div>
+                                  {assignableRoles.length ? (
+                                    <div className="squad-member-role-actions">
+                                      {assignableRoles.map((role) => (
+                                        <button key={role} type="button" className={`arena-btn ${member.role === role ? "arena-btn--send" : "arena-btn--decline"}`} onClick={() => void changeSquadMemberRole(member.userId, role)} disabled={socialSyncing || member.role === role}>
+                                          Make {squadRoleLabels[role]}
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {canKickMember ? <button type="button" className="arena-btn arena-btn--decline squad-kick-expanded" onClick={() => void kickFromSquad(member.userId, member.displayName)} disabled={socialSyncing}>Kick from squad</button> : null}
                                 </div>
                               ) : null}
                             </div>

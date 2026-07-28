@@ -1185,8 +1185,7 @@
   margin-top: 10px;
 }
 
-.squad-search-card,
-.squad-member-card {
+.squad-search-card {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1194,6 +1193,68 @@
   border-radius: 16px;
   padding: 11px;
   background: var(--surface-2);
+}
+
+.squad-member-card {
+  display: grid;
+  gap: 0;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 16px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.squad-member-card--expanded {
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+  background: color-mix(in oklch, var(--accent) 5%, var(--surface-2));
+}
+
+.squad-member-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: 0;
+  padding: 11px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.squad-member-summary:hover,
+.squad-member-summary:focus-visible {
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+  outline: none;
+}
+
+.squad-member-expanded {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  padding: 11px;
+}
+
+.squad-member-expanded > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.squad-member-expanded span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.squad-member-role-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.squad-kick-expanded {
+  justify-self: start;
 }
 
 .squad-search-card div,

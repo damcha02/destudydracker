@@ -432,6 +432,7 @@ function canChangeRole(actorRole: SquadRole, targetRole: SquadRole, nextRole: Sq
 function canKick(actorRole: SquadRole, targetRole: SquadRole) {
   if (actorRole === "leader") return targetRole !== "leader";
   if (actorRole === "co_leader") return roleRank(targetRole) < roleRank("co_leader");
+  if (actorRole === "elder") return targetRole === "member";
   return false;
 }
 
