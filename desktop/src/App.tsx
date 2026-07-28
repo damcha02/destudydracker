@@ -1904,7 +1904,7 @@ function ArenaRankBadge({ rank, large = false }: { rank: number; large?: boolean
 
 function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEntry; onProfile?: () => void }) {
   return (
-    <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`} onClick={onProfile} role={onProfile ? "button" : undefined} tabIndex={onProfile ? 0 : undefined} onKeyDown={onProfile ? (e) => { if (e.key === "Enter" || e.key === " ") onProfile(); } : undefined}>
+    <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`} onClick={onProfile} role={onProfile ? "button" : undefined} tabIndex={onProfile ? 0 : undefined} onKeyDown={onProfile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onProfile(); } } : undefined}>
       <ArenaRankBadge rank={entry.rank} />
       <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size="sm" />
       <div className="arena-lb-person">
@@ -2961,18 +2961,7 @@ function App() {
     : state.petRockPats >= 10 ? { plant: "\u{1F331}", label: "Sprouting Rock" }
     : { plant: "", label: "Pet Rock" };
   const streakEmoji = state.unlockStreak >= 7 ? "\u{1F525}\u{1F525}\u{1F525}" : state.unlockStreak >= 3 ? "\u{1F525}\u{1F525}" : state.unlockStreak >= 1 ? "\u{1F525}" : "";
-  const badges: ProfileBadge[] = [
-    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: "Unlock all 5 break games in one day." },
-    { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak, how: "Unlock any Break Room game once." },
-    { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire, how: "Unlock at least one break game on 3 consecutive days." },
-    { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird || (state.badgeCounts["early-bird"] ?? 0) > 0, daily: true, how: "Play an unlocked break game before 9:00 AM." },
-    { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl || (state.badgeCounts["night-owl"] ?? 0) > 0, daily: true, how: "Play an unlocked break game at or after 10:00 PM." },
-    { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner, daily: true, how: "Unlock your first break after earning a 45-minute break token from one single study or exam session." },
-    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
-    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
-    { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
-  ];
-  const petRockBadges: ProfileBadge[] = [
+  const petRockMilestones = [
     { id: "rock-sprouting", icon: "\u{1F331}", name: "Sprouting Rock", threshold: 10, label: "10" },
     { id: "rock-growing", icon: "\u{1F33F}", name: "Growing Rock", threshold: 50, label: "50" },
     { id: "rock-flourished", icon: "\u{1F333}", name: "Flourished Rock", threshold: 100, label: "100" },
@@ -2992,7 +2981,22 @@ function App() {
     { id: "rock-god", icon: "\u{1F5FF}", name: "Rock God", threshold: 1000000, label: "1M" },
     { id: "rock-demon", icon: "\u{1F47F}", name: "Demon", threshold: 6666666, label: "6,666,666" },
     { id: "rock-guardian-angel", icon: "\u{1F47C}", name: "Guardian Angel", threshold: 8888888, label: "8,888,888" },
-  ].map((badge) => ({
+  ];
+  const currentRockBadge = petRockMilestones.findLast((badge) => state.petRockPats >= badge.threshold);
+  const nextRockBadge = petRockMilestones.find((badge) => state.petRockPats < badge.threshold);
+  const badges: ProfileBadge[] = [
+    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: "Unlock all 5 break games in one day." },
+    { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak, how: "Unlock any Break Room game once." },
+    { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire, how: "Unlock at least one break game on 3 consecutive days." },
+    { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird || (state.badgeCounts["early-bird"] ?? 0) > 0, daily: true, how: "Play an unlocked break game before 9:00 AM." },
+    { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl || (state.badgeCounts["night-owl"] ?? 0) > 0, daily: true, how: "Play an unlocked break game at or after 10:00 PM." },
+    { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner, daily: true, how: "Unlock your first break after earning a 45-minute break token from one single study or exam session." },
+    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
+    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
+    { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
+    { id: "rock-current", icon: currentRockBadge?.icon ?? "\u{1FAA8}", name: currentRockBadge?.name ?? "Pet Rock", earned: Boolean(currentRockBadge), how: nextRockBadge ? `Pat the pet rock ${nextRockBadge.label} times.` : "Reach the final pet rock form." },
+  ];
+  const petRockBadges: ProfileBadge[] = petRockMilestones.map((badge) => ({
     id: badge.id,
     icon: badge.icon,
     name: badge.name,
@@ -4008,6 +4012,10 @@ function App() {
     }
   }
 
+  const loadInitialSquadSuggestions = useEffectEvent(() => {
+    void loadSquadSuggestions({ forceFetch: true });
+  });
+
   async function joinOrRequestSquad(squad: SquadSearchResult) {
     setSocialSyncing(true);
     try {
@@ -4397,7 +4405,7 @@ function App() {
 
   useEffect(() => {
     if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "squad" || currentSquad || squadSuggestions.length || squadSuggestionsLoading) return;
-    void loadSquadSuggestions({ forceFetch: true });
+    loadInitialSquadSuggestions();
   }, [socialConfigured, state.activeTab, socialSubtab, currentSquad, squadSuggestions.length, squadSuggestionsLoading]);
 
   const initDurakPuzzle = useEffectEvent(() => {
@@ -8920,7 +8928,7 @@ function App() {
                   <span>You</span>
                 </div>
                 {state.social.friends.slice(0, 10).map((friend) => (
-                  <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
+                  <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(friend); } }}>
                     <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="md" /></div>
                     <span>{friend.displayName}</span>
                   </div>
@@ -9457,7 +9465,7 @@ function App() {
                   {state.social.friends.length ? (
                     <div className="arena-friend-grid">
                       {state.social.friends.map((friend) => (
-                        <div key={friend.userId} className="arena-friend-card" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(friend); }}>
+                        <div key={friend.userId} className="arena-friend-card" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(friend); } }}>
                           <ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="sm" />
                           <div><strong>{friend.displayName}</strong><span>{friend.friendCode}{friend.lastSeenAt ? ` · seen ${formatProfileSeenAt(friend.lastSeenAt)}` : ""}</span></div>
                         </div>
@@ -9513,7 +9521,7 @@ function App() {
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
                     const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
                     return (
-                      <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") openFriendProfile(profileTarget); }}>
+                      <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(profileTarget); } }}>
                         <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
                         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                         <span>{formatMinutes(entry.minutes)}</span>

@@ -449,12 +449,6 @@ async function getSquadMemberCount(env: Env, squadId: string) {
   return Number(row?.count ?? 0);
 }
 
-async function addSquadMemberHistory(env: Env, squadId: string, userId: string, role: SquadRole) {
-  await env.DB.prepare("INSERT INTO squad_member_history (id, squad_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)")
-    .bind(crypto.randomUUID(), squadId, userId, role)
-    .run();
-}
-
 async function closeSquadMemberHistory(env: Env, squadId: string, userId: string) {
   await env.DB.prepare("UPDATE squad_member_history SET left_at = CURRENT_TIMESTAMP WHERE squad_id = ? AND user_id = ? AND left_at IS NULL")
     .bind(squadId, userId)
@@ -1418,8 +1412,9 @@ async function handleSquadCreate(request: Request, env: Env) {
       .bind(squadId, cleanSquadName(payload.name), payload.isPrivate ? 1 : 0, userId),
     env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'leader')")
       .bind(squadId, userId),
+    env.DB.prepare("INSERT INTO squad_member_history (id, squad_id, user_id, role, joined_at) VALUES (?, ?, ?, 'leader', CURRENT_TIMESTAMP)")
+      .bind(crypto.randomUUID(), squadId, userId),
   ]);
-  await addSquadMemberHistory(env, squadId, userId, "leader");
   return json(await getSocialSnapshot(request, env, userId));
 }
 
@@ -1482,15 +1477,22 @@ async function handleSquadJoin(request: Request, env: Env) {
       ON CONFLICT(squad_id, user_id) DO UPDATE SET status = 'pending', responded_at = NULL, responded_by_user_id = NULL
     `).bind(id, squadId, userId).run();
   } else {
-    const insert = await env.DB.prepare(`
+    const [insert] = await env.DB.batch([
+      env.DB.prepare(`
       INSERT INTO squad_members (squad_id, user_id, role)
       SELECT ?, ?, 'member'
       WHERE (SELECT COUNT(*) FROM squad_members WHERE squad_id = ?) < ?
         AND NOT EXISTS (SELECT 1 FROM squad_members WHERE user_id = ?)
-    `).bind(squadId, userId, squadId, MAX_SQUAD_MEMBERS, userId).run();
+      `).bind(squadId, userId, squadId, MAX_SQUAD_MEMBERS, userId),
+      env.DB.prepare(`
+        INSERT INTO squad_member_history (id, squad_id, user_id, role, joined_at)
+        SELECT ?, ?, ?, 'member', CURRENT_TIMESTAMP
+        WHERE EXISTS (SELECT 1 FROM squad_members WHERE squad_id = ? AND user_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM squad_member_history WHERE squad_id = ? AND user_id = ? AND left_at IS NULL)
+      `).bind(crypto.randomUUID(), squadId, userId, squadId, userId, squadId, userId),
+      env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(squadId),
+    ]);
     if ((insert.meta?.changes ?? 0) < 1) return text("That squad is already full.", 409);
-    await addSquadMemberHistory(env, squadId, userId, "member");
-    await env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(squadId).run();
   }
   return json(await getSocialSnapshot(request, env, userId));
 }
@@ -1510,18 +1512,28 @@ async function handleSquadRespond(request: Request, env: Env) {
   if (response === "accepted") {
     if (await getUserSquadMember(env, joinRequest.userId)) return text("That user is already in a squad.", 409);
     if (await getSquadMemberCount(env, actor.squadId) >= MAX_SQUAD_MEMBERS) return text("That squad is already full.", 409);
-    const insert = await env.DB.prepare(`
+    const [insert] = await env.DB.batch([
+      env.DB.prepare(`
       INSERT INTO squad_members (squad_id, user_id, role)
       SELECT ?, ?, 'member'
       WHERE (SELECT COUNT(*) FROM squad_members WHERE squad_id = ?) < ?
         AND NOT EXISTS (SELECT 1 FROM squad_members WHERE user_id = ?)
-    `).bind(actor.squadId, joinRequest.userId, actor.squadId, MAX_SQUAD_MEMBERS, joinRequest.userId).run();
-    if ((insert.meta?.changes ?? 0) < 1) return text("That squad is already full.", 409);
-    await addSquadMemberHistory(env, actor.squadId, joinRequest.userId, "member");
-    await env.DB.batch([
-      env.DB.prepare("UPDATE squad_join_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ? WHERE id = ?").bind(userId, joinRequest.id),
+      `).bind(actor.squadId, joinRequest.userId, actor.squadId, MAX_SQUAD_MEMBERS, joinRequest.userId),
+      env.DB.prepare(`
+        INSERT INTO squad_member_history (id, squad_id, user_id, role, joined_at)
+        SELECT ?, ?, ?, 'member', CURRENT_TIMESTAMP
+        WHERE EXISTS (SELECT 1 FROM squad_members WHERE squad_id = ? AND user_id = ?)
+          AND NOT EXISTS (SELECT 1 FROM squad_member_history WHERE squad_id = ? AND user_id = ? AND left_at IS NULL)
+      `).bind(crypto.randomUUID(), actor.squadId, joinRequest.userId, actor.squadId, joinRequest.userId, actor.squadId, joinRequest.userId),
+      env.DB.prepare(`
+        UPDATE squad_join_requests
+        SET status = 'accepted', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ?
+        WHERE id = ?
+          AND EXISTS (SELECT 1 FROM squad_members WHERE squad_id = ? AND user_id = ?)
+      `).bind(userId, joinRequest.id, actor.squadId, joinRequest.userId),
       env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(actor.squadId),
     ]);
+    if ((insert.meta?.changes ?? 0) < 1) return text("That squad is already full.", 409);
   } else {
     await env.DB.prepare("UPDATE squad_join_requests SET status = 'declined', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ? WHERE id = ?")
       .bind(userId, joinRequest.id)

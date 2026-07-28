@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialSquadRole, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
@@ -126,6 +126,27 @@ function normalizeSquadMessages(messages: unknown): SocialState["squadMessages"]
       body: record.body,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
       isSelf: Boolean(record.isSelf),
+    }];
+  });
+}
+
+function normalizeSquadScoreEntries(entries: unknown): SocialSquadScoreEntry[] {
+  if (!Array.isArray(entries)) return [];
+  return entries.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record.squadId !== "string" || typeof record.squadName !== "string") return [];
+    return [{
+      squadId: record.squadId,
+      squadName: record.squadName,
+      isPrivate: Boolean(record.isPrivate),
+      memberCount: typeof record.memberCount === "number" ? record.memberCount : 0,
+      totalMinutes: typeof record.totalMinutes === "number" ? record.totalMinutes : 0,
+      totalSessions: typeof record.totalSessions === "number" ? record.totalSessions : 0,
+      averageMinutes: typeof record.averageMinutes === "number" ? record.averageMinutes : 0,
+      rank: typeof record.rank === "number" ? record.rank : 0,
+      points: typeof record.points === "number" ? record.points : 0,
+      scoredDays: typeof record.scoredDays === "number" ? record.scoredDays : undefined,
     }];
   });
 }
@@ -415,9 +436,9 @@ function normalizeSocialState(social: unknown): SocialState {
       },
     },
     cachedSquadScoreLeaderboards: {
-      daily: record.cachedSquadScoreLeaderboards?.daily ?? [],
-      weekly: record.cachedSquadScoreLeaderboards?.weekly ?? [],
-      overall: record.cachedSquadScoreLeaderboards?.overall ?? [],
+      daily: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.daily),
+      weekly: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.weekly),
+      overall: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.overall),
     },
   };
 }
