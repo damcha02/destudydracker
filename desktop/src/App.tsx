@@ -36,7 +36,7 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
 import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSquadScoreEntry, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
@@ -1656,6 +1656,15 @@ interface PreparedFeedImage {
   name: string;
 }
 
+interface FeedPollDraft {
+  question: string;
+  multiple: boolean;
+  options: string[];
+}
+
+const emptyFeedPollDraft = (): FeedPollDraft => ({ question: "", multiple: false, options: ["", ""] });
+const MAX_FEED_POLL_OPTIONS = 12;
+
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number) {
   return new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("Could not prepare image.")), type, quality);
@@ -1722,12 +1731,27 @@ function buildFeedPostFromSession(session: StudySession, state: AppState, course
   };
 }
 
+function prepareFeedPollDraft(draft: FeedPollDraft) {
+  const question = draft.question.trim().replace(/\s+/g, " ").slice(0, 180);
+  const seen = new Set<string>();
+  const options = draft.options.flatMap((option) => {
+    const text = option.trim().replace(/\s+/g, " ").slice(0, 100);
+    const key = text.toLocaleLowerCase();
+    if (!text || seen.has(key)) return [];
+    seen.add(key);
+    return [{ id: makeId(), text, votes: 0, selected: false }];
+  }).slice(0, MAX_FEED_POLL_OPTIONS);
+  if (!question && options.length === 0) return null;
+  if (!question || options.length < 2) throw new Error("A poll needs a question and at least two different options.");
+  return { question, multiple: draft.multiple, options, totalVotes: 0 };
+}
+
 function getSessionCourseName(state: AppState, session: StudySession) {
   return state.courses.find((course) => course.id === session.courseId)?.name ?? "";
 }
 
-function queueFeedPost(state: AppState, session: StudySession, courseName: string, note?: string) {
-  const post = buildFeedPostFromSession(session, state, courseName, note);
+function queueFeedPost(state: AppState, session: StudySession, courseName: string, note?: string, poll?: SocialFeedPost["poll"]) {
+  const post = { ...buildFeedPostFromSession(session, state, courseName, note), poll: poll ?? null };
   const alreadyQueued = state.social.pendingFeedPosts.some((item) => item.id === post.id);
   const cachedLocally = [...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((item) => item.id === post.id);
   if (alreadyQueued || cachedLocally) return state;
@@ -2212,6 +2236,8 @@ function App() {
   const [feedScope, setFeedScope] = useState<SocialFeedScope>("friends");
   const [feedNoteDraft, setFeedNoteDraft] = useState("");
   const [feedImageDraft, setFeedImageDraft] = useState<PreparedFeedImage | null>(null);
+  const [feedPollDraft, setFeedPollDraft] = useState<FeedPollDraft>(() => emptyFeedPollDraft());
+  const [feedPollPanelOpen, setFeedPollPanelOpen] = useState(false);
   const [r2UsageStatus, setR2UsageStatus] = useState<R2UsageStatus | null>(null);
   const [failedFeedImages, setFailedFeedImages] = useState<Set<string>>(() => new Set());
   const [expandedFeedImageId, setExpandedFeedImageId] = useState<string | null>(null);
@@ -2918,6 +2944,7 @@ function App() {
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
   const feedImagesVisible = !state.settings.hideFeedImages;
+  const feedPollsVisible = !state.settings.hideFeedPolls;
   const expandedFeedImage = feedImagesVisible && expandedFeedImageId ? socialFeed.find((post) => post.id === expandedFeedImageId && post.imageUrl) : null;
   const friendInviteLink = makeFriendInviteLink(state.social.friendCode);
   const incomingFriendRequestCount = state.social.incomingFriendRequests.length;
@@ -2925,6 +2952,7 @@ function App() {
   const latestFeedSessionPosted = latestFeedSession
     ? [...state.social.pendingFeedPosts, ...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === latestFeedSession.id)
     : false;
+  const feedPollHasDraft = Boolean(feedPollDraft.question.trim() || feedPollDraft.options.some((option) => option.trim()));
   const liveFriends = state.social.friends.filter((friend) => {
     return isRecentlyActive(friend.lastSeenAt);
   });
@@ -3380,6 +3408,16 @@ function App() {
     if (!state.settings.hideFeedImages) setExpandedFeedImageId(null);
   }
 
+  function toggleFeedPolls() {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        hideFeedPolls: !current.settings.hideFeedPolls,
+      },
+    }));
+  }
+
   async function copyFriendCode() {
     try {
       await navigator.clipboard.writeText(state.social.friendCode);
@@ -3606,6 +3644,26 @@ function App() {
     }
   }
 
+  function updateFeedPollOption(index: number, value: string) {
+    setFeedPollDraft((current) => ({
+      ...current,
+      options: current.options.map((option, optionIndex) => optionIndex === index ? value : option),
+    }));
+  }
+
+  function addFeedPollOption() {
+    setFeedPollDraft((current) => current.options.length >= MAX_FEED_POLL_OPTIONS ? current : { ...current, options: [...current.options, ""] });
+  }
+
+  function removeFeedPollOption(index: number) {
+    setFeedPollDraft((current) => current.options.length <= 2 ? current : { ...current, options: current.options.filter((_, optionIndex) => optionIndex !== index) });
+  }
+
+  function clearFeedPollDraft() {
+    setFeedPollDraft(emptyFeedPollDraft());
+    setFeedPollPanelOpen(false);
+  }
+
   async function handleEditingFeedPostImageChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -3637,14 +3695,24 @@ function App() {
       return;
     }
 
+    let poll: SocialFeedPost["poll"] = null;
+    try {
+      poll = prepareFeedPollDraft(feedPollDraft);
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error, "Could not prepare poll."));
+      return;
+    }
+
     let nextState: AppState | null = null;
     setState((current) => {
-      nextState = queueFeedPost(current, latestFeedSession, getSessionCourseName(current, latestFeedSession), feedNoteDraft);
+      nextState = queueFeedPost(current, latestFeedSession, getSessionCourseName(current, latestFeedSession), feedNoteDraft, poll);
       return nextState;
     });
     const image = feedImageDraft;
     setFeedNoteDraft("");
     setFeedImageDraft(null);
+    setFeedPollDraft(emptyFeedPollDraft());
+    setFeedPollPanelOpen(false);
     if (!image) {
       setMessage(socialConfigured ? "Post queued. Sync to publish it to the feed." : "Post queued locally. Configure sync to publish it.");
       return;
@@ -3737,6 +3805,54 @@ function App() {
     } catch (error: unknown) {
       console.warn("Could not sync feed reaction.", error);
       setMessage(getErrorMessage(error, "Could not sync reaction."));
+    }
+  }
+
+  async function voteFeedPoll(post: SocialFeedPost, optionId: string) {
+    if (!post.poll) return;
+    if (state.social.pendingFeedPosts.some((item) => item.id === post.id)) {
+      setMessage("Sync this post before voting on its poll.");
+      return;
+    }
+    if (!socialConfigured) {
+      setMessage("Social sync is required for poll voting.");
+      return;
+    }
+
+    const applyPoll = (poll: SocialFeedPost["poll"]) => {
+      const updatePost = (item: SocialFeedPost) => item.id === post.id ? { ...item, poll } : item;
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.map(updatePost),
+            friends: current.social.cachedFeeds.friends.map(updatePost),
+          },
+          pendingFeedPosts: current.social.pendingFeedPosts.map(updatePost),
+        },
+      }));
+    };
+
+    const wasSelected = post.poll.options.find((option) => option.id === optionId)?.selected ?? false;
+    const optimisticOptions = post.poll.options.map((option) => {
+      if (post.poll?.multiple) {
+        if (option.id !== optionId) return option;
+        return { ...option, selected: !wasSelected, votes: Math.max(0, option.votes + (wasSelected ? -1 : 1)) };
+      }
+      if (option.id === optionId) return { ...option, selected: !wasSelected, votes: Math.max(0, option.votes + (wasSelected ? -1 : 1)) };
+      if (option.selected && !wasSelected) return { ...option, selected: false, votes: Math.max(0, option.votes - 1) };
+      return option;
+    });
+    applyPoll({ ...post.poll, options: optimisticOptions, totalVotes: optimisticOptions.reduce((sum, option) => sum + option.votes, 0) });
+
+    try {
+      const result = await voteOnFeedPoll(state.social, post.id, optionId);
+      applyPoll(result.poll);
+    } catch (error: unknown) {
+      console.warn("Could not sync poll vote.", error);
+      applyPoll(post.poll);
+      setMessage(getErrorMessage(error, "Could not sync poll vote."));
     }
   }
 
@@ -6994,6 +7110,18 @@ function App() {
                   />
                   <span className="ios-switch" aria-hidden="true" />
                 </label>
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Feed polls</strong>
+                    <small>{state.settings.hideFeedPolls ? "Hidden" : "Shown"} · social feed polls on this device</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={!state.settings.hideFeedPolls}
+                    onChange={toggleFeedPolls}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
               </div>
               <button
                 type="button"
@@ -8959,11 +9087,40 @@ function App() {
                   <p>{latestFeedSession ? "Write one sentence, or leave it blank for a chaotic default." : "Finish a study or exam block, then publish it here."}</p>
                 </div>
                 <input className="arena-input" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
-                <label className="feed-image-picker">
-                  <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
-                  <span>{feedImageDraft ? "Change image" : "Add image"}</span>
-                </label>
+                <div className="feed-composer-actions">
+                  <label className="feed-action-icon" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
+                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
+                    <span aria-hidden="true">▧</span>
+                  </label>
+                  <button type="button" className={`feed-action-icon ${feedPollHasDraft ? "feed-action-icon--active" : ""}`} onClick={() => setFeedPollPanelOpen((open) => !open)} disabled={!latestFeedSession || latestFeedSessionPosted} title="Create poll" aria-label="Create poll">◉</button>
+                </div>
                 <button type="submit" className="arena-btn arena-btn--send" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
+                {feedPollPanelOpen ? (
+                  <div className="feed-poll-popover">
+                    <div className="feed-poll-popover__head">
+                      <strong>Create poll</strong>
+                      <label className="feed-poll-switch">
+                        <span>Multiple answers</span>
+                        <input type="checkbox" checked={feedPollDraft.multiple} onChange={(event) => setFeedPollDraft((current) => ({ ...current, multiple: event.target.checked }))} />
+                        <i className="ios-switch" aria-hidden="true" />
+                      </label>
+                    </div>
+                    <input className="arena-input" value={feedPollDraft.question} onChange={(event) => setFeedPollDraft((current) => ({ ...current, question: event.target.value }))} placeholder="Question" maxLength={180} />
+                    <div className="feed-poll-options-editor">
+                      {feedPollDraft.options.map((option, index) => (
+                        <div key={index} className="feed-poll-option-editor">
+                          <input className="arena-input" value={option} onChange={(event) => updateFeedPollOption(index, event.target.value)} placeholder={`Option ${index + 1}`} maxLength={100} />
+                          {feedPollDraft.options.length > 2 ? <button type="button" className="feed-poll-option-remove" onClick={() => removeFeedPollOption(index)} aria-label={`Remove option ${index + 1}`}>×</button> : null}
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" className="feed-poll-add-option" onClick={addFeedPollOption} disabled={feedPollDraft.options.length >= MAX_FEED_POLL_OPTIONS}>+ Add option</button>
+                    <div className="feed-poll-popover__actions">
+                      <button type="button" className="arena-btn arena-btn--send" onClick={() => setFeedPollPanelOpen(false)}>Done</button>
+                      <button type="button" className="ghost-button small-button" onClick={clearFeedPollDraft}>Clear</button>
+                    </div>
+                  </div>
+                ) : null}
                 {feedImageDraft ? (
                   <div className="feed-image-draft">
                     <img src={feedImageDraft.previewUrl} alt="Selected feed post preview" />
@@ -9028,6 +9185,28 @@ function App() {
                           </div>
                         </div>
                       ) : item.note ? <p>"{item.note}"</p> : null}
+                      {feedPollsVisible && item.poll ? (
+                        <div className="feed-poll-card">
+                          <div className="feed-poll-card__head">
+                            <strong>{item.poll.question}</strong>
+                            <span>{item.poll.multiple ? "Multiple answers" : "One answer"}</span>
+                          </div>
+                          <div className="feed-poll-card__options">
+                            {item.poll.options.map((option) => {
+                              const percent = item.poll?.totalVotes ? Math.round((option.votes / item.poll.totalVotes) * 100) : 0;
+                              return (
+                                <button key={option.id} type="button" className={`feed-poll-vote ${option.selected ? "feed-poll-vote--selected" : ""}`} onClick={() => void voteFeedPoll(item, option.id)}>
+                                  <span className="feed-poll-vote__fill" style={{ width: `${percent}%` }} />
+                                  <span className="feed-poll-vote__check">{option.selected ? "✓" : item.poll?.multiple ? "□" : "○"}</span>
+                                  <span className="feed-poll-vote__text">{option.text}</span>
+                                  <span className="feed-poll-vote__count">{option.votes} · {percent}%</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <small>{item.poll.totalVotes} vote{item.poll.totalVotes === 1 ? "" : "s"}</small>
+                        </div>
+                      ) : null}
                       {feedImagesVisible && item.imageUrl && !failedFeedImages.has(item.id) ? (
                         <button type="button" className="feed-card__image" onClick={() => setExpandedFeedImageId(item.id)} aria-label="Open feed image fullscreen">
                           <img src={`${item.imageUrl}${item.imageUrl.includes("?") ? "&" : "?"}v=${encodeURIComponent(item.imageExpiresAt ?? item.createdAt)}`} alt={`${item.displayName}'s feed post image`} loading="lazy" onLoad={() => setFailedFeedImages((current) => { if (!current.has(item.id)) return current; const next = new Set(current); next.delete(item.id); return next; })} onError={() => setFailedFeedImages((current) => new Set(current).add(item.id))} />
@@ -9810,7 +9989,7 @@ function App() {
               </button>
             </div>
 
-            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patRock(); } }}>
+            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.repeat) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patRock(); } }}>
               <div className="rock-area">
                 <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
                 {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}

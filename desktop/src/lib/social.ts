@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -249,6 +249,18 @@ export async function reactToFeedPost(social: SocialState, postId: string, emoji
       deviceSecret: social.deviceSecret,
       postId,
       emoji,
+    }),
+  });
+}
+
+export async function voteOnFeedPoll(social: SocialState, postId: string, optionId: string) {
+  return requestSocialApi<{ ok: boolean; poll: SocialFeedPoll | null }>("/feed/poll/vote", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      postId,
+      optionId,
     }),
   });
 }

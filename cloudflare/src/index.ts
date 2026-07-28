@@ -41,8 +41,15 @@ interface SyncPayload {
     minutes?: number;
     presetLabel?: string;
     createdAt?: string;
+    poll?: {
+      question?: string;
+      multiple?: boolean;
+      options?: Array<{ id?: string; text?: string }>;
+    } | null;
   }>;
 }
+
+type SyncFeedPoll = NonNullable<NonNullable<SyncPayload["feedPosts"]>[number]["poll"]> | null | undefined;
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -57,6 +64,9 @@ const MAX_DAILY_SESSIONS = 200;
 const MAX_ID_LENGTH = 80;
 const MAX_SECRET_LENGTH = 120;
 const MAX_COMMENT_LENGTH = 220;
+const MAX_POLL_QUESTION_LENGTH = 180;
+const MAX_POLL_OPTION_LENGTH = 100;
+const MAX_POLL_OPTIONS = 12;
 const MAX_SQUAD_NAME_LENGTH = 48;
 const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
@@ -221,6 +231,23 @@ function cleanText(value: unknown, max = 180) {
   return String(value ?? "").trim().slice(0, max);
 }
 
+function cleanPoll(value: SyncFeedPoll) {
+  if (!value || typeof value !== "object") return null;
+  const question = cleanText(value.question, MAX_POLL_QUESTION_LENGTH).replace(/\s+/g, " ");
+  const rawOptions = Array.isArray(value.options) ? value.options : [];
+  const seen = new Set<string>();
+  const options = rawOptions.flatMap((option) => {
+    if (!option || typeof option !== "object") return [];
+    const text = cleanText(option.text, MAX_POLL_OPTION_LENGTH).replace(/\s+/g, " ");
+    const dedupeKey = text.toLocaleLowerCase();
+    if (!text || seen.has(dedupeKey)) return [];
+    seen.add(dedupeKey);
+    return [{ id: cleanText(option.id, 80) || crypto.randomUUID(), text }];
+  }).slice(0, MAX_POLL_OPTIONS);
+  if (!question || options.length < 2) return null;
+  return { question, multiple: Boolean(value.multiple), options };
+}
+
 function feedImageUrl(request: Request, key: string | null) {
   if (!key) return null;
   return `${new URL(request.url).origin}/feed/image/${encodeURIComponent(key)}`;
@@ -334,7 +361,8 @@ async function assertR2ClassBBudget(env: Env) {
 
 async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["feedPosts"]) {
   if (!Array.isArray(posts) || !posts.length) return;
-  const statements = posts.slice(0, 25).map((post) => env.DB.prepare(`
+  const limitedPosts = posts.slice(0, 25);
+  const statements = limitedPosts.map((post) => env.DB.prepare(`
     INSERT INTO feed_posts (id, user_id, type, subject, detail, note, icon, minutes, preset_label, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
@@ -357,6 +385,31 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
     /^\d{4}-\d{2}-\d{2}T/.test(String(post.createdAt ?? "")) ? String(post.createdAt) : new Date().toISOString(),
   ));
   await env.DB.batch(statements);
+
+  for (const post of limitedPosts) {
+    const postId = cleanText(post.id, 80);
+    if (!postId || !("poll" in post)) continue;
+    const poll = cleanPoll(post.poll);
+    if (!poll) {
+      await env.DB.prepare("DELETE FROM feed_polls WHERE post_id = ?").bind(postId).run();
+      continue;
+    }
+    await env.DB.prepare(`
+      INSERT INTO feed_polls (post_id, question, multiple)
+      VALUES (?, ?, ?)
+      ON CONFLICT(post_id) DO UPDATE SET question = excluded.question, multiple = excluded.multiple
+    `).bind(postId, poll.question, poll.multiple ? 1 : 0).run();
+    const optionStatements = poll.options.map((option, index) => env.DB.prepare(`
+      INSERT INTO feed_poll_options (id, post_id, text, sort_order)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET text = excluded.text, sort_order = excluded.sort_order
+    `).bind(option.id, postId, option.text, index));
+    if (optionStatements.length) await env.DB.batch(optionStatements);
+    await env.DB.prepare(`
+      DELETE FROM feed_poll_options
+      WHERE post_id = ? AND id NOT IN (${poll.options.map(() => "?").join(",")})
+    `).bind(postId, ...poll.options.map((option) => option.id)).run();
+  }
 }
 
 async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]) {
@@ -889,6 +942,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
     createdAt: string;
     isSelf: boolean;
   }>>();
+  const polls = new Map<string, { question: string; multiple: boolean; options: Array<{ id: string; text: string; votes: number; selected: boolean }>; totalVotes: number }>();
   if (ids.length) {
     const countRows = await env.DB.prepare(`
       SELECT post_id AS postId, emoji, COUNT(*) AS count
@@ -947,6 +1001,33 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
       });
       comments.set(row.postId, existing);
     });
+
+    const pollRows = await env.DB.prepare(`
+      SELECT post_id AS postId, question, multiple
+      FROM feed_polls
+      WHERE post_id IN (${ids.map(() => "?").join(",")})
+    `).bind(...ids).all<{ postId: string; question: string; multiple: number }>();
+    pollRows.results.forEach((row) => {
+      polls.set(row.postId, { question: row.question, multiple: Boolean(row.multiple), options: [], totalVotes: 0 });
+    });
+    if (pollRows.results.length) {
+      const optionRows = await env.DB.prepare(`
+        SELECT o.id, o.post_id AS postId, o.text, COUNT(v.user_id) AS votes,
+          MAX(CASE WHEN v.user_id = ? THEN 1 ELSE 0 END) AS selected
+        FROM feed_poll_options o
+        LEFT JOIN feed_poll_votes v ON v.option_id = o.id
+        WHERE o.post_id IN (${ids.map(() => "?").join(",")})
+        GROUP BY o.id, o.post_id, o.text, o.sort_order
+        ORDER BY o.post_id, o.sort_order ASC
+      `).bind(userId, ...ids).all<{ id: string; postId: string; text: string; votes: number; selected: number }>();
+      optionRows.results.forEach((row) => {
+        const poll = polls.get(row.postId);
+        if (!poll) return;
+        const votes = Number(row.votes ?? 0);
+        poll.options.push({ id: row.id, text: row.text, votes, selected: Boolean(row.selected) });
+        poll.totalVotes += votes;
+      });
+    }
   }
 
   return posts.results.map((post) => ({
@@ -956,6 +1037,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
     minutes: Number(post.minutes),
     isSelf: post.userId === userId,
     imageUrl: feedImageUrl(request, post.imageKey),
+    poll: polls.get(post.id) ?? null,
     reactions: { fire: 0, brain: 0, clap: 0, ...(reactionCounts.get(post.id) ?? {}) },
     reacted: reacted.get(post.id) ?? {},
     reactedBy: reactedBy.get(post.id) ?? {},
@@ -1200,6 +1282,65 @@ async function handleFeedReaction(request: Request, env: Env) {
     await env.DB.prepare("INSERT OR IGNORE INTO feed_reactions (post_id, user_id, emoji) VALUES (?, ?, ?)").bind(postId, userId, emoji).run();
   }
   return json({ ok: true });
+}
+
+async function getFeedPoll(env: Env, userId: string, postId: string) {
+  const pollRow = await env.DB.prepare("SELECT question, multiple FROM feed_polls WHERE post_id = ?")
+    .bind(postId)
+    .first<{ question: string; multiple: number }>();
+  if (!pollRow) return null;
+  const optionRows = await env.DB.prepare(`
+    SELECT o.id, o.text, COUNT(v.user_id) AS votes,
+      MAX(CASE WHEN v.user_id = ? THEN 1 ELSE 0 END) AS selected
+    FROM feed_poll_options o
+    LEFT JOIN feed_poll_votes v ON v.option_id = o.id
+    WHERE o.post_id = ?
+    GROUP BY o.id, o.text, o.sort_order
+    ORDER BY o.sort_order ASC
+  `).bind(userId, postId).all<{ id: string; text: string; votes: number; selected: number }>();
+  const options = optionRows.results.map((row) => ({
+    id: row.id,
+    text: row.text,
+    votes: Number(row.votes ?? 0),
+    selected: Boolean(row.selected),
+  }));
+  return {
+    question: pollRow.question,
+    multiple: Boolean(pollRow.multiple),
+    options,
+    totalVotes: options.reduce((sum, option) => sum + option.votes, 0),
+  };
+}
+
+async function handleFeedPollVote(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; postId: string; optionId: string }>(request);
+  const userId = String(payload.userId ?? "").trim();
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const postId = cleanText(payload.postId, 80);
+  const optionId = cleanText(payload.optionId, 80);
+  const visibility = await canViewFeedPost(env, userId, postId);
+  if (visibility.missing) return text("Feed post not found.", 404);
+  if (!visibility.allowed) return text("You cannot vote on this poll.", 403);
+
+  const option = await env.DB.prepare(`
+    SELECT o.id, p.multiple
+    FROM feed_poll_options o
+    JOIN feed_polls p ON p.post_id = o.post_id
+    WHERE o.post_id = ? AND o.id = ?
+  `).bind(postId, optionId).first<{ id: string; multiple: number }>();
+  if (!option) return text("Poll option not found.", 404);
+
+  const existing = await env.DB.prepare("SELECT 1 FROM feed_poll_votes WHERE option_id = ? AND user_id = ?")
+    .bind(optionId, userId)
+    .first();
+  if (existing) {
+    await env.DB.prepare("DELETE FROM feed_poll_votes WHERE option_id = ? AND user_id = ?").bind(optionId, userId).run();
+  } else {
+    if (!option.multiple) await env.DB.prepare("DELETE FROM feed_poll_votes WHERE post_id = ? AND user_id = ?").bind(postId, userId).run();
+    await env.DB.prepare("INSERT OR IGNORE INTO feed_poll_votes (post_id, option_id, user_id) VALUES (?, ?, ?)").bind(postId, optionId, userId).run();
+  }
+
+  return json({ ok: true, poll: await getFeedPoll(env, userId, postId) });
 }
 
 async function handleFeedUpdate(request: Request, env: Env) {
@@ -1656,6 +1797,7 @@ export default {
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
+      if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);
       if (request.method === "POST" && url.pathname === "/feed/update") return await handleFeedUpdate(request, env);
       if (request.method === "POST" && url.pathname === "/feed/delete") return await handleFeedDelete(request, env);

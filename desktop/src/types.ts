@@ -98,6 +98,7 @@ export interface Settings {
   themeFamily: "normal";
   backgroundEffect: boolean;
   hideFeedImages: boolean;
+  hideFeedPolls: boolean;
   vaultPath: string | null;
   vaultName: string;
   visibleTabs: Record<TabKey, boolean>;
@@ -157,10 +158,25 @@ export interface SocialFeedPost {
   imageMimeType?: string | null;
   imageExpiresAt?: string | null;
   imageExpiredAt?: string | null;
+  poll?: SocialFeedPoll | null;
   reactions: Record<string, number>;
   reacted?: Record<string, boolean>;
   reactedBy?: Record<string, string[]>;
   comments?: SocialFeedComment[];
+}
+
+export interface SocialFeedPoll {
+  question: string;
+  multiple: boolean;
+  options: SocialFeedPollOption[];
+  totalVotes: number;
+}
+
+export interface SocialFeedPollOption {
+  id: string;
+  text: string;
+  votes: number;
+  selected?: boolean;
 }
 
 export interface SocialFeedComment {

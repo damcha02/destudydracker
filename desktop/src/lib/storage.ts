@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
@@ -151,6 +151,39 @@ function normalizeSquadScoreEntries(entries: unknown): SocialSquadScoreEntry[] {
   });
 }
 
+function normalizeFeedPosts(posts: unknown): SocialFeedPost[] {
+  if (!Array.isArray(posts)) return [];
+  return posts.flatMap((post) => {
+    if (!post || typeof post !== "object") return [];
+    const record = post as SocialFeedPost & Record<string, unknown>;
+    const pollRecord = record.poll && typeof record.poll === "object" ? record.poll as unknown as Record<string, unknown> : null;
+    const pollOptions = pollRecord && Array.isArray(pollRecord.options) ? pollRecord.options.flatMap((option) => {
+      if (!option || typeof option !== "object") return [];
+      const optionRecord = option as Record<string, unknown>;
+      if (typeof optionRecord.id !== "string" || typeof optionRecord.text !== "string") return [];
+      return [{
+        id: optionRecord.id,
+        text: optionRecord.text,
+        votes: typeof optionRecord.votes === "number" ? optionRecord.votes : 0,
+        selected: Boolean(optionRecord.selected),
+      }];
+    }) : [];
+    return [{
+      ...record,
+      type: record.type === "milestone" ? "milestone" : "session",
+      poll: pollRecord && typeof pollRecord.question === "string" && pollOptions.length >= 2 ? {
+        question: pollRecord.question,
+        multiple: Boolean(pollRecord.multiple),
+        options: pollOptions,
+        totalVotes: typeof pollRecord.totalVotes === "number" ? pollRecord.totalVotes : pollOptions.reduce((sum, option) => sum + option.votes, 0),
+      } : null,
+      reactions: record.reactions && typeof record.reactions === "object" ? record.reactions : { fire: 0, brain: 0, clap: 0 },
+      reacted: record.reacted && typeof record.reacted === "object" ? record.reacted : {},
+      comments: Array.isArray(record.comments) ? record.comments : [],
+    }];
+  });
+}
+
 function makeDefaultSocialState(): SocialState {
   const friendCode = makeFriendCode();
   const displaySuffix = friendCode.slice(-4).replace(/[^A-Z0-9]/g, "");
@@ -230,6 +263,7 @@ export const defaultState: AppState = {
     themeFamily: "normal",
     backgroundEffect: true,
     hideFeedImages: false,
+    hideFeedPolls: false,
     vaultPath: null,
     vaultName: "StudyTrackerVault",
     visibleTabs: defaultVisibleTabs,
@@ -414,10 +448,10 @@ function normalizeSocialState(social: unknown): SocialState {
     outgoingSquadRequests: normalizeSquadRequests(record.outgoingSquadRequests),
     squadMessages: normalizeSquadMessages(record.squadMessages),
     cachedFeeds: {
-      global: Array.isArray(record.cachedFeeds?.global) ? record.cachedFeeds.global : [],
-      friends: Array.isArray(record.cachedFeeds?.friends) ? record.cachedFeeds.friends : [],
+      global: normalizeFeedPosts(record.cachedFeeds?.global),
+      friends: normalizeFeedPosts(record.cachedFeeds?.friends),
     },
-    pendingFeedPosts: Array.isArray(record.pendingFeedPosts) ? record.pendingFeedPosts : [],
+    pendingFeedPosts: normalizeFeedPosts(record.pendingFeedPosts),
     cachedLeaderboards: {
       global: {
         daily: record.cachedLeaderboards?.global?.daily ?? [],
@@ -586,6 +620,7 @@ export function loadAppState(): AppState {
         ...parsed.settings,
         visibleTabs,
         hideFeedImages: Boolean(parsed.settings?.hideFeedImages),
+        hideFeedPolls: Boolean(parsed.settings?.hideFeedPolls),
       },
       social: normalizeSocialState(parsed.social),
       timer: timerRecovery.timer,
