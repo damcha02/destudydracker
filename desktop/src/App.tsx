@@ -39,7 +39,7 @@ import type { SummaryFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage } from "./lib/social";
 import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSquadScoreEntry, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
@@ -521,6 +521,15 @@ function canEditSquadMember(actorRole: SocialSquadRole, targetRole: SocialSquadR
   if (actorRole === "leader") return targetRole !== "leader";
   if (actorRole === "co_leader") return squadRoleRank(targetRole) < squadRoleRank("co_leader");
   return false;
+}
+
+function pickSquadSuggestions(squads: SquadSearchResult[]) {
+  const pool = [...squads];
+  for (let i = pool.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, 4);
 }
 
 const feedFallbackNotes = [
@@ -1821,6 +1830,22 @@ function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEnt
   );
 }
 
+function SquadArenaRow({ entry, period, isSelf }: { entry: SocialSquadScoreEntry; period: SocialLeaderboardPeriod; isSelf: boolean }) {
+  return (
+    <div className={`squad-score-row ${isSelf ? "squad-score-row--self" : ""}`}>
+      <ArenaRankBadge rank={entry.rank} />
+      <div className="squad-score-main">
+        <strong>{entry.squadName}{isSelf ? " (Your squad)" : ""}</strong>
+        <span>{entry.isPrivate ? "Private" : "Public"} · {entry.memberCount} members · avg {formatMinutes(Math.round(entry.averageMinutes))}</span>
+      </div>
+      <div className="squad-score-points">
+        <strong>{period === "daily" ? formatMinutes(Math.round(entry.averageMinutes)) : `${entry.points} pts`}</strong>
+        <span>{period === "daily" ? `${entry.points} pts if day ends now` : `${entry.scoredDays ?? 0} scored days`}</span>
+      </div>
+    </div>
+  );
+}
+
 function SummaryPdfViewer({ vaultPath, path, title }: { vaultPath: string; path: string; title: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
@@ -2103,7 +2128,10 @@ function App() {
   const [squadPrivateDraft, setSquadPrivateDraft] = useState(false);
   const [squadSearchDraft, setSquadSearchDraft] = useState("");
   const [squadSearchResults, setSquadSearchResults] = useState<SquadSearchResult[]>([]);
+  const [squadSuggestionPool, setSquadSuggestionPool] = useState<SquadSearchResult[]>([]);
+  const [squadSuggestions, setSquadSuggestions] = useState<SquadSearchResult[]>([]);
   const [squadSearching, setSquadSearching] = useState(false);
+  const [squadSuggestionsLoading, setSquadSuggestionsLoading] = useState(false);
   const [squadChatDraft, setSquadChatDraft] = useState("");
   const [squadSettingsEditing, setSquadSettingsEditing] = useState(false);
   const [squadSettingsNameDraft, setSquadSettingsNameDraft] = useState("");
@@ -2699,7 +2727,9 @@ function App() {
   const badgeVeteran = state.totalUnlocks >= 10;
   const badgeRockMaster = state.petRockPats >= 1000;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
-  const squadLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
+  const squadMemberLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
+  const squadScoreLeaderboard = state.social.cachedSquadScoreLeaderboards[socialPeriod] ?? [];
+  const socialArenaTitle = socialScope === "global" ? "World Arena" : socialScope === "squad" ? "Squad Arena" : "Friends Arena";
   const socialGlobalWeekly = getLeaderboardWithLocalSelf(state, "global", "weekly");
   const socialFriendsWeekly = getLeaderboardWithLocalSelf(state, "friends", "weekly");
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
@@ -3736,11 +3766,36 @@ function App() {
     }
   }
 
+  async function loadSquadSuggestions(options: { forceFetch?: boolean } = {}) {
+    if (!socialConfigured || currentSquad) return;
+    if (!options.forceFetch && squadSuggestionPool.length) {
+      setSquadSuggestions(pickSquadSuggestions(squadSuggestionPool));
+      return;
+    }
+    setSquadSuggestionsLoading(true);
+    try {
+      const result = await searchSquads(state.social, "");
+      setSquadSuggestionPool(result.squads);
+      setSquadSuggestions(pickSquadSuggestions(result.squads));
+    } catch (error: unknown) {
+      console.warn("Could not load squad suggestions.", error);
+      setMessage(getErrorMessage(error, "Could not load squad suggestions."));
+    } finally {
+      setSquadSuggestionsLoading(false);
+    }
+  }
+
   async function joinOrRequestSquad(squad: SquadSearchResult) {
     setSocialSyncing(true);
     try {
       const result = await joinSquad(state.social, squad.id);
       applySocialSnapshot(result);
+      if (squad.isPrivate) {
+        const markPending = (item: SquadSearchResult) => item.id === squad.id ? { ...item, action: "pending" as const } : item;
+        setSquadSuggestions((current) => current.map(markPending));
+        setSquadSuggestionPool((current) => current.map(markPending));
+        setSquadSearchResults((current) => current.map(markPending));
+      }
       await submitSquadSearch();
       setMessage(squad.isPrivate ? "Join request sent." : "Joined squad.");
     } catch (error: unknown) {
@@ -3993,6 +4048,7 @@ function App() {
           incomingSquadRequests: result.social.incomingSquadRequests,
           outgoingSquadRequests: result.social.outgoingSquadRequests,
           squadMessages: result.social.squadMessages,
+          cachedSquadScoreLeaderboards: result.social.cachedSquadScoreLeaderboards,
           cachedLeaderboards: result.social.cachedLeaderboards,
           cachedFeeds: result.social.cachedFeeds,
           pendingFeedPosts: current.social.pendingFeedPosts,
@@ -4113,6 +4169,11 @@ function App() {
       void refreshFriendStatus();
     }
   }, [state.activeTab, socialSubtab]);
+
+  useEffect(() => {
+    if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "squad" || currentSquad || squadSuggestions.length || squadSuggestionsLoading) return;
+    void loadSquadSuggestions({ forceFetch: true });
+  }, [socialConfigured, state.activeTab, socialSubtab, currentSquad, squadSuggestions.length, squadSuggestionsLoading]);
 
   const initDurakPuzzle = useEffectEvent(() => {
     const today = isoDate();
@@ -8872,10 +8933,10 @@ function App() {
                     <p className="squad-copy">Squads hold up to 4 players. Once you join one, you cannot create or join another until you leave.</p>
                     <form className="squad-form" onSubmit={submitSquadCreate}>
                       <input className="arena-input" value={squadNameDraft} onChange={(event) => setSquadNameDraft(event.target.value)} placeholder="Squad name" maxLength={48} disabled={!socialConfigured || socialSyncing} />
-                      <label className="squad-toggle">
-                        <input type="checkbox" checked={squadPrivateDraft} onChange={(event) => setSquadPrivateDraft(event.target.checked)} disabled={!socialConfigured || socialSyncing} />
-                        <span>Private squad</span>
-                      </label>
+                      <button type="button" className={`profile-toggle squad-privacy-toggle ${squadPrivateDraft ? "" : "active"}`} onClick={() => setSquadPrivateDraft((value) => !value)} disabled={!socialConfigured || socialSyncing}>
+                        <strong>{squadPrivateDraft ? "Private squad" : "Public squad"}</strong>
+                        <span>{squadPrivateDraft ? "Players must request to join." : "Players can join instantly."}</span>
+                      </button>
                       <button type="submit" className="arena-btn arena-btn--send" disabled={!socialConfigured || socialSyncing}>{socialSyncing ? "Working..." : "Create"}</button>
                     </form>
                   </article>
@@ -8892,9 +8953,36 @@ function App() {
                       <input className="arena-input" value={squadSearchDraft} onChange={(event) => setSquadSearchDraft(event.target.value)} placeholder="Search by squad name" disabled={!socialConfigured || squadSearching} />
                       <button type="submit" className="arena-btn arena-btn--send" disabled={!socialConfigured || squadSearching}>{squadSearching ? "Searching..." : "Search"}</button>
                     </form>
+                    <div className="squad-suggestion-head">
+                      <div>
+                        <strong>Suggested squads</strong>
+                        <span>Don't know a name? Join or request one of these.</span>
+                      </div>
+                      {squadSuggestionPool.length > 4 ? (
+                        <button type="button" className="arena-btn arena-btn--decline" onClick={() => void loadSquadSuggestions()} disabled={squadSuggestionsLoading}>{squadSuggestionsLoading ? "Loading..." : "Reload"}</button>
+                      ) : null}
+                    </div>
+                    <div className="squad-search-results squad-suggestions">
+                      {squadSuggestions.map((squad) => (
+                        <div key={squad.id} className="squad-search-card">
+                          <div>
+                            <strong>{squad.name}</strong>
+                            <span>{squad.isPrivate ? "Private" : "Public"} · {squad.memberCount}/{squad.maxMembers} members · {formatMinutes(squad.totalMinutes)}</span>
+                          </div>
+                          {squad.action === "join" || squad.action === "request" ? (
+                            <button type="button" className="arena-btn arena-btn--accept" onClick={() => void joinOrRequestSquad(squad)} disabled={socialSyncing}>{squad.action === "join" ? "Join" : "Request"}</button>
+                          ) : (
+                            <span className="arena-pending-badge">{squad.action === "pending" ? "Pending" : squad.action === "full" ? "Full" : "Unavailable"}</span>
+                          )}
+                        </div>
+                      ))}
+                      {squadSuggestionsLoading ? <div className="arena-empty small">Loading suggestions...</div> : null}
+                      {!squadSuggestionsLoading && !squadSuggestions.length ? <div className="arena-empty small">No squads exist yet. Create the first one.</div> : null}
+                    </div>
                     {state.social.outgoingSquadRequests.length ? (
                       <div className="squad-request-note">Pending request: {state.social.outgoingSquadRequests.map((request) => request.squadName ?? "Squad").join(", ")}</div>
                     ) : null}
+                    <div className="squad-result-head">Search results</div>
                     <div className="squad-search-results">
                       {squadSearchResults.map((squad) => (
                         <div key={squad.id} className="squad-search-card">
@@ -8933,7 +9021,10 @@ function App() {
                     {squadSettingsEditing ? (
                       <form className="squad-form squad-settings-form" onSubmit={submitSquadSettings}>
                         <input className="arena-input" value={squadSettingsNameDraft} onChange={(event) => setSquadSettingsNameDraft(event.target.value)} maxLength={48} />
-                        <label className="squad-toggle"><input type="checkbox" checked={squadSettingsPrivateDraft} onChange={(event) => setSquadSettingsPrivateDraft(event.target.checked)} /><span>Private squad</span></label>
+                        <button type="button" className={`profile-toggle squad-privacy-toggle ${squadSettingsPrivateDraft ? "" : "active"}`} onClick={() => setSquadSettingsPrivateDraft((value) => !value)} disabled={socialSyncing}>
+                          <strong>{squadSettingsPrivateDraft ? "Private squad" : "Public squad"}</strong>
+                          <span>{squadSettingsPrivateDraft ? "Players must request to join." : "Players can join instantly."}</span>
+                        </button>
                         <button type="submit" className="arena-btn arena-btn--send" disabled={socialSyncing}>Save</button>
                         <button type="button" className="arena-btn arena-btn--decline" onClick={() => setSquadSettingsEditing(false)}>Cancel</button>
                       </form>
@@ -8945,55 +9036,45 @@ function App() {
                     </div>
                   </article>
 
-                  <article className="arena-panel squad-card">
-                    <div className="arena-panel-head"><span className="arena-panel-icon">R</span><div><span className="arena-kicker">Squad roster</span><h3>Members</h3></div></div>
-                    <div className="squad-member-list">
-                      {currentSquad.members.map((member) => {
-                        const editable = currentSquadRole ? canEditSquadMember(currentSquadRole, member.role) && !member.isSelf : false;
-                        return (
-                          <div key={member.userId} className="squad-member-card">
-                            <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
-                            <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
-                            <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
-                            {editable ? (
-                              <div className="squad-member-actions">
-                                <select value={member.role} onChange={(event) => void changeSquadMemberRole(member.userId, event.target.value as SocialSquadRole)} disabled={socialSyncing}>
-                                  {squadRoles.filter((role) => role !== "leader" && (currentSquadRole === "leader" || squadRoleRank(role) < squadRoleRank("co_leader"))).map((role) => <option key={role} value={role}>{squadRoleLabels[role]}</option>)}
-                                </select>
-                                <button type="button" className="arena-btn arena-btn--decline" onClick={() => void kickFromSquad(member.userId, member.displayName)} disabled={socialSyncing}>Kick</button>
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </article>
-
-                  {canManageCurrentSquadRequests ? (
-                    <article className="arena-panel squad-card">
-                      <div className="arena-panel-head"><span className="arena-panel-icon">?</span><div><span className="arena-kicker">Private requests</span><h3>Join requests</h3></div></div>
-                      {state.social.incomingSquadRequests.length ? state.social.incomingSquadRequests.map((request) => (
-                        <div key={request.id} className="arena-request-card">
-                          <ArenaAvatar name={request.displayName ?? "Student"} avatar={request.avatar} size="sm" />
-                          <div className="arena-request-copy"><strong>{request.displayName}</strong><span>{request.friendCode}</span></div>
-                          <div className="arena-request-actions">
-                            <button type="button" className="arena-btn arena-btn--accept" onClick={() => void answerSquadRequest(request.id, "accepted")} disabled={socialSyncing}>Accept</button>
-                            <button type="button" className="arena-btn arena-btn--decline" onClick={() => void answerSquadRequest(request.id, "declined")} disabled={socialSyncing}>Decline</button>
-                          </div>
-                        </div>
-                      )) : <div className="arena-empty small">No pending squad requests.</div>}
+                  <div className="squad-main-grid">
+                    <article className="arena-panel squad-card squad-roster-panel">
+                      <div className="arena-panel-head"><span className="arena-panel-icon">R</span><div><span className="arena-kicker">Squad roster</span><h3>Members</h3></div></div>
+                      <div className="squad-member-list">
+                        {currentSquad.members.map((member) => {
+                          const editable = currentSquadRole ? canEditSquadMember(currentSquadRole, member.role) && !member.isSelf : false;
+                          return (
+                            <div key={member.userId} className="squad-member-card">
+                              <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                              <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
+                              <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
+                              {editable ? (
+                                <div className="squad-member-actions">
+                                  <select value={member.role} onChange={(event) => void changeSquadMemberRole(member.userId, event.target.value as SocialSquadRole)} disabled={socialSyncing}>
+                                    {squadRoles.filter((role) => role !== "leader" && (currentSquadRole === "leader" || squadRoleRank(role) < squadRoleRank("co_leader"))).map((role) => <option key={role} value={role}>{squadRoleLabels[role]}</option>)}
+                                  </select>
+                                  <button type="button" className="arena-btn arena-btn--decline" onClick={() => void kickFromSquad(member.userId, member.displayName)} disabled={socialSyncing}>Kick</button>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </article>
-                  ) : null}
 
-                  <article className="arena-panel squad-card">
-                    <div className="arena-panel-head"><span className="arena-panel-icon">⚔</span><div><span className="arena-kicker">Squad standings</span><h3>{socialPeriod === "daily" ? "Daily" : socialPeriod === "weekly" ? "Weekly" : "Overall"}</h3></div></div>
-                    <div className="arena-period-chips squad-periods" aria-label="Squad leaderboard period">
-                      {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>{period === "daily" ? "Daily" : period === "weekly" ? "Weekly" : "Overall"}</button>)}
-                    </div>
-                    <div className="arena-lb-rows squad-lb-rows">
-                      {squadLeaderboard.map((entry) => <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile({ userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar })} />)}
-                    </div>
-                  </article>
+                    <article className="arena-panel squad-card squad-internal-leaderboard-panel">
+                      <div className="arena-panel-head"><span className="arena-panel-icon">⚔</span><div><span className="arena-kicker">Internal leaderboard</span><h3>Squad members</h3></div></div>
+                      <div className="arena-period-chips squad-periods" aria-label="Internal squad leaderboard period">
+                        {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>{period === "daily" ? "Daily" : period === "weekly" ? "Weekly" : "Overall"}</button>)}
+                      </div>
+                      <div className="arena-lb-rows squad-lb-rows">
+                        {squadMemberLeaderboard.map((entry) => {
+                          const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
+                          return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
+                        })}
+                        {!squadMemberLeaderboard.length ? <div className="arena-empty small">Sync your squad to see member rankings.</div> : null}
+                      </div>
+                    </article>
+                  </div>
 
                   <article className="arena-panel squad-card squad-chat-card">
                     <div className="arena-panel-head"><span className="arena-panel-icon">#</span><div><span className="arena-kicker">Squad chat</span><h3>Chat</h3></div></div>
@@ -9011,6 +9092,22 @@ function App() {
                       <button type="submit" className="arena-btn arena-btn--send" disabled={!squadChatDraft.trim()}>Send</button>
                     </form>
                   </article>
+
+                  {canManageCurrentSquadRequests ? (
+                    <article className="arena-panel squad-card squad-requests-card">
+                      <div className="arena-panel-head"><span className="arena-panel-icon">?</span><div><span className="arena-kicker">Private requests</span><h3>Join requests</h3></div></div>
+                      {state.social.incomingSquadRequests.length ? state.social.incomingSquadRequests.map((request) => (
+                        <div key={request.id} className="arena-request-card">
+                          <ArenaAvatar name={request.displayName ?? "Student"} avatar={request.avatar} size="sm" />
+                          <div className="arena-request-copy"><strong>{request.displayName}</strong><span>{request.friendCode}</span></div>
+                          <div className="arena-request-actions">
+                            <button type="button" className="arena-btn arena-btn--accept" onClick={() => void answerSquadRequest(request.id, "accepted")} disabled={socialSyncing}>Accept</button>
+                            <button type="button" className="arena-btn arena-btn--decline" onClick={() => void answerSquadRequest(request.id, "declined")} disabled={socialSyncing}>Decline</button>
+                          </div>
+                        </div>
+                      )) : <div className="arena-empty small">No pending squad requests.</div>}
+                    </article>
+                  ) : null}
                 </>
               )}
             </div>
@@ -9090,7 +9187,7 @@ function App() {
                   <span className="arena-title-icon">⚔</span>
                   <div>
                     <span className="arena-kicker">Arena standings</span>
-                    <h2>{socialScope === "global" ? "World Arena" : "Friends Arena"}</h2>
+                    <h2>{socialArenaTitle}</h2>
                     <p>{socialPeriod === "daily" ? "Daily Sprint" : socialPeriod === "weekly" ? "Weekly League" : "Hall of Focus"}</p>
                   </div>
                 </div>
@@ -9100,9 +9197,9 @@ function App() {
               </div>
 
               <div className="arena-scope-toggle" aria-label="Leaderboard scope">
-                {(["friends", "global"] as SocialLeaderboardScope[]).map((scope) => (
+                {(["friends", "squad", "global"] as SocialLeaderboardScope[]).map((scope) => (
                   <button key={scope} type="button" className={socialScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setSocialScope(scope)}>
-                    {scope === "global" ? "World Arena" : "Friends Arena"}
+                    {scope === "global" ? "World Arena" : scope === "squad" ? "Squad Arena" : "Friends Arena"}
                   </button>
                 ))}
               </div>
@@ -9122,7 +9219,7 @@ function App() {
                 </div>
               ) : null}
 
-              {socialLeaderboard.length >= 3 ? (
+              {socialScope !== "squad" && socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
                     const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
@@ -9142,11 +9239,19 @@ function App() {
               ) : null}
 
               <div className="arena-lb-rows">
-                {(socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
+                {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
+                  <SquadArenaRow key={entry.squadId} entry={entry} period={socialPeriod} isSelf={entry.squadId === state.social.squad?.id} />
+                )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
                   const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
                   return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
                 })}
-                {!socialLeaderboard.length ? (
+                {socialScope === "squad" && !squadScoreLeaderboard.length ? (
+                  <div className="arena-empty">
+                    <strong>No eligible squads yet</strong>
+                    <span>Squads need at least 2 members to enter the Squad Arena.</span>
+                  </div>
+                ) : null}
+                {socialScope !== "squad" && !socialLeaderboard.length ? (
                   <div className="arena-empty">
                     <strong>No contenders yet</strong>
                     <span>Start studying and sync to claim your rank.</span>
@@ -9407,7 +9512,7 @@ function App() {
               </button>
             </div>
 
-            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") patRock(); }}>
+            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patRock(); } }}>
               <div className="rock-area">
                 <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
                 {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}

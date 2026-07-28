@@ -227,6 +227,19 @@ export interface SocialSquadMessage {
   isSelf?: boolean;
 }
 
+export interface SocialSquadScoreEntry {
+  squadId: string;
+  squadName: string;
+  isPrivate: boolean;
+  memberCount: number;
+  totalMinutes: number;
+  totalSessions: number;
+  averageMinutes: number;
+  rank: number;
+  points: number;
+  scoredDays?: number;
+}
+
 export interface SocialState {
   userId: string;
   deviceSecret: string;
@@ -248,6 +261,7 @@ export interface SocialState {
   cachedFeeds: Record<SocialFeedScope, SocialFeedPost[]>;
   pendingFeedPosts: SocialFeedPost[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
+  cachedSquadScoreLeaderboards: Record<SocialLeaderboardPeriod, SocialSquadScoreEntry[]>;
 }
 
 export interface TimerState {

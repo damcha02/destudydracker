@@ -7,6 +7,7 @@ export interface Env {
 type LeaderboardPeriod = "daily" | "weekly" | "overall";
 type LeaderboardScope = "global" | "friends" | "squad";
 type SquadRole = "leader" | "co_leader" | "elder" | "member";
+type SquadScorePeriod = "daily" | "weekly" | "overall";
 type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
@@ -447,6 +448,18 @@ async function getSquadMemberCount(env: Env, squadId: string) {
   return Number(row?.count ?? 0);
 }
 
+async function addSquadMemberHistory(env: Env, squadId: string, userId: string, role: SquadRole) {
+  await env.DB.prepare("INSERT INTO squad_member_history (id, squad_id, user_id, role, joined_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)")
+    .bind(crypto.randomUUID(), squadId, userId, role)
+    .run();
+}
+
+async function closeSquadMemberHistory(env: Env, squadId: string, userId: string) {
+  await env.DB.prepare("UPDATE squad_member_history SET left_at = CURRENT_TIMESTAMP WHERE squad_id = ? AND user_id = ? AND left_at IS NULL")
+    .bind(squadId, userId)
+    .run();
+}
+
 async function getSquadMemberIds(env: Env, userId: string) {
   const membership = await getUserSquadMember(env, userId);
   if (!membership) return [];
@@ -458,6 +471,10 @@ async function getSquadMemberIds(env: Env, userId: string) {
 
 async function getSquadLeaderboard(env: Env, userId: string, period: LeaderboardPeriod) {
   const memberIds = await getSquadMemberIds(env, userId);
+  return getSquadLeaderboardForMemberIds(env, userId, memberIds, period);
+}
+
+async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberIds: string[], period: LeaderboardPeriod) {
   if (!memberIds.length) return [];
   const periodFilter = leaderboardWhere(period);
   const clauses = [`u.id IN (${memberIds.map(() => "?").join(",")})`];
@@ -496,6 +513,159 @@ async function getSquadLeaderboard(env: Env, userId: string, period: Leaderboard
     rank: index + 1,
     isSelf: row.userId === userId,
   }));
+}
+
+async function scoreSquadDate(env: Env, date: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  const dayStart = `${date}T00:00:00.000Z`;
+  const dayEnd = `${date}T23:59:59.999Z`;
+  const historyCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM squad_member_history WHERE joined_at <= ? AND (left_at IS NULL OR left_at >= ?)")
+    .bind(dayEnd, dayStart)
+    .first<{ count: number }>();
+  const hasHistory = Number(historyCount?.count ?? 0) > 0;
+  const rows = hasHistory ? await env.DB.prepare(`
+    SELECT s.id AS squadId, s.name,
+      COUNT(DISTINCT h.user_id) AS memberCount,
+      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(ds.sessions), 0) AS totalSessions
+    FROM squads s
+    JOIN squad_member_history h ON h.squad_id = s.id AND h.joined_at <= ? AND (h.left_at IS NULL OR h.left_at >= ?)
+    LEFT JOIN daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
+    GROUP BY s.id, s.name
+    HAVING memberCount >= 2
+  `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>() : await env.DB.prepare(`
+    SELECT s.id AS squadId, s.name,
+      COUNT(DISTINCT sm.user_id) AS memberCount,
+      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(ds.sessions), 0) AS totalSessions
+    FROM squads s
+    JOIN squad_members sm ON sm.squad_id = s.id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+    GROUP BY s.id, s.name
+    HAVING memberCount >= 2
+  `).bind(date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>();
+
+  const ranked = rows.results
+    .map((row) => ({
+      ...row,
+      memberCount: Number(row.memberCount),
+      totalMinutes: Number(row.totalMinutes),
+      totalSessions: Number(row.totalSessions),
+      averageMinutes: Number(row.memberCount) ? Number(row.totalMinutes) / Number(row.memberCount) : 0,
+    }))
+    .sort((a, b) => b.averageMinutes - a.averageMinutes || b.totalMinutes - a.totalMinutes || a.name.localeCompare(b.name));
+
+  let previousAverage: number | null = null;
+  let previousRank = 0;
+  const statements = ranked.map((row, index) => {
+    const rank = previousAverage !== null && row.averageMinutes === previousAverage ? previousRank : index + 1;
+    previousAverage = row.averageMinutes;
+    previousRank = rank;
+    const points = rank === 1 ? 2 : rank === 2 ? 1 : 0;
+    return env.DB.prepare(`
+      INSERT INTO squad_daily_scores (squad_id, date, average_minutes, total_minutes, member_count, rank, points, scored_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(squad_id, date) DO UPDATE SET
+        average_minutes = excluded.average_minutes,
+        total_minutes = excluded.total_minutes,
+        member_count = excluded.member_count,
+        rank = excluded.rank,
+        points = excluded.points,
+        scored_at = CURRENT_TIMESTAMP
+    `).bind(row.squadId, date, row.averageMinutes, row.totalMinutes, row.memberCount, rank, points);
+  });
+  if (statements.length) await env.DB.batch(statements);
+}
+
+async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
+  if (period === "daily") {
+    const date = todayIso();
+    const rows = await env.DB.prepare(`
+      SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
+        COUNT(DISTINCT sm.user_id) AS memberCount,
+        COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+        COALESCE(SUM(ds.sessions), 0) AS totalSessions
+      FROM squads s
+      JOIN squad_members sm ON sm.squad_id = s.id
+      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+      GROUP BY s.id, s.name, s.is_private
+      HAVING memberCount >= 2
+      ORDER BY CAST(totalMinutes AS REAL) / memberCount DESC, totalMinutes DESC, s.name ASC
+      LIMIT 50
+    `).bind(date).all<{ squadId: string; squadName: string; isPrivate: number; memberCount: number; totalMinutes: number; totalSessions: number }>();
+    let previousAverage: number | null = null;
+    let previousRank = 0;
+    return rows.results.map((row, index) => {
+      const memberCount = Number(row.memberCount);
+      const totalMinutes = Number(row.totalMinutes);
+      const averageMinutes = memberCount ? totalMinutes / memberCount : 0;
+      const rank = previousAverage !== null && averageMinutes === previousAverage ? previousRank : index + 1;
+      previousAverage = averageMinutes;
+      previousRank = rank;
+      return {
+        squadId: row.squadId,
+        squadName: row.squadName,
+        isPrivate: Boolean(row.isPrivate),
+        memberCount,
+        totalMinutes,
+        totalSessions: Number(row.totalSessions),
+        averageMinutes,
+        rank,
+        points: rank === 1 ? 2 : rank === 2 ? 1 : 0,
+      };
+    });
+  }
+
+  const periodFilter = period === "weekly" ? "WHERE score.date >= ?" : "";
+  const params = period === "weekly" ? [weekStartIso()] : [];
+  const rows = await env.DB.prepare(`
+    SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
+      (SELECT COUNT(*) FROM squad_members sm WHERE sm.squad_id = s.id) AS currentMemberCount,
+      COALESCE(SUM(score.points), 0) AS points,
+      COALESCE(SUM(score.total_minutes), 0) AS totalMinutes,
+      COALESCE(SUM(score.member_count), 0) AS memberCountSum,
+      COUNT(score.date) AS scoredDays
+    FROM squads s
+    LEFT JOIN squad_daily_scores score ON score.squad_id = s.id
+    ${periodFilter}
+    GROUP BY s.id, s.name, s.is_private
+    HAVING scoredDays > 0
+    ORDER BY points DESC, CASE WHEN memberCountSum > 0 THEN CAST(totalMinutes AS REAL) / memberCountSum ELSE 0 END DESC, s.name ASC
+    LIMIT 50
+  `).bind(...params).all<{ squadId: string; squadName: string; isPrivate: number; currentMemberCount: number; points: number; totalMinutes: number; memberCountSum: number; scoredDays: number }>();
+
+  let previousPoints: number | null = null;
+  let previousRank = 0;
+  return rows.results.map((row, index) => {
+    const points = Number(row.points);
+    const memberCountSum = Number(row.memberCountSum);
+    const totalMinutes = Number(row.totalMinutes);
+    const rank = previousPoints !== null && points === previousPoints ? previousRank : index + 1;
+    previousPoints = points;
+    previousRank = rank;
+    return {
+      squadId: row.squadId,
+      squadName: row.squadName,
+      isPrivate: Boolean(row.isPrivate),
+      memberCount: Number(row.currentMemberCount),
+      totalMinutes,
+      totalSessions: 0,
+      averageMinutes: memberCountSum ? totalMinutes / memberCountSum : 0,
+      rank,
+      points,
+      scoredDays: Number(row.scoredDays),
+    };
+  });
+}
+
+async function getSquadLeaderboards(env: Env, userId: string) {
+  const memberIds = await getSquadMemberIds(env, userId);
+  const [daily, weekly, overall] = await Promise.all([
+    getSquadLeaderboardForMemberIds(env, userId, memberIds, "daily"),
+    getSquadLeaderboardForMemberIds(env, userId, memberIds, "weekly"),
+    getSquadLeaderboardForMemberIds(env, userId, memberIds, "overall"),
+  ]);
+  return { daily, weekly, overall };
 }
 
 async function getSquadSnapshot(env: Env, userId: string) {
@@ -833,29 +1003,30 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
     ORDER BY r.created_at DESC
   `).bind(userId).all();
 
+  const [globalDaily, globalWeekly, globalOverall, friendsDaily, friendsWeekly, friendsOverall, squadLeaderboards, squadScoreDaily, squadScoreWeekly, squadScoreOverall, globalFeed, friendsFeed, squadSnapshot] = await Promise.all([
+    getLeaderboard(env, userId, "global", "daily"),
+    getLeaderboard(env, userId, "global", "weekly"),
+    getLeaderboard(env, userId, "global", "overall"),
+    getLeaderboard(env, userId, "friends", "daily"),
+    getLeaderboard(env, userId, "friends", "weekly"),
+    getLeaderboard(env, userId, "friends", "overall"),
+    getSquadLeaderboards(env, userId),
+    getSquadScoreLeaderboard(env, "daily"),
+    getSquadScoreLeaderboard(env, "weekly"),
+    getSquadScoreLeaderboard(env, "overall"),
+    getFeed(request, env, userId, "global"),
+    getFeed(request, env, userId, "friends"),
+    getSquadSnapshot(env, userId),
+  ]);
   const cachedLeaderboards = {
-    global: {
-      daily: await getLeaderboard(env, userId, "global", "daily"),
-      weekly: await getLeaderboard(env, userId, "global", "weekly"),
-      overall: await getLeaderboard(env, userId, "global", "overall"),
-    },
-    friends: {
-      daily: await getLeaderboard(env, userId, "friends", "daily"),
-      weekly: await getLeaderboard(env, userId, "friends", "weekly"),
-      overall: await getLeaderboard(env, userId, "friends", "overall"),
-    },
-    squad: {
-      daily: await getLeaderboard(env, userId, "squad", "daily"),
-      weekly: await getLeaderboard(env, userId, "squad", "weekly"),
-      overall: await getLeaderboard(env, userId, "squad", "overall"),
-    },
+    global: { daily: globalDaily, weekly: globalWeekly, overall: globalOverall },
+    friends: { daily: friendsDaily, weekly: friendsWeekly, overall: friendsOverall },
+    squad: squadLeaderboards,
   };
   const cachedFeeds = {
-    global: await getFeed(request, env, userId, "global"),
-    friends: await getFeed(request, env, userId, "friends"),
+    global: globalFeed,
+    friends: friendsFeed,
   };
-
-  const squadSnapshot = await getSquadSnapshot(env, userId);
   return {
     social: {
       friends: friends.results.map((friend) => ({
@@ -879,6 +1050,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
       })),
       cachedLeaderboards,
       cachedFeeds,
+      cachedSquadScoreLeaderboards: { daily: squadScoreDaily, weekly: squadScoreWeekly, overall: squadScoreOverall },
       ...squadSnapshot,
     },
   };
@@ -1246,6 +1418,7 @@ async function handleSquadCreate(request: Request, env: Env) {
     env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'leader')")
       .bind(squadId, userId),
   ]);
+  await addSquadMemberHistory(env, squadId, userId, "leader");
   return json(await getSocialSnapshot(request, env, userId));
 }
 
@@ -1308,9 +1481,14 @@ async function handleSquadJoin(request: Request, env: Env) {
       ON CONFLICT(squad_id, user_id) DO UPDATE SET status = 'pending', responded_at = NULL, responded_by_user_id = NULL
     `).bind(id, squadId, userId).run();
   } else {
-    await env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'member')")
-      .bind(squadId, userId)
-      .run();
+    const insert = await env.DB.prepare(`
+      INSERT INTO squad_members (squad_id, user_id, role)
+      SELECT ?, ?, 'member'
+      WHERE (SELECT COUNT(*) FROM squad_members WHERE squad_id = ?) < ?
+        AND NOT EXISTS (SELECT 1 FROM squad_members WHERE user_id = ?)
+    `).bind(squadId, userId, squadId, MAX_SQUAD_MEMBERS, userId).run();
+    if ((insert.meta?.changes ?? 0) < 1) return text("That squad is already full.", 409);
+    await addSquadMemberHistory(env, squadId, userId, "member");
     await env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(squadId).run();
   }
   return json(await getSocialSnapshot(request, env, userId));
@@ -1331,9 +1509,16 @@ async function handleSquadRespond(request: Request, env: Env) {
   if (response === "accepted") {
     if (await getUserSquadMember(env, joinRequest.userId)) return text("That user is already in a squad.", 409);
     if (await getSquadMemberCount(env, actor.squadId) >= MAX_SQUAD_MEMBERS) return text("That squad is already full.", 409);
+    const insert = await env.DB.prepare(`
+      INSERT INTO squad_members (squad_id, user_id, role)
+      SELECT ?, ?, 'member'
+      WHERE (SELECT COUNT(*) FROM squad_members WHERE squad_id = ?) < ?
+        AND NOT EXISTS (SELECT 1 FROM squad_members WHERE user_id = ?)
+    `).bind(actor.squadId, joinRequest.userId, actor.squadId, MAX_SQUAD_MEMBERS, joinRequest.userId).run();
+    if ((insert.meta?.changes ?? 0) < 1) return text("That squad is already full.", 409);
+    await addSquadMemberHistory(env, actor.squadId, joinRequest.userId, "member");
     await env.DB.batch([
       env.DB.prepare("UPDATE squad_join_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ? WHERE id = ?").bind(userId, joinRequest.id),
-      env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'member')").bind(actor.squadId, joinRequest.userId),
       env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(actor.squadId),
     ]);
   } else {
@@ -1352,10 +1537,17 @@ async function handleSquadLeave(request: Request, env: Env) {
   if (!membership) return text("You are not in a squad.", 404);
   const count = await getSquadMemberCount(env, membership.squadId);
   if (count <= 1) {
-    await env.DB.prepare("DELETE FROM squads WHERE id = ?").bind(membership.squadId).run();
+    await closeSquadMemberHistory(env, membership.squadId, userId);
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM squad_messages WHERE squad_id = ?").bind(membership.squadId),
+      env.DB.prepare("DELETE FROM squad_join_requests WHERE squad_id = ?").bind(membership.squadId),
+      env.DB.prepare("DELETE FROM squad_members WHERE squad_id = ?").bind(membership.squadId),
+      env.DB.prepare("DELETE FROM squads WHERE id = ?").bind(membership.squadId),
+    ]);
     return json(await getSocialSnapshot(request, env, userId));
   }
 
+  await closeSquadMemberHistory(env, membership.squadId, userId);
   await env.DB.prepare("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ?").bind(membership.squadId, userId).run();
   if (membership.role === "leader") {
     const nextLeader = await env.DB.prepare(`
@@ -1364,7 +1556,10 @@ async function handleSquadLeave(request: Request, env: Env) {
       ORDER BY CASE role WHEN 'co_leader' THEN 1 WHEN 'elder' THEN 2 ELSE 3 END, joined_at ASC
       LIMIT 1
     `).bind(membership.squadId).first<{ userId: string }>();
-    if (nextLeader) await env.DB.prepare("UPDATE squad_members SET role = 'leader' WHERE squad_id = ? AND user_id = ?").bind(membership.squadId, nextLeader.userId).run();
+    if (nextLeader) await env.DB.batch([
+      env.DB.prepare("UPDATE squad_members SET role = 'leader' WHERE squad_id = ? AND user_id = ?").bind(membership.squadId, nextLeader.userId),
+      env.DB.prepare("UPDATE squad_member_history SET role = 'leader' WHERE squad_id = ? AND user_id = ? AND left_at IS NULL").bind(membership.squadId, nextLeader.userId),
+    ]);
   }
   await env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(membership.squadId).run();
   return json(await getSocialSnapshot(request, env, userId));
@@ -1401,6 +1596,9 @@ async function handleSquadRole(request: Request, env: Env) {
   await env.DB.prepare("UPDATE squad_members SET role = ? WHERE squad_id = ? AND user_id = ?")
     .bind(nextRole, actor.squadId, targetUserId)
     .run();
+  await env.DB.prepare("UPDATE squad_member_history SET role = ? WHERE squad_id = ? AND user_id = ? AND left_at IS NULL")
+    .bind(nextRole, actor.squadId, targetUserId)
+    .run();
   return json(await getSocialSnapshot(request, env, userId));
 }
 
@@ -1417,6 +1615,7 @@ async function handleSquadKick(request: Request, env: Env) {
     .first<{ role: SquadRole }>();
   if (!target) return text("Squad member not found.", 404);
   if (!canKick(actor.role, target.role)) return text("You cannot kick that member.", 403);
+  await closeSquadMemberHistory(env, actor.squadId, targetUserId);
   await env.DB.prepare("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ?").bind(actor.squadId, targetUserId).run();
   return json(await getSocialSnapshot(request, env, userId));
 }
@@ -1473,6 +1672,8 @@ export default {
   },
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await scoreSquadDate(env, yesterday).catch((error) => console.error("Squad scoring failed.", error));
     const usage = await getR2Usage(env);
     const remainingClassA = Math.max(0, R2_CLASS_A_HARD_MONTHLY - usage.classAOps);
     if (!remainingClassA) return;

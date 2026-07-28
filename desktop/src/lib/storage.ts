@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialSquadRole, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
@@ -49,6 +49,87 @@ function normalizeAvatar(avatar: unknown, displayName: string): SocialAvatar {
   return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
 }
 
+function normalizeSquadRole(role: unknown): SocialSquadRole {
+  return role === "leader" || role === "co_leader" || role === "elder" || role === "member" ? role : "member";
+}
+
+function normalizeSquad(squad: unknown): SocialState["squad"] {
+  if (!squad || typeof squad !== "object") return null;
+  const record = squad as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.name !== "string") return null;
+  const members = Array.isArray(record.members) ? record.members.flatMap((member) => {
+    if (!member || typeof member !== "object") return [];
+    const item = member as Record<string, unknown>;
+    if (typeof item.userId !== "string" || typeof item.displayName !== "string" || typeof item.friendCode !== "string") return [];
+    return [{
+      userId: item.userId,
+      displayName: item.displayName,
+      friendCode: item.friendCode,
+      avatar: normalizeAvatar(item.avatar, item.displayName),
+      role: normalizeSquadRole(item.role),
+      joinedAt: typeof item.joinedAt === "string" ? item.joinedAt : new Date().toISOString(),
+      lastSeenAt: typeof item.lastSeenAt === "string" ? item.lastSeenAt : null,
+      minutes: typeof item.minutes === "number" ? item.minutes : 0,
+      sessions: typeof item.sessions === "number" ? item.sessions : 0,
+      isSelf: Boolean(item.isSelf),
+    }];
+  }) : [];
+  return {
+    id: record.id,
+    name: record.name,
+    isPrivate: Boolean(record.isPrivate),
+    createdByUserId: typeof record.createdByUserId === "string" ? record.createdByUserId : "",
+    createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    totalMinutes: typeof record.totalMinutes === "number" ? record.totalMinutes : 0,
+    totalSessions: typeof record.totalSessions === "number" ? record.totalSessions : 0,
+    memberCount: typeof record.memberCount === "number" ? record.memberCount : members.length,
+    myRole: normalizeSquadRole(record.myRole),
+    members,
+  };
+}
+
+function normalizeSquadRequests(requests: unknown): SocialState["incomingSquadRequests"] {
+  if (!Array.isArray(requests)) return [];
+  return requests.flatMap((request) => {
+    if (!request || typeof request !== "object") return [];
+    const record = request as Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.squadId !== "string") return [];
+    return [{
+      id: record.id,
+      squadId: record.squadId,
+      squadName: typeof record.squadName === "string" ? record.squadName : undefined,
+      userId: typeof record.userId === "string" ? record.userId : undefined,
+      displayName: typeof record.displayName === "string" ? record.displayName : undefined,
+      friendCode: typeof record.friendCode === "string" ? record.friendCode : undefined,
+      avatar: normalizeAvatar(record.avatar, typeof record.displayName === "string" ? record.displayName : "Student"),
+      isPrivate: typeof record.isPrivate === "boolean" ? record.isPrivate : undefined,
+      status: record.status === "accepted" || record.status === "declined" ? record.status : "pending",
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+}
+
+function normalizeSquadMessages(messages: unknown): SocialState["squadMessages"] {
+  if (!Array.isArray(messages)) return [];
+  return messages.flatMap((message) => {
+    if (!message || typeof message !== "object") return [];
+    const record = message as Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.squadId !== "string" || typeof record.userId !== "string" || typeof record.displayName !== "string" || typeof record.body !== "string") return [];
+    return [{
+      id: record.id,
+      squadId: record.squadId,
+      userId: record.userId,
+      displayName: record.displayName,
+      friendCode: typeof record.friendCode === "string" ? record.friendCode : "",
+      avatar: normalizeAvatar(record.avatar, record.displayName),
+      role: normalizeSquadRole(record.role),
+      body: record.body,
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+      isSelf: Boolean(record.isSelf),
+    }];
+  });
+}
+
 function makeDefaultSocialState(): SocialState {
   const friendCode = makeFriendCode();
   const displaySuffix = friendCode.slice(-4).replace(/[^A-Z0-9]/g, "");
@@ -81,6 +162,7 @@ function makeDefaultSocialState(): SocialState {
       friends: { daily: [], weekly: [], overall: [] },
       squad: { daily: [], weekly: [], overall: [] },
     },
+    cachedSquadScoreLeaderboards: { daily: [], weekly: [], overall: [] },
   };
 }
 
@@ -280,10 +362,10 @@ function normalizeSocialState(social: unknown): SocialState {
     friends: Array.isArray(record.friends) ? record.friends : [],
     incomingFriendRequests: Array.isArray(record.incomingFriendRequests) ? record.incomingFriendRequests : [],
     outgoingFriendRequests: Array.isArray(record.outgoingFriendRequests) ? record.outgoingFriendRequests : [],
-    squad: record.squad && typeof record.squad === "object" ? record.squad : null,
-    incomingSquadRequests: Array.isArray(record.incomingSquadRequests) ? record.incomingSquadRequests : [],
-    outgoingSquadRequests: Array.isArray(record.outgoingSquadRequests) ? record.outgoingSquadRequests : [],
-    squadMessages: Array.isArray(record.squadMessages) ? record.squadMessages : [],
+    squad: normalizeSquad(record.squad),
+    incomingSquadRequests: normalizeSquadRequests(record.incomingSquadRequests),
+    outgoingSquadRequests: normalizeSquadRequests(record.outgoingSquadRequests),
+    squadMessages: normalizeSquadMessages(record.squadMessages),
     cachedFeeds: {
       global: Array.isArray(record.cachedFeeds?.global) ? record.cachedFeeds.global : [],
       friends: Array.isArray(record.cachedFeeds?.friends) ? record.cachedFeeds.friends : [],
@@ -305,6 +387,11 @@ function normalizeSocialState(social: unknown): SocialState {
         weekly: record.cachedLeaderboards?.squad?.weekly ?? [],
         overall: record.cachedLeaderboards?.squad?.overall ?? [],
       },
+    },
+    cachedSquadScoreLeaderboards: {
+      daily: record.cachedSquadScoreLeaderboards?.daily ?? [],
+      weekly: record.cachedSquadScoreLeaderboards?.weekly ?? [],
+      overall: record.cachedSquadScoreLeaderboards?.overall ?? [],
     },
   };
 }

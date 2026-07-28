@@ -1101,6 +1101,13 @@
   gap: 16px;
 }
 
+.squad-main-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
 .squad-card {
   padding: 18px;
 }
@@ -1134,12 +1141,48 @@
   font-weight: 850;
 }
 
+.squad-privacy-toggle {
+  flex: 1 1 220px;
+  margin: 0;
+  text-align: left;
+}
+
 .squad-search-results,
 .squad-member-list,
 .squad-chat-list {
   display: grid;
   gap: 9px;
   margin-top: 14px;
+}
+
+.squad-suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.squad-suggestion-head div {
+  display: grid;
+  gap: 3px;
+}
+
+.squad-suggestion-head span,
+.squad-result-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.squad-result-head {
+  margin-top: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.squad-suggestions {
+  margin-top: 10px;
 }
 
 .squad-search-card,
@@ -1254,6 +1297,57 @@
   padding: 0;
 }
 
+.squad-score-rows {
+  display: grid;
+  gap: 9px;
+}
+
+.squad-score-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 16px;
+  padding: 11px;
+  background: var(--surface-2);
+}
+
+.squad-score-row--self {
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+  background: color-mix(in oklch, var(--accent) 9%, var(--surface-2));
+}
+
+.squad-score-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.squad-score-main span,
+.squad-score-points span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.squad-score-points {
+  display: grid;
+  gap: 3px;
+  text-align: right;
+}
+
+.squad-score-points strong {
+  color: var(--accent);
+}
+
+.squad-internal-leaderboard-panel .arena-lb-rows {
+  padding: 0;
+}
+
+.squad-internal-leaderboard-panel .arena-lb-row {
+  padding: 9px;
+}
+
 .squad-chat-list {
   max-height: 360px;
   overflow: auto;
@@ -1296,6 +1390,12 @@
   font-size: 0.9rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .squad-main-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .stories {
