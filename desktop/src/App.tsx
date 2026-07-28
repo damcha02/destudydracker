@@ -41,7 +41,7 @@ import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./li
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSquadScoreEntry, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
-import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -4994,7 +4994,7 @@ function App() {
         const firstCard = durakGameState.playerHand[prev[0]];
         if (firstCard.rank !== card.rank) return [idx];
 
-        const maxCards = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
+        const maxCards = durakGameState.phase === "player_attack" ? Math.min(6, durakGameState.cpuHand.length) : Math.max(0, getAttackLimitAgainstCpu(durakGameState) - durakGameState.table.length);
         if (prev.length >= maxCards) return prev;
 
         return [...prev, idx];
@@ -5033,10 +5033,10 @@ function App() {
     setDurakSelected([]);
   }
 
-  function handleDurakThrow() {
+  function handleDurakThrow(forcePass = false) {
     if (!durakGameState || durakGameState.phase !== "player_throw") return;
-    if (durakSelected.length > 0) {
-      const maxThrow = Math.max(0, Math.min(6 - durakGameState.table.length, durakGameState.cpuHand.length));
+    if (!forcePass && durakSelected.length > 0) {
+      const maxThrow = Math.max(0, getAttackLimitAgainstCpu(durakGameState) - durakGameState.table.length);
       const cards = durakSelected.map((i) => durakGameState.playerHand[i]).slice(0, maxThrow);
       handleDurakFinished(processCpuTurn(executePlayerThrow(durakGameState, cards)));
     } else {
@@ -9944,10 +9944,10 @@ function App() {
                   )}
                   {durakGameState.phase === "player_throw" && (
                     <>
-                      <button type="button" className="durak-btn durak-btn--primary" onClick={handleDurakThrow} disabled={durakSelected.length === 0}>
+                      <button type="button" className="durak-btn durak-btn--primary" onClick={() => handleDurakThrow()} disabled={durakSelected.length === 0}>
                         Throw
                       </button>
-                      <button type="button" className="durak-btn durak-btn--secondary" onClick={() => { setDurakSelected([]); handleDurakThrow(); }}>
+                      <button type="button" className="durak-btn durak-btn--secondary" onClick={() => handleDurakThrow(true)}>
                         Pass
                       </button>
                     </>

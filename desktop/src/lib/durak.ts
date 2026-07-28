@@ -159,6 +159,31 @@ function pickUpCards(state: DurakGameState, target: "player" | "cpu"): DurakGame
   return next;
 }
 
+export function getAttackLimitAgainstCpu(state: DurakGameState): number {
+  const cpuDefenseCardsOnTable = state.table.filter((entry) => entry.defenseBy === "cpu").length;
+  return Math.min(6, state.cpuHand.length + cpuDefenseCardsOnTable);
+}
+
+function cpuIsPickingUp(state: DurakGameState): boolean {
+  return state.phase === "player_throw" && state.table.some((entry) => !entry.defense);
+}
+
+function finishCpuPickup(state: DurakGameState): DurakGameState {
+  const next = pickUpCards(state, "cpu");
+  if (next.phase !== "finished") {
+    next.phase = "player_attack";
+    next.message = "CPU picked up cards. Your turn to attack.";
+  }
+  return next;
+}
+
+function startCpuPickup(state: DurakGameState): DurakGameState {
+  const next = copyState(state);
+  next.phase = "player_throw";
+  next.message = "CPU picks up. You may throw in matching ranks, or pass.";
+  return next;
+}
+
 function clearTable(state: DurakGameState): DurakGameState {
   const next = copyState(state);
   const discards: Card[] = [];
@@ -208,8 +233,8 @@ export function getValidThrows(hand: Card[], table: TableEntry[], maxTotal: numb
     tableRanks.add(entry.attack.rank);
     if (entry.defense) tableRanks.add(entry.defense.rank);
   }
-  const currentTableCount = table.length * 2;
-  const maxAdd = Math.max(0, maxTotal - currentTableCount);
+  const currentAttackCount = table.length;
+  const maxAdd = Math.max(0, maxTotal - currentAttackCount);
   if (maxAdd <= 0) return [];
   const result: Card[][] = [];
   for (const rank of tableRanks) {
@@ -290,7 +315,7 @@ function cpuDefend(state: DurakGameState): DurakGameState {
       entry.defenseBy = "cpu";
       next.cpuHand = removeCard(next.cpuHand, best);
     } else {
-      return pickUpCards(next, "cpu");
+      return startCpuPickup(next);
     }
   }
   next.message = "CPU defended all cards.";
@@ -323,7 +348,7 @@ function cpuAttack(state: DurakGameState): DurakGameState {
 
 function cpuThrowCards(state: DurakGameState): DurakGameState {
   let next = copyState(state);
-  const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.playerHand.length);
+  const maxTotal = Math.min(6, next.table.length + next.playerHand.length);
   const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
   if (throws.length > 0) {
     const chosen = throws[0];
@@ -359,15 +384,25 @@ export function executePlayerAttack(state: DurakGameState, cards: Card[]): Durak
 
 export function executePlayerThrow(state: DurakGameState, cards: Card[]): DurakGameState {
   const next = copyState(state);
-  const maxAdd = Math.max(0, Math.min(6 - next.table.length, next.cpuHand.length));
+  const wasCpuPickingUp = cpuIsPickingUp(next);
+  const maxAdd = Math.max(0, getAttackLimitAgainstCpu(next) - next.table.length);
   const used = cards.slice(0, maxAdd);
   if (used.length === 0) return next;
   for (const card of used) {
     next.table.push({ attack: { ...card }, attackBy: "player" });
     next.playerHand = removeCard(next.playerHand, card);
   }
-  next.phase = "cpu_defense";
-  next.message = `You throw in ${used.map(cardToString).join(", ")}.`;
+  if (wasCpuPickingUp) {
+    const throws = getValidThrows(next.playerHand, next.table, getAttackLimitAgainstCpu(next));
+    if (throws.length === 0 || next.table.length >= getAttackLimitAgainstCpu(next)) {
+      return finishCpuPickup(next);
+    }
+    next.phase = "player_throw";
+    next.message = `You throw in ${used.map(cardToString).join(", ")}. CPU will pick them up too.`;
+  } else {
+    next.phase = "cpu_defense";
+    next.message = `You throw in ${used.map(cardToString).join(", ")}.`;
+  }
   checkWin(next);
   return next;
 }
@@ -409,6 +444,7 @@ export function defendOneCard(state: DurakGameState, card: Card): DurakGameState
 }
 
 export function playerPassThrow(state: DurakGameState): DurakGameState {
+  if (cpuIsPickingUp(state)) return finishCpuPickup(state);
   const next = clearTable(state);
   next.phase = "cpu_attack";
   next.message = "CPU's turn to attack.";
@@ -512,11 +548,11 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "player_throw": {
-        const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.cpuHand.length);
+        const maxTotal = getAttackLimitAgainstCpu(next);
         const throws = getValidThrows(next.playerHand, next.table, maxTotal);
         if (throws.length === 0 || depth > 3) {
-          const n = clearTable(next);
-          n.phase = "cpu_attack";
+          const n = cpuIsPickingUp(next) ? finishCpuPickup(next) : clearTable(next);
+          if (!cpuIsPickingUp(next) && n.phase !== "finished") n.phase = "cpu_attack";
           seq.push(`pass throw`);
           if (dfs(n, depth + 1)) return true;
           seq.pop();
@@ -570,7 +606,7 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "cpu_throw": {
-        const maxTotal = next.table.length * 2 + Math.min(6 - next.table.length, next.playerHand.length);
+        const maxTotal = Math.min(6, next.table.length + next.playerHand.length);
         const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
         if (throws.length === 0 || depth > 3) {
           const n = clearTable(next);
