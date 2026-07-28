@@ -5,7 +5,8 @@ export interface Env {
 }
 
 type LeaderboardPeriod = "daily" | "weekly" | "overall";
-type LeaderboardScope = "global" | "friends";
+type LeaderboardScope = "global" | "friends" | "squad";
+type SquadRole = "leader" | "co_leader" | "elder" | "member";
 type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
@@ -55,6 +56,9 @@ const MAX_DAILY_SESSIONS = 200;
 const MAX_ID_LENGTH = 80;
 const MAX_SECRET_LENGTH = 120;
 const MAX_COMMENT_LENGTH = 220;
+const MAX_SQUAD_NAME_LENGTH = 48;
+const MAX_SQUAD_MEMBERS = 4;
+const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
@@ -400,7 +404,230 @@ function leaderboardWhere(period: LeaderboardPeriod) {
   return { clause: "", params: [] };
 }
 
+function cleanSquadName(value: unknown) {
+  const name = cleanText(value, MAX_SQUAD_NAME_LENGTH).replace(/\s+/g, " ");
+  if (!name) throw new Response("Missing squad name.", { status: 400, headers: corsHeaders });
+  return name;
+}
+
+function cleanSquadRole(value: unknown): SquadRole {
+  return value === "leader" || value === "co_leader" || value === "elder" || value === "member" ? value : "member";
+}
+
+function roleRank(role: SquadRole) {
+  return role === "leader" ? 4 : role === "co_leader" ? 3 : role === "elder" ? 2 : 1;
+}
+
+function canManageRequests(role: SquadRole) {
+  return roleRank(role) > roleRank("member");
+}
+
+function canChangeRole(actorRole: SquadRole, targetRole: SquadRole, nextRole: SquadRole) {
+  if (actorRole === "leader") return nextRole !== "leader";
+  if (actorRole !== "co_leader") return false;
+  return roleRank(targetRole) < roleRank("co_leader") && roleRank(nextRole) < roleRank("co_leader");
+}
+
+function canKick(actorRole: SquadRole, targetRole: SquadRole) {
+  if (actorRole === "leader") return targetRole !== "leader";
+  if (actorRole === "co_leader") return roleRank(targetRole) < roleRank("co_leader");
+  return false;
+}
+
+async function getUserSquadMember(env: Env, userId: string) {
+  return env.DB.prepare("SELECT squad_id AS squadId, role FROM squad_members WHERE user_id = ?")
+    .bind(userId)
+    .first<{ squadId: string; role: SquadRole }>();
+}
+
+async function getSquadMemberCount(env: Env, squadId: string) {
+  const row = await env.DB.prepare("SELECT COUNT(*) AS count FROM squad_members WHERE squad_id = ?")
+    .bind(squadId)
+    .first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+async function getSquadMemberIds(env: Env, userId: string) {
+  const membership = await getUserSquadMember(env, userId);
+  if (!membership) return [];
+  const rows = await env.DB.prepare("SELECT user_id AS id FROM squad_members WHERE squad_id = ?")
+    .bind(membership.squadId)
+    .all<{ id: string }>();
+  return rows.results.map((row) => row.id);
+}
+
+async function getSquadLeaderboard(env: Env, userId: string, period: LeaderboardPeriod) {
+  const memberIds = await getSquadMemberIds(env, userId);
+  if (!memberIds.length) return [];
+  const periodFilter = leaderboardWhere(period);
+  const clauses = [`u.id IN (${memberIds.map(() => "?").join(",")})`];
+  const params = [...memberIds, ...periodFilter.params];
+  if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
+  const rows = await env.DB.prepare(`
+    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
+      sm.role AS role,
+      COALESCE(SUM(ds.minutes), 0) AS minutes,
+      COALESCE(SUM(ds.sessions), 0) AS sessions,
+      MAX(ds.date) AS lastActiveDate
+    FROM users u
+    JOIN squad_members sm ON sm.user_id = u.id
+    LEFT JOIN daily_stats ds ON ds.user_id = u.id
+    WHERE ${clauses.join(" AND ")}
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role
+    ORDER BY minutes DESC, displayName ASC
+    LIMIT 50
+  `).bind(...params).all<{
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatarJson: string;
+    role: SquadRole;
+    minutes: number;
+    sessions: number;
+    lastActiveDate: string | null;
+  }>();
+
+  return rows.results.map((row, index) => ({
+    ...row,
+    avatar: parseAvatar(row.avatarJson, row.displayName),
+    avatarJson: undefined,
+    minutes: Number(row.minutes),
+    sessions: Number(row.sessions),
+    rank: index + 1,
+    isSelf: row.userId === userId,
+  }));
+}
+
+async function getSquadSnapshot(env: Env, userId: string) {
+  const membership = await getUserSquadMember(env, userId);
+  if (!membership) {
+    const outgoing = await env.DB.prepare(`
+      SELECT r.id, r.squad_id AS squadId, s.name AS squadName, s.is_private AS isPrivate, r.status, r.created_at AS createdAt
+      FROM squad_join_requests r
+      JOIN squads s ON s.id = r.squad_id
+      WHERE r.user_id = ? AND r.status = 'pending'
+      ORDER BY r.created_at DESC
+    `).bind(userId).all();
+    return { squad: null, outgoingSquadRequests: outgoing.results, incomingSquadRequests: [], squadMessages: [] };
+  }
+
+  const squad = await env.DB.prepare(`
+    SELECT s.id, s.name, s.is_private AS isPrivate, s.created_by_user_id AS createdByUserId, s.created_at AS createdAt,
+      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(ds.sessions), 0) AS totalSessions,
+      COUNT(DISTINCT sm.user_id) AS memberCount
+    FROM squads s
+    JOIN squad_members sm ON sm.squad_id = s.id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    WHERE s.id = ?
+    GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
+  `).bind(membership.squadId).first<{
+    id: string;
+    name: string;
+    isPrivate: number;
+    createdByUserId: string;
+    createdAt: string;
+    totalMinutes: number;
+    totalSessions: number;
+    memberCount: number;
+  }>();
+
+  const members = await env.DB.prepare(`
+    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
+      sm.role, sm.joined_at AS joinedAt, u.last_seen_at AS lastSeenAt,
+      COALESCE(SUM(ds.minutes), 0) AS minutes,
+      COALESCE(SUM(ds.sessions), 0) AS sessions
+    FROM squad_members sm
+    JOIN users u ON u.id = sm.user_id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    WHERE sm.squad_id = ?
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, sm.joined_at, u.last_seen_at
+    ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
+  `).bind(membership.squadId).all<{
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatarJson: string;
+    role: SquadRole;
+    joinedAt: string;
+    lastSeenAt: string | null;
+    minutes: number;
+    sessions: number;
+  }>();
+
+  const incoming = canManageRequests(membership.role) ? await env.DB.prepare(`
+    SELECT r.id, r.squad_id AS squadId, r.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+      u.avatar_json AS avatarJson, r.status, r.created_at AS createdAt
+    FROM squad_join_requests r
+    JOIN users u ON u.id = r.user_id
+    WHERE r.squad_id = ? AND r.status = 'pending'
+    ORDER BY r.created_at DESC
+  `).bind(membership.squadId).all<{
+    id: string;
+    squadId: string;
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatarJson: string;
+    status: string;
+    createdAt: string;
+  }>() : { results: [] };
+
+  const messages = await env.DB.prepare(`
+    SELECT m.id, m.squad_id AS squadId, m.user_id AS userId, u.display_name AS displayName, u.friend_code AS friendCode,
+      u.avatar_json AS avatarJson, sm.role, m.body, m.created_at AS createdAt
+    FROM squad_messages m
+    JOIN users u ON u.id = m.user_id
+    JOIN squad_members sm ON sm.squad_id = m.squad_id AND sm.user_id = m.user_id
+    WHERE m.squad_id = ?
+    ORDER BY m.created_at DESC
+    LIMIT 60
+  `).bind(membership.squadId).all<{
+    id: string;
+    squadId: string;
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatarJson: string;
+    role: SquadRole;
+    body: string;
+    createdAt: string;
+  }>();
+
+  return {
+    squad: squad ? {
+      ...squad,
+      isPrivate: Boolean(squad.isPrivate),
+      totalMinutes: Number(squad.totalMinutes),
+      totalSessions: Number(squad.totalSessions),
+      memberCount: Number(squad.memberCount),
+      myRole: membership.role,
+      members: members.results.map((member) => ({
+        ...member,
+        avatar: parseAvatar(member.avatarJson, member.displayName),
+        avatarJson: undefined,
+        minutes: Number(member.minutes),
+        sessions: Number(member.sessions),
+        isSelf: member.userId === userId,
+      })),
+    } : null,
+    incomingSquadRequests: incoming.results.map((request) => ({
+      ...request,
+      avatar: parseAvatar(request.avatarJson, request.displayName),
+      avatarJson: undefined,
+    })),
+    outgoingSquadRequests: [],
+    squadMessages: messages.results.reverse().map((message) => ({
+      ...message,
+      avatar: parseAvatar(message.avatarJson, message.displayName),
+      avatarJson: undefined,
+      isSelf: message.userId === userId,
+    })),
+  };
+}
+
 async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope, period: LeaderboardPeriod) {
+  if (scope === "squad") return getSquadLeaderboard(env, userId, period);
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
   const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
   const periodFilter = leaderboardWhere(period);
@@ -617,12 +844,18 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
       weekly: await getLeaderboard(env, userId, "friends", "weekly"),
       overall: await getLeaderboard(env, userId, "friends", "overall"),
     },
+    squad: {
+      daily: await getLeaderboard(env, userId, "squad", "daily"),
+      weekly: await getLeaderboard(env, userId, "squad", "weekly"),
+      overall: await getLeaderboard(env, userId, "squad", "overall"),
+    },
   };
   const cachedFeeds = {
     global: await getFeed(request, env, userId, "global"),
     friends: await getFeed(request, env, userId, "friends"),
   };
 
+  const squadSnapshot = await getSquadSnapshot(env, userId);
   return {
     social: {
       friends: friends.results.map((friend) => ({
@@ -646,6 +879,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
       })),
       cachedLeaderboards,
       cachedFeeds,
+      ...squadSnapshot,
     },
   };
 }
@@ -998,6 +1232,207 @@ async function handleFriendResponse(request: Request, env: Env) {
   return json(await getSocialSnapshot(request, env, userId));
 }
 
+async function handleSquadCreate(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; name: string; isPrivate?: boolean }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const existing = await getUserSquadMember(env, userId);
+  if (existing) return text("Leave your current squad before creating a new one.", 409);
+
+  const squadId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO squads (id, name, is_private, created_by_user_id) VALUES (?, ?, ?, ?)")
+      .bind(squadId, cleanSquadName(payload.name), payload.isPrivate ? 1 : 0, userId),
+    env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'leader')")
+      .bind(squadId, userId),
+  ]);
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadSearch(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; query?: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const query = `%${cleanText(payload.query, 48)}%`;
+  const userMembership = await getUserSquadMember(env, userId);
+  const pendingRows = await env.DB.prepare("SELECT squad_id AS squadId FROM squad_join_requests WHERE user_id = ? AND status = 'pending'")
+    .bind(userId)
+    .all<{ squadId: string }>();
+  const pendingIds = new Set(pendingRows.results.map((row) => row.squadId));
+  const rows = await env.DB.prepare(`
+    SELECT s.id, s.name, s.is_private AS isPrivate, s.created_at AS createdAt,
+      COUNT(DISTINCT sm.user_id) AS memberCount,
+      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(ds.sessions), 0) AS totalSessions
+    FROM squads s
+    LEFT JOIN squad_members sm ON sm.squad_id = s.id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    WHERE s.name LIKE ?
+    GROUP BY s.id, s.name, s.is_private, s.created_at
+    ORDER BY memberCount DESC, totalMinutes DESC, s.name ASC
+    LIMIT 30
+  `).bind(query).all<{ id: string; name: string; isPrivate: number; createdAt: string; memberCount: number; totalMinutes: number; totalSessions: number }>();
+
+  return json({
+    squads: rows.results.map((squad) => {
+      const memberCount = Number(squad.memberCount);
+      const action = userMembership ? "unavailable" : memberCount >= MAX_SQUAD_MEMBERS ? "full" : pendingIds.has(squad.id) ? "pending" : squad.isPrivate ? "request" : "join";
+      return {
+        ...squad,
+        isPrivate: Boolean(squad.isPrivate),
+        memberCount,
+        maxMembers: MAX_SQUAD_MEMBERS,
+        totalMinutes: Number(squad.totalMinutes),
+        totalSessions: Number(squad.totalSessions),
+        action,
+      };
+    }),
+  });
+}
+
+async function handleSquadJoin(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; squadId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  if (await getUserSquadMember(env, userId)) return text("Leave your current squad before joining another one.", 409);
+  const squadId = requiredText(payload.squadId, "squadId", MAX_ID_LENGTH);
+  const squad = await env.DB.prepare("SELECT id, is_private AS isPrivate FROM squads WHERE id = ?").bind(squadId).first<{ id: string; isPrivate: number }>();
+  if (!squad) return text("Squad not found.", 404);
+  if (await getSquadMemberCount(env, squadId) >= MAX_SQUAD_MEMBERS) return text("That squad is already full.", 409);
+
+  if (squad.isPrivate) {
+    const id = crypto.randomUUID();
+    await env.DB.prepare(`
+      INSERT INTO squad_join_requests (id, squad_id, user_id, status)
+      VALUES (?, ?, ?, 'pending')
+      ON CONFLICT(squad_id, user_id) DO UPDATE SET status = 'pending', responded_at = NULL, responded_by_user_id = NULL
+    `).bind(id, squadId, userId).run();
+  } else {
+    await env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'member')")
+      .bind(squadId, userId)
+      .run();
+    await env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(squadId).run();
+  }
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadRespond(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; requestId: string; response: "accepted" | "declined" }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const actor = await getUserSquadMember(env, userId);
+  if (!actor || !canManageRequests(actor.role)) return text("You cannot manage squad requests.", 403);
+  const joinRequest = await env.DB.prepare("SELECT id, squad_id AS squadId, user_id AS userId FROM squad_join_requests WHERE id = ? AND squad_id = ? AND status = 'pending'")
+    .bind(String(payload.requestId ?? ""), actor.squadId)
+    .first<{ id: string; squadId: string; userId: string }>();
+  if (!joinRequest) return text("Squad request not found.", 404);
+
+  const response = payload.response === "accepted" ? "accepted" : "declined";
+  if (response === "accepted") {
+    if (await getUserSquadMember(env, joinRequest.userId)) return text("That user is already in a squad.", 409);
+    if (await getSquadMemberCount(env, actor.squadId) >= MAX_SQUAD_MEMBERS) return text("That squad is already full.", 409);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE squad_join_requests SET status = 'accepted', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ? WHERE id = ?").bind(userId, joinRequest.id),
+      env.DB.prepare("INSERT INTO squad_members (squad_id, user_id, role) VALUES (?, ?, 'member')").bind(actor.squadId, joinRequest.userId),
+      env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(actor.squadId),
+    ]);
+  } else {
+    await env.DB.prepare("UPDATE squad_join_requests SET status = 'declined', responded_at = CURRENT_TIMESTAMP, responded_by_user_id = ? WHERE id = ?")
+      .bind(userId, joinRequest.id)
+      .run();
+  }
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadLeave(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const membership = await getUserSquadMember(env, userId);
+  if (!membership) return text("You are not in a squad.", 404);
+  const count = await getSquadMemberCount(env, membership.squadId);
+  if (count <= 1) {
+    await env.DB.prepare("DELETE FROM squads WHERE id = ?").bind(membership.squadId).run();
+    return json(await getSocialSnapshot(request, env, userId));
+  }
+
+  await env.DB.prepare("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ?").bind(membership.squadId, userId).run();
+  if (membership.role === "leader") {
+    const nextLeader = await env.DB.prepare(`
+      SELECT user_id AS userId FROM squad_members
+      WHERE squad_id = ?
+      ORDER BY CASE role WHEN 'co_leader' THEN 1 WHEN 'elder' THEN 2 ELSE 3 END, joined_at ASC
+      LIMIT 1
+    `).bind(membership.squadId).first<{ userId: string }>();
+    if (nextLeader) await env.DB.prepare("UPDATE squad_members SET role = 'leader' WHERE squad_id = ? AND user_id = ?").bind(membership.squadId, nextLeader.userId).run();
+  }
+  await env.DB.prepare("UPDATE squads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(membership.squadId).run();
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadChat(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; body: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const membership = await getUserSquadMember(env, userId);
+  if (!membership) return text("Join a squad before chatting.", 403);
+  const body = cleanText(payload.body, MAX_SQUAD_MESSAGE_LENGTH);
+  if (!body) return text("Message cannot be empty.", 400);
+  await env.DB.prepare("INSERT INTO squad_messages (id, squad_id, user_id, body) VALUES (?, ?, ?, ?)")
+    .bind(crypto.randomUUID(), membership.squadId, userId, body)
+    .run();
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadRole(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; targetUserId: string; role: SquadRole }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const actor = await getUserSquadMember(env, userId);
+  if (!actor) return text("You are not in a squad.", 404);
+  const targetUserId = cleanUserId(payload.targetUserId);
+  if (targetUserId === userId) return text("You cannot change your own rank.", 400);
+  const target = await env.DB.prepare("SELECT role FROM squad_members WHERE squad_id = ? AND user_id = ?")
+    .bind(actor.squadId, targetUserId)
+    .first<{ role: SquadRole }>();
+  if (!target) return text("Squad member not found.", 404);
+  const nextRole = cleanSquadRole(payload.role);
+  if (!canChangeRole(actor.role, target.role, nextRole)) return text("You cannot assign that rank.", 403);
+  await env.DB.prepare("UPDATE squad_members SET role = ? WHERE squad_id = ? AND user_id = ?")
+    .bind(nextRole, actor.squadId, targetUserId)
+    .run();
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadKick(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; targetUserId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const actor = await getUserSquadMember(env, userId);
+  if (!actor) return text("You are not in a squad.", 404);
+  const targetUserId = cleanUserId(payload.targetUserId);
+  if (targetUserId === userId) return text("Use leave squad instead.", 400);
+  const target = await env.DB.prepare("SELECT role FROM squad_members WHERE squad_id = ? AND user_id = ?")
+    .bind(actor.squadId, targetUserId)
+    .first<{ role: SquadRole }>();
+  if (!target) return text("Squad member not found.", 404);
+  if (!canKick(actor.role, target.role)) return text("You cannot kick that member.", 403);
+  await env.DB.prepare("DELETE FROM squad_members WHERE squad_id = ? AND user_id = ?").bind(actor.squadId, targetUserId).run();
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
+async function handleSquadSettings(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; name: string; isPrivate?: boolean }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const actor = await getUserSquadMember(env, userId);
+  if (!actor || actor.role !== "leader") return text("Only the squad leader can edit squad settings.", 403);
+  await env.DB.prepare("UPDATE squads SET name = ?, is_private = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(cleanSquadName(payload.name), payload.isPrivate ? 1 : 0, actor.squadId)
+    .run();
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -1017,6 +1452,16 @@ export default {
       if (request.method === "POST" && url.pathname === "/friends/request") return await handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return await handleFriendResponse(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/create") return await handleSquadCreate(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/search") return await handleSquadSearch(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/join") return await handleSquadJoin(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/respond") return await handleSquadRespond(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/leave") return await handleSquadLeave(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/chat") return await handleSquadChat(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/status") return await handleFriendStatus(request, env);
+      if (request.method === "POST" && (url.pathname === "/squads/promote" || url.pathname === "/squads/demote")) return await handleSquadRole(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/kick") return await handleSquadKick(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/settings") return await handleSquadSettings(request, env);
       if (request.method === "POST" && url.pathname === "/presence") return await handlePresence(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/player-stats") return await handlePlayerStats(request, env);
       return text("Not found.", 404);

@@ -36,10 +36,10 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, presencePing, reactToFeedPost, respondToFriendRequest, shouldAutoSyncSocial, syncSocialState, updateFeedPost, uploadFeedPostImage } from "./lib/social";
-import type { PlayerStatsResponse, R2UsageStatus } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage } from "./lib/social";
+import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
@@ -490,7 +490,7 @@ const socialSubtabs: Array<{ id: SocialSubtab; label: string; badge?: string }> 
   { id: "feed", label: "Feed" },
   { id: "leaderboard", label: "Leaderboard" },
   { id: "friends", label: "Friends" },
-  { id: "squad", label: "Squad", badge: "Coming soon" },
+  { id: "squad", label: "Squad" },
   { id: "profile", label: "Profile" },
 ];
 
@@ -498,6 +498,29 @@ const LANDING_PAGE_URL = "https://damcha02.github.io/destudydracker/";
 
 function makeFriendInviteLink(friendCode: string) {
   return `${LANDING_PAGE_URL}?invite=${encodeURIComponent(friendCode)}`;
+}
+
+const squadRoleLabels: Record<SocialSquadRole, string> = {
+  leader: "Leader",
+  co_leader: "Co-leader",
+  elder: "Elder",
+  member: "Member",
+};
+
+const squadRoles: SocialSquadRole[] = ["leader", "co_leader", "elder", "member"];
+
+function squadRoleRank(role: SocialSquadRole) {
+  return role === "leader" ? 4 : role === "co_leader" ? 3 : role === "elder" ? 2 : 1;
+}
+
+function canManageSquadRequests(role?: SocialSquadRole) {
+  return Boolean(role && squadRoleRank(role) > squadRoleRank("member"));
+}
+
+function canEditSquadMember(actorRole: SocialSquadRole, targetRole: SocialSquadRole) {
+  if (actorRole === "leader") return targetRole !== "leader";
+  if (actorRole === "co_leader") return squadRoleRank(targetRole) < squadRoleRank("co_leader");
+  return false;
 }
 
 const feedFallbackNotes = [
@@ -2076,6 +2099,15 @@ function App() {
   const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("friends");
   const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
   const [friendCodeDraft, setFriendCodeDraft] = useState("");
+  const [squadNameDraft, setSquadNameDraft] = useState("");
+  const [squadPrivateDraft, setSquadPrivateDraft] = useState(false);
+  const [squadSearchDraft, setSquadSearchDraft] = useState("");
+  const [squadSearchResults, setSquadSearchResults] = useState<SquadSearchResult[]>([]);
+  const [squadSearching, setSquadSearching] = useState(false);
+  const [squadChatDraft, setSquadChatDraft] = useState("");
+  const [squadSettingsEditing, setSquadSettingsEditing] = useState(false);
+  const [squadSettingsNameDraft, setSquadSettingsNameDraft] = useState("");
+  const [squadSettingsPrivateDraft, setSquadSettingsPrivateDraft] = useState(false);
   const [socialSyncing, setSocialSyncing] = useState(false);
   const [socialNameEditing, setSocialNameEditing] = useState(false);
   const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
@@ -2667,6 +2699,7 @@ function App() {
   const badgeVeteran = state.totalUnlocks >= 10;
   const badgeRockMaster = state.petRockPats >= 1000;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
+  const squadLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
   const socialGlobalWeekly = getLeaderboardWithLocalSelf(state, "global", "weekly");
   const socialFriendsWeekly = getLeaderboardWithLocalSelf(state, "friends", "weekly");
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
@@ -2698,6 +2731,10 @@ function App() {
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const socialFriendIds = new Set(state.social.friends.map((friend) => friend.userId));
   const outgoingFriendRequestCodes = new Set(state.social.outgoingFriendRequests.map((request) => request.toFriendCode));
+  const currentSquad = state.social.squad;
+  const currentSquadRole = currentSquad?.myRole;
+  const canManageCurrentSquadRequests = canManageSquadRequests(currentSquadRole);
+  const isLastSquadMember = Boolean(currentSquad && currentSquad.memberCount <= 1);
   const viewingIsSelf = viewingFriend?.userId === state.social.userId;
   const viewingIsFriend = viewingFriend ? socialFriendIds.has(viewingFriend.userId) : false;
   const viewingRequestPending = viewingFriend ? outgoingFriendRequestCodes.has(viewingFriend.friendCode) : false;
@@ -3237,7 +3274,17 @@ function App() {
             weekly: appState.social.cachedLeaderboards.friends.weekly.map(updateLeaderboard),
             overall: appState.social.cachedLeaderboards.friends.overall.map(updateLeaderboard),
           },
+          squad: {
+            daily: appState.social.cachedLeaderboards.squad.daily.map(updateLeaderboard),
+            weekly: appState.social.cachedLeaderboards.squad.weekly.map(updateLeaderboard),
+            overall: appState.social.cachedLeaderboards.squad.overall.map(updateLeaderboard),
+          },
         },
+        squad: appState.social.squad ? {
+          ...appState.social.squad,
+          members: appState.social.squad.members.map((member) => member.userId === appState.social.userId || member.isSelf ? { ...member, avatar } : member),
+        } : null,
+        squadMessages: appState.social.squadMessages.map((message) => message.userId === appState.social.userId || message.isSelf ? { ...message, avatar } : message),
       },
     };
   }
@@ -3636,6 +3683,175 @@ function App() {
     }
   }
 
+  function applySocialSnapshot(result: { social: Partial<AppState["social"]> }) {
+    setState((current) => ({
+      ...current,
+      social: {
+        ...current.social,
+        ...result.social,
+        pendingFeedPosts: current.social.pendingFeedPosts,
+        lastSyncedAt: new Date().toISOString(),
+        lastSyncError: null,
+        nextAutoSyncAt: getNextAutoSyncAt(),
+      },
+    }));
+  }
+
+  async function submitSquadCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = squadNameDraft.trim();
+    if (!name) {
+      setMessage("Name your squad first.");
+      return;
+    }
+    setSocialSyncing(true);
+    try {
+      const result = await createSquad(state.social, name, squadPrivateDraft);
+      applySocialSnapshot(result);
+      setSquadNameDraft("");
+      setMessage("Squad created.");
+    } catch (error: unknown) {
+      console.warn("Could not create squad.", error);
+      setMessage(getErrorMessage(error, "Could not create squad."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function submitSquadSearch(event?: FormEvent<HTMLFormElement>) {
+    event?.preventDefault();
+    if (!socialConfigured) {
+      setMessage("Social sync is required for squads.");
+      return;
+    }
+    setSquadSearching(true);
+    try {
+      const result = await searchSquads(state.social, squadSearchDraft.trim());
+      setSquadSearchResults(result.squads);
+    } catch (error: unknown) {
+      console.warn("Could not search squads.", error);
+      setMessage(getErrorMessage(error, "Could not search squads."));
+    } finally {
+      setSquadSearching(false);
+    }
+  }
+
+  async function joinOrRequestSquad(squad: SquadSearchResult) {
+    setSocialSyncing(true);
+    try {
+      const result = await joinSquad(state.social, squad.id);
+      applySocialSnapshot(result);
+      await submitSquadSearch();
+      setMessage(squad.isPrivate ? "Join request sent." : "Joined squad.");
+    } catch (error: unknown) {
+      console.warn("Could not join squad.", error);
+      setMessage(getErrorMessage(error, "Could not join squad."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function answerSquadRequest(requestId: string, response: "accepted" | "declined") {
+    setSocialSyncing(true);
+    try {
+      const result = await respondToSquadRequest(state.social, requestId, response);
+      applySocialSnapshot(result);
+      setMessage(response === "accepted" ? "Squad request accepted." : "Squad request declined.");
+    } catch (error: unknown) {
+      console.warn("Could not update squad request.", error);
+      setMessage(getErrorMessage(error, "Could not update squad request."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function leaveCurrentSquad() {
+    if (isLastSquadMember && !window.confirm("You are the last member. Leaving will delete this squad. Continue?")) return;
+    setSocialSyncing(true);
+    try {
+      const result = await leaveSquad(state.social);
+      applySocialSnapshot(result);
+      setMessage(isLastSquadMember ? "Squad deleted." : "You left the squad.");
+    } catch (error: unknown) {
+      console.warn("Could not leave squad.", error);
+      setMessage(getErrorMessage(error, "Could not leave squad."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function submitSquadChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const body = squadChatDraft.trim();
+    if (!body) return;
+    setSquadChatDraft("");
+    try {
+      const result = await sendSquadMessage(state.social, body);
+      applySocialSnapshot(result);
+    } catch (error: unknown) {
+      console.warn("Could not send squad message.", error);
+      setSquadChatDraft(body);
+      setMessage(getErrorMessage(error, "Could not send message."));
+    }
+  }
+
+  async function changeSquadMemberRole(targetUserId: string, role: SocialSquadRole) {
+    setSocialSyncing(true);
+    try {
+      const result = await setSquadMemberRole(state.social, targetUserId, role);
+      applySocialSnapshot(result);
+      setMessage("Squad rank updated.");
+    } catch (error: unknown) {
+      console.warn("Could not update squad rank.", error);
+      setMessage(getErrorMessage(error, "Could not update squad rank."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  async function kickFromSquad(targetUserId: string, displayName: string) {
+    if (!window.confirm(`Kick ${displayName} from the squad?`)) return;
+    setSocialSyncing(true);
+    try {
+      const result = await kickSquadMember(state.social, targetUserId);
+      applySocialSnapshot(result);
+      setMessage("Member kicked.");
+    } catch (error: unknown) {
+      console.warn("Could not kick squad member.", error);
+      setMessage(getErrorMessage(error, "Could not kick member."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
+  function startSquadSettingsEdit() {
+    if (!currentSquad) return;
+    setSquadSettingsNameDraft(currentSquad.name);
+    setSquadSettingsPrivateDraft(currentSquad.isPrivate);
+    setSquadSettingsEditing(true);
+  }
+
+  async function submitSquadSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = squadSettingsNameDraft.trim();
+    if (!name) {
+      setMessage("Name your squad first.");
+      return;
+    }
+    setSocialSyncing(true);
+    try {
+      const result = await updateSquadSettings(state.social, name, squadSettingsPrivateDraft);
+      applySocialSnapshot(result);
+      setSquadSettingsEditing(false);
+      setMessage("Squad settings saved.");
+    } catch (error: unknown) {
+      console.warn("Could not update squad settings.", error);
+      setMessage(getErrorMessage(error, "Could not update squad settings."));
+    } finally {
+      setSocialSyncing(false);
+    }
+  }
+
   function openMenuPanel(panel: Exclude<MenuPanel, null>) {
     setActiveMenuPanel(panel);
     setMenuOpen(false);
@@ -3773,6 +3989,10 @@ function App() {
           friends: result.social.friends,
           incomingFriendRequests: result.social.incomingFriendRequests,
           outgoingFriendRequests: result.social.outgoingFriendRequests,
+          squad: result.social.squad,
+          incomingSquadRequests: result.social.incomingSquadRequests,
+          outgoingSquadRequests: result.social.outgoingSquadRequests,
+          squadMessages: result.social.squadMessages,
           cachedLeaderboards: result.social.cachedLeaderboards,
           cachedFeeds: result.social.cachedFeeds,
           pendingFeedPosts: current.social.pendingFeedPosts,
@@ -3888,7 +4108,7 @@ function App() {
   }, [socialConfigured, socialSubtab, state.activeTab]);
 
   useEffect(() => {
-    if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile")) {
+    if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile" || socialSubtab === "squad")) {
       presencePingEffect();
       void refreshFriendStatus();
     }
@@ -8638,17 +8858,161 @@ function App() {
           ) : null}
 
           {socialSubtab === "squad" ? (
-            <div className="social-single-panel">
-              <article className="arena-panel arena-squad-coming-soon">
-                <div className="arena-panel-head">
-                  <span className="arena-panel-icon">S</span>
-                  <div>
-                    <span className="arena-kicker">Coming soon</span>
-                    <h3>Squads</h3>
-                  </div>
-                </div>
-                <p>Team up in study squads, climb group rankings, and run focus challenges together. For now, friend leaderboards are live.</p>
-              </article>
+            <div className="social-single-panel squad-panel">
+              {!currentSquad ? (
+                <>
+                  <article className="arena-panel squad-card">
+                    <div className="arena-panel-head">
+                      <span className="arena-panel-icon">S</span>
+                      <div>
+                        <span className="arena-kicker">Create squad</span>
+                        <h3>Start a squad</h3>
+                      </div>
+                    </div>
+                    <p className="squad-copy">Squads hold up to 4 players. Once you join one, you cannot create or join another until you leave.</p>
+                    <form className="squad-form" onSubmit={submitSquadCreate}>
+                      <input className="arena-input" value={squadNameDraft} onChange={(event) => setSquadNameDraft(event.target.value)} placeholder="Squad name" maxLength={48} disabled={!socialConfigured || socialSyncing} />
+                      <label className="squad-toggle">
+                        <input type="checkbox" checked={squadPrivateDraft} onChange={(event) => setSquadPrivateDraft(event.target.checked)} disabled={!socialConfigured || socialSyncing} />
+                        <span>Private squad</span>
+                      </label>
+                      <button type="submit" className="arena-btn arena-btn--send" disabled={!socialConfigured || socialSyncing}>{socialSyncing ? "Working..." : "Create"}</button>
+                    </form>
+                  </article>
+
+                  <article className="arena-panel squad-card">
+                    <div className="arena-panel-head">
+                      <span className="arena-panel-icon">⌕</span>
+                      <div>
+                        <span className="arena-kicker">Search all squads</span>
+                        <h3>Find a squad</h3>
+                      </div>
+                    </div>
+                    <form className="squad-form squad-search-form" onSubmit={submitSquadSearch}>
+                      <input className="arena-input" value={squadSearchDraft} onChange={(event) => setSquadSearchDraft(event.target.value)} placeholder="Search by squad name" disabled={!socialConfigured || squadSearching} />
+                      <button type="submit" className="arena-btn arena-btn--send" disabled={!socialConfigured || squadSearching}>{squadSearching ? "Searching..." : "Search"}</button>
+                    </form>
+                    {state.social.outgoingSquadRequests.length ? (
+                      <div className="squad-request-note">Pending request: {state.social.outgoingSquadRequests.map((request) => request.squadName ?? "Squad").join(", ")}</div>
+                    ) : null}
+                    <div className="squad-search-results">
+                      {squadSearchResults.map((squad) => (
+                        <div key={squad.id} className="squad-search-card">
+                          <div>
+                            <strong>{squad.name}</strong>
+                            <span>{squad.isPrivate ? "Private" : "Public"} · {squad.memberCount}/{squad.maxMembers} members · {formatMinutes(squad.totalMinutes)}</span>
+                          </div>
+                          {squad.action === "join" || squad.action === "request" ? (
+                            <button type="button" className="arena-btn arena-btn--accept" onClick={() => void joinOrRequestSquad(squad)} disabled={socialSyncing}>{squad.action === "join" ? "Join" : "Request"}</button>
+                          ) : (
+                            <span className="arena-pending-badge">{squad.action === "pending" ? "Pending" : squad.action === "full" ? "Full" : "Unavailable"}</span>
+                          )}
+                        </div>
+                      ))}
+                      {!squadSearchResults.length ? <div className="arena-empty small">Search by name to discover public and private squads.</div> : null}
+                    </div>
+                  </article>
+                </>
+              ) : (
+                <>
+                  <article className="arena-panel squad-card squad-hq-card">
+                    <div className="squad-hq-head">
+                      <div className="arena-title-cluster">
+                        <span className="arena-title-icon">S</span>
+                        <div>
+                          <span className="arena-kicker">{currentSquad.isPrivate ? "Private squad" : "Public squad"}</span>
+                          <h2>{currentSquad.name}</h2>
+                          <p>{currentSquad.memberCount}/4 members · Your rank: {squadRoleLabels[currentSquad.myRole]}</p>
+                        </div>
+                      </div>
+                      <div className="squad-actions">
+                        {currentSquad.myRole === "leader" ? <button type="button" className="arena-btn arena-btn--decline" onClick={startSquadSettingsEdit}>Edit</button> : null}
+                        <button type="button" className="arena-btn arena-btn--decline" onClick={() => void leaveCurrentSquad()} disabled={socialSyncing}>Leave</button>
+                      </div>
+                    </div>
+                    {squadSettingsEditing ? (
+                      <form className="squad-form squad-settings-form" onSubmit={submitSquadSettings}>
+                        <input className="arena-input" value={squadSettingsNameDraft} onChange={(event) => setSquadSettingsNameDraft(event.target.value)} maxLength={48} />
+                        <label className="squad-toggle"><input type="checkbox" checked={squadSettingsPrivateDraft} onChange={(event) => setSquadSettingsPrivateDraft(event.target.checked)} /><span>Private squad</span></label>
+                        <button type="submit" className="arena-btn arena-btn--send" disabled={socialSyncing}>Save</button>
+                        <button type="button" className="arena-btn arena-btn--decline" onClick={() => setSquadSettingsEditing(false)}>Cancel</button>
+                      </form>
+                    ) : null}
+                    <div className="squad-stats-grid">
+                      <div><strong>{formatMinutes(currentSquad.totalMinutes)}</strong><span>Total squad focus</span></div>
+                      <div><strong>{currentSquad.totalSessions}</strong><span>Sessions</span></div>
+                      <div><strong>{state.social.incomingSquadRequests.length}</strong><span>Pending requests</span></div>
+                    </div>
+                  </article>
+
+                  <article className="arena-panel squad-card">
+                    <div className="arena-panel-head"><span className="arena-panel-icon">R</span><div><span className="arena-kicker">Squad roster</span><h3>Members</h3></div></div>
+                    <div className="squad-member-list">
+                      {currentSquad.members.map((member) => {
+                        const editable = currentSquadRole ? canEditSquadMember(currentSquadRole, member.role) && !member.isSelf : false;
+                        return (
+                          <div key={member.userId} className="squad-member-card">
+                            <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                            <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
+                            <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
+                            {editable ? (
+                              <div className="squad-member-actions">
+                                <select value={member.role} onChange={(event) => void changeSquadMemberRole(member.userId, event.target.value as SocialSquadRole)} disabled={socialSyncing}>
+                                  {squadRoles.filter((role) => role !== "leader" && (currentSquadRole === "leader" || squadRoleRank(role) < squadRoleRank("co_leader"))).map((role) => <option key={role} value={role}>{squadRoleLabels[role]}</option>)}
+                                </select>
+                                <button type="button" className="arena-btn arena-btn--decline" onClick={() => void kickFromSquad(member.userId, member.displayName)} disabled={socialSyncing}>Kick</button>
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+
+                  {canManageCurrentSquadRequests ? (
+                    <article className="arena-panel squad-card">
+                      <div className="arena-panel-head"><span className="arena-panel-icon">?</span><div><span className="arena-kicker">Private requests</span><h3>Join requests</h3></div></div>
+                      {state.social.incomingSquadRequests.length ? state.social.incomingSquadRequests.map((request) => (
+                        <div key={request.id} className="arena-request-card">
+                          <ArenaAvatar name={request.displayName ?? "Student"} avatar={request.avatar} size="sm" />
+                          <div className="arena-request-copy"><strong>{request.displayName}</strong><span>{request.friendCode}</span></div>
+                          <div className="arena-request-actions">
+                            <button type="button" className="arena-btn arena-btn--accept" onClick={() => void answerSquadRequest(request.id, "accepted")} disabled={socialSyncing}>Accept</button>
+                            <button type="button" className="arena-btn arena-btn--decline" onClick={() => void answerSquadRequest(request.id, "declined")} disabled={socialSyncing}>Decline</button>
+                          </div>
+                        </div>
+                      )) : <div className="arena-empty small">No pending squad requests.</div>}
+                    </article>
+                  ) : null}
+
+                  <article className="arena-panel squad-card">
+                    <div className="arena-panel-head"><span className="arena-panel-icon">⚔</span><div><span className="arena-kicker">Squad standings</span><h3>{socialPeriod === "daily" ? "Daily" : socialPeriod === "weekly" ? "Weekly" : "Overall"}</h3></div></div>
+                    <div className="arena-period-chips squad-periods" aria-label="Squad leaderboard period">
+                      {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>{period === "daily" ? "Daily" : period === "weekly" ? "Weekly" : "Overall"}</button>)}
+                    </div>
+                    <div className="arena-lb-rows squad-lb-rows">
+                      {squadLeaderboard.map((entry) => <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile({ userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar })} />)}
+                    </div>
+                  </article>
+
+                  <article className="arena-panel squad-card squad-chat-card">
+                    <div className="arena-panel-head"><span className="arena-panel-icon">#</span><div><span className="arena-kicker">Squad chat</span><h3>Chat</h3></div></div>
+                    <div className="squad-chat-list">
+                      {state.social.squadMessages.map((message) => (
+                        <div key={message.id} className={`squad-chat-message ${message.isSelf ? "squad-chat-message--self" : ""}`}>
+                          <ArenaAvatar name={message.displayName} avatar={message.avatar} self={message.isSelf} size="sm" />
+                          <div><strong>{message.displayName} <span>{squadRoleLabels[message.role]}</span></strong><p>{message.body}</p></div>
+                        </div>
+                      ))}
+                      {!state.social.squadMessages.length ? <div className="arena-empty small">No messages yet. Start the squad chat.</div> : null}
+                    </div>
+                    <form className="squad-chat-form" onSubmit={submitSquadChat}>
+                      <input className="arena-input" value={squadChatDraft} onChange={(event) => setSquadChatDraft(event.target.value)} placeholder="Message your squad" maxLength={500} />
+                      <button type="submit" className="arena-btn arena-btn--send" disabled={!squadChatDraft.trim()}>Send</button>
+                    </form>
+                  </article>
+                </>
+              )}
             </div>
           ) : null}
 

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -13,7 +13,7 @@ export interface SocialDailyStat {
 }
 
 interface SocialSyncResponse {
-  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
+  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
 }
 
 interface DeviceIdentity {
@@ -22,7 +22,19 @@ interface DeviceIdentity {
 }
 
 interface SocialStatusResponse {
-  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds">;
+  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedFeeds" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
+}
+
+export interface SquadSearchResult {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  createdAt: string;
+  memberCount: number;
+  maxMembers: number;
+  totalMinutes: number;
+  totalSessions: number;
+  action: "join" | "request" | "pending" | "full" | "unavailable";
 }
 
 interface SocialFeedResponse {
@@ -130,7 +142,12 @@ export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeader
     .filter((entry) => period !== "daily" || isCurrentDayEntry(entry, today))
     .filter((entry) => period !== "weekly" || isCurrentWeekEntry(entry, weekStart));
   const combined = [...(includeSelf ? [self] : []), ...remote]
-    .filter((entry) => scope === "global" || entry.isSelf || state.social.friends.some((friend) => friend.userId === entry.userId))
+    .filter((entry) => {
+      if (scope === "global") return true;
+      if (entry.isSelf) return true;
+      if (scope === "squad") return Boolean(state.social.squad?.members.some((member) => member.userId === entry.userId));
+      return state.social.friends.some((friend) => friend.userId === entry.userId);
+    })
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
 
   return combined.map((entry, index) => ({ ...entry, rank: index + 1, isSelf: entry.userId === self.userId }));
@@ -321,6 +338,69 @@ export async function getFriendStatus(social: SocialState) {
       userId: social.userId,
       deviceSecret: social.deviceSecret,
     }),
+  });
+}
+
+export async function createSquad(social: SocialState, name: string, isPrivate: boolean) {
+  return requestSocialApi<SocialSyncResponse>("/squads/create", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, name, isPrivate }),
+  });
+}
+
+export async function searchSquads(social: SocialState, query: string) {
+  return requestSocialApi<{ squads: SquadSearchResult[] }>("/squads/search", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, query }),
+  });
+}
+
+export async function joinSquad(social: SocialState, squadId: string) {
+  return requestSocialApi<SocialSyncResponse>("/squads/join", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, squadId }),
+  });
+}
+
+export async function respondToSquadRequest(social: SocialState, requestId: string, response: "accepted" | "declined") {
+  return requestSocialApi<SocialSyncResponse>("/squads/respond", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, requestId, response }),
+  });
+}
+
+export async function leaveSquad(social: SocialState) {
+  return requestSocialApi<SocialSyncResponse>("/squads/leave", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret }),
+  });
+}
+
+export async function sendSquadMessage(social: SocialState, body: string) {
+  return requestSocialApi<SocialSyncResponse>("/squads/chat", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, body }),
+  });
+}
+
+export async function setSquadMemberRole(social: SocialState, targetUserId: string, role: SocialSquadRole) {
+  return requestSocialApi<SocialSyncResponse>("/squads/promote", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, targetUserId, role }),
+  });
+}
+
+export async function kickSquadMember(social: SocialState, targetUserId: string) {
+  return requestSocialApi<SocialSyncResponse>("/squads/kick", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, targetUserId }),
+  });
+}
+
+export async function updateSquadSettings(social: SocialState, name: string, isPrivate: boolean) {
+  return requestSocialApi<SocialSyncResponse>("/squads/settings", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, name, isPrivate }),
   });
 }
 

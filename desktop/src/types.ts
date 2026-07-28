@@ -3,11 +3,12 @@ export type SessionKind = "study" | "break" | "exam";
 export type TimerPhase = "idle" | "study" | "break" | "exam" | "stopwatch";
 export type TimerMode = "focus" | "exam" | "endless";
 export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "friends" | "break";
-export type SocialLeaderboardScope = "global" | "friends";
+export type SocialLeaderboardScope = "global" | "friends" | "squad";
 export type SocialLeaderboardPeriod = "daily" | "weekly" | "overall";
 export type SocialFeedScope = "global" | "friends";
 export type SocialSubtab = "feed" | "leaderboard" | "friends" | "squad" | "profile";
 export type SocialFriendRequestStatus = "pending" | "accepted" | "declined";
+export type SocialSquadRole = "leader" | "co_leader" | "elder" | "member";
 export type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 export type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
@@ -174,6 +175,58 @@ export interface SocialFeedComment {
   isSelf?: boolean;
 }
 
+export interface SocialSquadMember {
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  avatar?: SocialAvatar;
+  role: SocialSquadRole;
+  joinedAt: string;
+  lastSeenAt: string | null;
+  minutes: number;
+  sessions: number;
+  isSelf?: boolean;
+}
+
+export interface SocialSquad {
+  id: string;
+  name: string;
+  isPrivate: boolean;
+  createdByUserId: string;
+  createdAt: string;
+  totalMinutes: number;
+  totalSessions: number;
+  memberCount: number;
+  myRole: SocialSquadRole;
+  members: SocialSquadMember[];
+}
+
+export interface SocialSquadJoinRequest {
+  id: string;
+  squadId: string;
+  squadName?: string;
+  userId?: string;
+  displayName?: string;
+  friendCode?: string;
+  avatar?: SocialAvatar;
+  isPrivate?: boolean;
+  status: SocialFriendRequestStatus;
+  createdAt: string;
+}
+
+export interface SocialSquadMessage {
+  id: string;
+  squadId: string;
+  userId: string;
+  displayName: string;
+  friendCode: string;
+  avatar?: SocialAvatar;
+  role: SocialSquadRole;
+  body: string;
+  createdAt: string;
+  isSelf?: boolean;
+}
+
 export interface SocialState {
   userId: string;
   deviceSecret: string;
@@ -188,6 +241,10 @@ export interface SocialState {
   friends: SocialFriend[];
   incomingFriendRequests: SocialFriendRequest[];
   outgoingFriendRequests: SocialFriendRequest[];
+  squad: SocialSquad | null;
+  incomingSquadRequests: SocialSquadJoinRequest[];
+  outgoingSquadRequests: SocialSquadJoinRequest[];
+  squadMessages: SocialSquadMessage[];
   cachedFeeds: Record<SocialFeedScope, SocialFeedPost[]>;
   pendingFeedPosts: SocialFeedPost[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;

@@ -67,6 +67,10 @@ function makeDefaultSocialState(): SocialState {
     friends: [],
     incomingFriendRequests: [],
     outgoingFriendRequests: [],
+    squad: null,
+    incomingSquadRequests: [],
+    outgoingSquadRequests: [],
+    squadMessages: [],
     cachedFeeds: {
       global: [],
       friends: [],
@@ -75,6 +79,7 @@ function makeDefaultSocialState(): SocialState {
     cachedLeaderboards: {
       global: { daily: [], weekly: [], overall: [] },
       friends: { daily: [], weekly: [], overall: [] },
+      squad: { daily: [], weekly: [], overall: [] },
     },
   };
 }
@@ -275,6 +280,10 @@ function normalizeSocialState(social: unknown): SocialState {
     friends: Array.isArray(record.friends) ? record.friends : [],
     incomingFriendRequests: Array.isArray(record.incomingFriendRequests) ? record.incomingFriendRequests : [],
     outgoingFriendRequests: Array.isArray(record.outgoingFriendRequests) ? record.outgoingFriendRequests : [],
+    squad: record.squad && typeof record.squad === "object" ? record.squad : null,
+    incomingSquadRequests: Array.isArray(record.incomingSquadRequests) ? record.incomingSquadRequests : [],
+    outgoingSquadRequests: Array.isArray(record.outgoingSquadRequests) ? record.outgoingSquadRequests : [],
+    squadMessages: Array.isArray(record.squadMessages) ? record.squadMessages : [],
     cachedFeeds: {
       global: Array.isArray(record.cachedFeeds?.global) ? record.cachedFeeds.global : [],
       friends: Array.isArray(record.cachedFeeds?.friends) ? record.cachedFeeds.friends : [],
@@ -290,6 +299,11 @@ function normalizeSocialState(social: unknown): SocialState {
         daily: record.cachedLeaderboards?.friends?.daily ?? [],
         weekly: record.cachedLeaderboards?.friends?.weekly ?? [],
         overall: record.cachedLeaderboards?.friends?.overall ?? [],
+      },
+      squad: {
+        daily: record.cachedLeaderboards?.squad?.daily ?? [],
+        weekly: record.cachedLeaderboards?.squad?.weekly ?? [],
+        overall: record.cachedLeaderboards?.squad?.overall ?? [],
       },
     },
   };

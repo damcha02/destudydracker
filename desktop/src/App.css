@@ -1096,6 +1096,208 @@
   padding-inline: 0;
 }
 
+.squad-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.squad-card {
+  padding: 18px;
+}
+
+.squad-copy,
+.squad-request-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.squad-form,
+.squad-chat-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.squad-form .arena-input,
+.squad-chat-form .arena-input {
+  flex: 1 1 220px;
+}
+
+.squad-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.squad-search-results,
+.squad-member-list,
+.squad-chat-list {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.squad-search-card,
+.squad-member-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 16px;
+  padding: 11px;
+  background: var(--surface-2);
+}
+
+.squad-search-card div,
+.squad-member-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.squad-search-card span,
+.squad-member-main span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.squad-hq-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.squad-actions,
+.squad-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.squad-member-actions select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+}
+
+.squad-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.squad-stats-grid div {
+  display: grid;
+  gap: 3px;
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 16px;
+  padding: 12px;
+  background: color-mix(in oklch, var(--surface-2) 80%, transparent);
+}
+
+.squad-stats-grid strong {
+  color: var(--accent);
+  font-size: 1.1rem;
+}
+
+.squad-stats-grid span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.squad-role-badge {
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: color-mix(in oklch, var(--border) 30%, transparent);
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.squad-role-badge--leader {
+  background: color-mix(in oklch, var(--watch) 18%, transparent);
+  color: var(--watch);
+}
+
+.squad-role-badge--co_leader {
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.squad-role-badge--elder {
+  background: color-mix(in oklch, var(--ok) 16%, transparent);
+  color: var(--ok);
+}
+
+.squad-periods {
+  padding: 0 0 12px;
+}
+
+.squad-lb-rows {
+  padding: 0;
+}
+
+.squad-chat-list {
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.squad-chat-message {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-radius: 16px;
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.squad-chat-message--self {
+  border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
+}
+
+.squad-chat-message div {
+  display: grid;
+  gap: 4px;
+}
+
+.squad-chat-message strong {
+  font-size: 0.84rem;
+}
+
+.squad-chat-message strong span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 850;
+}
+
+.squad-chat-message p {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .stories {
   display: flex;
   gap: 14px;
