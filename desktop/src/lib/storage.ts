@@ -291,6 +291,50 @@ function keepTimerContext(timer: TimerState) {
   };
 }
 
+function nextLocalMidnightAfter(date: Date) {
+  const next = new Date(date);
+  next.setHours(24, 0, 0, 0);
+  return next;
+}
+
+function buildRecoveredSessions(timer: TimerState, startedAt: string, endedAt: string) {
+  const startMs = new Date(startedAt).getTime();
+  const endMs = new Date(endedAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return [];
+  }
+
+  const sessions: StudySession[] = [];
+  let cursorMs = startMs;
+  while (cursorMs < endMs) {
+    const midnight = nextLocalMidnightAfter(new Date(cursorMs)).getTime();
+    const segmentEndMs = Math.min(endMs, midnight);
+    const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
+    const segmentStartedAt = new Date(cursorMs).toISOString();
+    const segmentEndedAt = new Date(bucketEndMs).toISOString();
+    const minutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
+    sessions.push({
+      id: `recovered-${timer.phase}-${segmentStartedAt}-${segmentEndedAt}`,
+      semesterId: timer.semesterId,
+      courseId: timer.courseId,
+      taskId: timer.taskId,
+      kind: timer.phase === "exam" ? "exam" : "study",
+      goal: timer.goal.trim(),
+      learned: timer.learned.trim(),
+      blocker: timer.blocker.trim(),
+      nextStep: timer.nextStep.trim(),
+      confidence: timer.confidence,
+      startedAt: segmentStartedAt,
+      endedAt: segmentEndedAt,
+      minutes,
+      presetLabel: timer.presetLabel,
+    });
+    cursorMs = segmentEndMs;
+  }
+
+  return sessions;
+}
+
 function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   if (!timer.running || !timer.endsAt || (timer.phase !== "study" && timer.phase !== "exam")) {
     return { timer: rehydrateTimer(timer), sessions };
@@ -303,31 +347,13 @@ function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
 
   const endedAt = new Date(endsAtTime).toISOString();
   const startedAt = timer.startedAt ?? endedAt;
-  const minutes = Math.max(1, timer.phase === "exam" ? Math.round(timer.examMinutes) : Math.round(timer.studyMinutes));
-  const recoveredId = `recovered-${timer.phase}-${startedAt}-${endedAt}`;
-  if (sessions.some((session) => session.id === recoveredId)) {
+  const recoveredSessions = buildRecoveredSessions(timer, startedAt, endedAt);
+  if (!recoveredSessions.length || recoveredSessions.every((recoveredSession) => sessions.some((session) => session.id === recoveredSession.id))) {
     return { timer: rehydrateTimer(timer), sessions };
   }
 
-  const recoveredSession: StudySession = {
-    id: recoveredId,
-    semesterId: timer.semesterId,
-    courseId: timer.courseId,
-    taskId: timer.taskId,
-    kind: timer.phase === "exam" ? "exam" : "study",
-    goal: timer.goal.trim(),
-    learned: timer.learned.trim(),
-    blocker: timer.blocker.trim(),
-    nextStep: timer.nextStep.trim(),
-    confidence: timer.confidence,
-    startedAt,
-    endedAt,
-    minutes,
-    presetLabel: timer.presetLabel,
-  };
-
   return {
-    sessions: [recoveredSession, ...sessions],
+    sessions: [...recoveredSessions.filter((recoveredSession) => !sessions.some((session) => session.id === recoveredSession.id)), ...sessions],
     timer: {
       ...defaultTimer,
       ...keepTimerContext(timer),

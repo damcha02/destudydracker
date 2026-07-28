@@ -56,11 +56,25 @@ type ProfileBadge = {
   count?: number;
 };
 
+type ProfileBadgeSubgroup = {
+  category: string;
+  source: string;
+  badges: ProfileBadge[];
+};
+
+type ProfileBadgeGroup = ProfileBadgeSubgroup & {
+  subgroups?: ProfileBadgeSubgroup[];
+};
+
 type FeedCommentNotice = {
   postId: string;
   scope: SocialFeedScope;
   commenterName: string;
   body: string;
+};
+
+type EndlessInactivityPrompt = {
+  promptedAt: string;
 };
 
 const bellSound = new Audio("/bell.mp3");
@@ -298,6 +312,13 @@ function formatCompletedUnits(units: number) {
   return Number.isInteger(units) ? String(units) : units.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function formatCountdown(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 const studyBreakGames = [
   { name: "Daily Durak", url: "", desc: "Solve today's Durak endgame puzzle" },
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
@@ -430,6 +451,8 @@ const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
+const ENDLESS_INACTIVITY_PROMPT_MS = 2 * 60 * 60 * 1000;
+const ENDLESS_INACTIVITY_GRACE_MS = 60 * 60 * 1000;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
@@ -1288,6 +1311,14 @@ function getTimerMinutes(timer: TimerState) {
     return Math.max(1, Math.round(timer.remainingSeconds / 60));
   }
 
+  if (timer.running) {
+    const startedAt = new Date(timer.startedAt).getTime();
+    if (Number.isFinite(startedAt)) {
+      const elapsed = Math.max(0, Date.now() - startedAt);
+      return Math.max(1, Math.round(elapsed / 60000));
+    }
+  }
+
   const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
   const elapsed = clamp(configuredSeconds - timer.remainingSeconds, 0, configuredSeconds);
   return Math.max(1, Math.round(elapsed / 60));
@@ -1508,7 +1539,7 @@ function renderMarkdownPreview(markdown: string) {
   return elements;
 }
 
-function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: number): StudySession {
+function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: number, startedAt = timer.startedAt ?? endedAt): StudySession {
   return {
     id: makeId(),
     semesterId: timer.semesterId,
@@ -1520,10 +1551,56 @@ function buildSessionFromTimer(timer: TimerState, endedAt: string, minutes: numb
     blocker: timer.blocker.trim(),
     nextStep: timer.nextStep.trim(),
     confidence: timer.confidence,
-    startedAt: timer.startedAt ?? endedAt,
+    startedAt,
     endedAt,
     minutes,
     presetLabel: timer.presetLabel,
+  };
+}
+
+function nextLocalMidnightAfter(date: Date) {
+  const next = new Date(date);
+  next.setHours(24, 0, 0, 0);
+  return next;
+}
+
+function getFirstMidnightCrossing(startedAt: string, endedAt: string) {
+  const start = new Date(startedAt);
+  const end = new Date(endedAt);
+  const midnight = nextLocalMidnightAfter(start);
+  return midnight.getTime() > start.getTime() && midnight.getTime() <= end.getTime() ? midnight : null;
+}
+
+function buildSessionsFromTimerRange(timer: TimerState, endedAt: string) {
+  const startedAt = timer.startedAt ?? endedAt;
+  const startMs = new Date(startedAt).getTime();
+  const endMs = new Date(endedAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    return [buildSessionFromTimer(timer, endedAt, getTimerMinutes(timer), startedAt)];
+  }
+
+  const sessions: StudySession[] = [];
+  let cursorMs = startMs;
+  while (cursorMs < endMs) {
+    const cursor = new Date(cursorMs);
+    const midnight = nextLocalMidnightAfter(cursor).getTime();
+    const segmentEndMs = Math.min(endMs, midnight);
+    const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
+    const minutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
+    sessions.push(buildSessionFromTimer(timer, new Date(bucketEndMs).toISOString(), minutes, new Date(cursorMs).toISOString()));
+    cursorMs = segmentEndMs;
+  }
+
+  return sessions;
+}
+
+function prependSessionsToState(state: AppState, sessions: StudySession[], postSession?: StudySession) {
+  const socialState = postSession && state.social.autoPostSessions
+    ? queueFeedPost(state, postSession, getSessionCourseName(state, postSession))
+    : state;
+  return {
+    ...socialState,
+    sessions: pruneSessionHistory([...sessions, ...socialState.sessions]),
   };
 }
 
@@ -1995,6 +2072,11 @@ function App() {
   const [focusTip, setFocusTip] = useState<FocusTip | null>(null);
   const [activeFocusMilestone, setActiveFocusMilestone] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [endlessInactivityPrompt, setEndlessInactivityPrompt] = useState<EndlessInactivityPrompt | null>(null);
+  const [timerInactivityNoticeVisible, setTimerInactivityNoticeVisible] = useState(false);
+  const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
+  const endlessContinuousStartedAtRef = useRef<string | null>(null);
+  const endlessInactivityPromptRef = useRef<EndlessInactivityPrompt | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
   const [visibleTabsOptionsOpen, setVisibleTabsOptionsOpen] = useState(false);
@@ -2053,6 +2135,10 @@ function App() {
   });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
+  const endlessInactivityRemainingMs = endlessInactivityPrompt
+    ? Math.max(0, new Date(endlessInactivityPrompt.promptedAt).getTime() + ENDLESS_INACTIVITY_GRACE_MS - countdownNowMs)
+    : ENDLESS_INACTIVITY_GRACE_MS;
+  const endlessInactivityCountdownLabel = formatCountdown(endlessInactivityRemainingMs);
   const [fullscreen, setFullscreen] = useState(false);
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
@@ -2290,6 +2376,13 @@ function App() {
   }, [dashboardLayout]);
 
   useEffect(() => {
+    if (!endlessInactivityPrompt) return undefined;
+    setCountdownNowMs(Date.now());
+    const interval = window.setInterval(() => setCountdownNowMs(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [endlessInactivityPrompt]);
+
+  useEffect(() => {
     if (!message) return undefined;
     const timeout = window.setTimeout(() => setMessage(null), 3200);
     return () => window.clearTimeout(timeout);
@@ -2322,7 +2415,61 @@ function App() {
 
         if (timer.phase === "stopwatch") {
           if (!timer.startedAt) return current;
-          const elapsed = Math.floor((Date.now() - new Date(timer.startedAt).getTime()) / 1000);
+          const now = new Date();
+          const elapsed = Math.floor((now.getTime() - new Date(timer.startedAt).getTime()) / 1000);
+          const prompt = endlessInactivityPromptRef.current;
+          if (prompt) {
+            if (now.getTime() - new Date(prompt.promptedAt).getTime() >= ENDLESS_INACTIVITY_GRACE_MS) {
+              const sessions = buildSessionsFromTimerRange(timer, prompt.promptedAt);
+              const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
+              endlessContinuousStartedAtRef.current = null;
+              endlessInactivityPromptRef.current = null;
+              setEndlessInactivityPrompt(null);
+              setTimerInactivityNoticeVisible(true);
+              void sendTimerNotification("Timer stopped", "Timer was stopped due to inactivity.");
+              return {
+                ...socialState,
+                timer: {
+                  ...defaultTimer,
+                  ...keepTimerContext(timer),
+                  running: false,
+                  startedAt: null,
+                  endsAt: null,
+                  phase: "idle",
+                  remainingSeconds: getIdleTimerSeconds(timer),
+                },
+              };
+            }
+
+            if (elapsed === timer.remainingSeconds) return current;
+            return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+          }
+
+          const midnight = getFirstMidnightCrossing(timer.startedAt, now.toISOString());
+          if (midnight) {
+            const splitSession = buildSessionFromTimer(timer, new Date(midnight.getTime() - 1).toISOString(), Math.max(1, Math.round((midnight.getTime() - new Date(timer.startedAt).getTime()) / 60000)), timer.startedAt);
+            const elapsedSinceMidnight = Math.floor((now.getTime() - midnight.getTime()) / 1000);
+            return {
+              ...current,
+              sessions: pruneSessionHistory([splitSession, ...current.sessions]),
+              timer: {
+                ...timer,
+                startedAt: midnight.toISOString(),
+                remainingSeconds: elapsedSinceMidnight,
+              },
+            };
+          }
+
+          if (!endlessContinuousStartedAtRef.current) {
+            endlessContinuousStartedAtRef.current = now.toISOString();
+          } else if (now.getTime() - new Date(endlessContinuousStartedAtRef.current).getTime() >= ENDLESS_INACTIVITY_PROMPT_MS) {
+            const nextPrompt = { promptedAt: now.toISOString() };
+            endlessInactivityPromptRef.current = nextPrompt;
+            setEndlessInactivityPrompt(nextPrompt);
+            ringBell();
+            void sendTimerNotification("Are you still here?", "Confirm that you are still studying to keep the endless timer running.");
+          }
+
           if (elapsed === timer.remainingSeconds) return current;
           return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
         }
@@ -2332,20 +2479,35 @@ function App() {
 
         const diff = Math.ceil((new Date(endsAt).getTime() - Date.now()) / 1000);
         if (diff > 0) {
+          if ((timer.phase === "study" || timer.phase === "exam") && timer.startedAt) {
+            const midnight = getFirstMidnightCrossing(timer.startedAt, new Date().toISOString());
+            if (midnight) {
+              const splitSession = buildSessionFromTimer(timer, new Date(midnight.getTime() - 1).toISOString(), Math.max(1, Math.round((midnight.getTime() - new Date(timer.startedAt).getTime()) / 60000)), timer.startedAt);
+              return {
+                ...current,
+                sessions: pruneSessionHistory([splitSession, ...current.sessions]),
+                timer: {
+                  ...timer,
+                  startedAt: midnight.toISOString(),
+                  remainingSeconds: diff,
+                },
+              };
+            }
+          }
+
           if (diff === timer.remainingSeconds) return current;
           return { ...current, timer: { ...timer, remainingSeconds: diff } };
         }
 
         const endedAt = new Date(new Date(endsAt).getTime()).toISOString();
         if (timer.phase === "study") {
-          const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.studyMinutes));
-          const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
+          const sessions = buildSessionsFromTimerRange(timer, endedAt);
+          const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
             ringBell();
             void sendTimerNotification("Focus session finished", "Nice work. Time for a break.");
             return {
               ...socialState,
-              sessions: pruneSessionHistory([session, ...socialState.sessions]),
               timer: {
                 ...timer,
                 phase: "break",
@@ -2361,19 +2523,17 @@ function App() {
           void sendTimerNotification("Focus session finished", "Your study timer is complete.");
           return {
             ...socialState,
-            sessions: pruneSessionHistory([session, ...socialState.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
 
         if (timer.phase === "exam") {
-          const session = buildSessionFromTimer(timer, endedAt, Math.max(1, timer.examMinutes));
-          const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
+          const sessions = buildSessionsFromTimerRange(timer, endedAt);
+          const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
           ringBell();
           void sendTimerNotification("Exam timer finished", "Your exam timer is complete.");
           return {
             ...socialState,
-            sessions: pruneSessionHistory([session, ...socialState.sessions]),
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
         }
@@ -2738,7 +2898,6 @@ function App() {
   const badgeExplorer = state.playedGamesAllTime.length >= 5;
   const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === 5;
   const badgeVeteran = state.totalUnlocks >= 10;
-  const badgeRockMaster = state.petRockPats >= 1000;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
   const squadMemberLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
   const squadScoreLeaderboard = state.social.cachedSquadScoreLeaderboards[socialPeriod] ?? [];
@@ -2781,7 +2940,11 @@ function App() {
   const viewingIsSelf = viewingFriend?.userId === state.social.userId;
   const viewingIsFriend = viewingFriend ? socialFriendIds.has(viewingFriend.userId) : false;
   const viewingRequestPending = viewingFriend ? outgoingFriendRequestCodes.has(viewingFriend.friendCode) : false;
-  const rockStage = state.petRockPats >= 1000000 ? { plant: "\u{1F5FF}", label: "Rock God" }
+  const rockStage = state.petRockPats >= 8888888 ? { plant: "\u{1F47C}", label: "Guardian Angel" }
+    : state.petRockPats >= 6666666 ? { plant: "\u{1F47F}", label: "Demon" }
+    : state.petRockPats >= 1000000 ? { plant: "\u{1F5FF}", label: "Rock God" }
+    : state.petRockPats >= 888888 ? { plant: "\u{1F54A}\uFE0F", label: "Saint" }
+    : state.petRockPats >= 666666 ? { plant: "\u{1F608}", label: "Hell's Diplomat" }
     : state.petRockPats >= 500000 ? { plant: "\u{1F48E}", label: "Ancient Starstone" }
     : state.petRockPats >= 100000 ? { plant: "\u{1F320}", label: "Celestial Rock" }
     : state.petRockPats >= 50000 ? { plant: "\u{1FA90}", label: "Planetary Rock" }
@@ -2789,6 +2952,8 @@ function App() {
     : state.petRockPats >= 10000 ? { plant: "\u{1FAA8}", label: "Eternal Rock" }
     : state.petRockPats >= 5000 ? { plant: "\u{1F30C}", label: "Galactic Rock" }
     : state.petRockPats >= 1000 ? { plant: "\u{1F31F}", label: "Cosmic Rock" }
+    : state.petRockPats >= 888 ? { plant: "\u{1F607}", label: "Heavenly Rock" }
+    : state.petRockPats >= 666 ? { plant: "\u{1F525}", label: "Hellish Rock" }
     : state.petRockPats >= 500 ? { plant: "\u{1F451}", label: "Royal Rock" }
     : state.petRockPats >= 250 ? { plant: "\u{1F98B}", label: "Blooming Rock" }
     : state.petRockPats >= 100 ? { plant: "\u{1F333}", label: "Flourished Rock" }
@@ -2796,7 +2961,7 @@ function App() {
     : state.petRockPats >= 10 ? { plant: "\u{1F331}", label: "Sprouting Rock" }
     : { plant: "", label: "Pet Rock" };
   const streakEmoji = state.unlockStreak >= 7 ? "\u{1F525}\u{1F525}\u{1F525}" : state.unlockStreak >= 3 ? "\u{1F525}\u{1F525}" : state.unlockStreak >= 1 ? "\u{1F525}" : "";
-  const badges = [
+  const badges: ProfileBadge[] = [
     { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: "Unlock all 5 break games in one day." },
     { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak, how: "Unlock any Break Room game once." },
     { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire, how: "Unlock at least one break game on 3 consecutive days." },
@@ -2806,8 +2971,34 @@ function App() {
     { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
     { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
     { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
-    { id: "rock-master", icon: state.petRockPats >= 1000000 ? "\u{1F5FF}" : state.petRockPats >= 10000 ? "\u{1FAA8}" : "\u{1F31F}", name: state.petRockPats >= 1000000 ? "Rock God" : state.petRockPats >= 10000 ? "Stone Legend" : "Rock Master", earned: badgeRockMaster, how: state.petRockPats >= 1000000 ? "Pat the pet rock 1000000 times." : state.petRockPats >= 10000 ? "Pat the pet rock 10000 times." : "Pat the pet rock 1000 times." },
   ];
+  const petRockBadges: ProfileBadge[] = [
+    { id: "rock-sprouting", icon: "\u{1F331}", name: "Sprouting Rock", threshold: 10, label: "10" },
+    { id: "rock-growing", icon: "\u{1F33F}", name: "Growing Rock", threshold: 50, label: "50" },
+    { id: "rock-flourished", icon: "\u{1F333}", name: "Flourished Rock", threshold: 100, label: "100" },
+    { id: "rock-blooming", icon: "\u{1F98B}", name: "Blooming Rock", threshold: 250, label: "250" },
+    { id: "rock-royal", icon: "\u{1F451}", name: "Royal Rock", threshold: 500, label: "500" },
+    { id: "rock-hellish", icon: "\u{1F525}", name: "Hellish Rock", threshold: 666, label: "666" },
+    { id: "rock-heavenly", icon: "\u{1F607}", name: "Heavenly Rock", threshold: 888, label: "888" },
+    { id: "rock-cosmic", icon: "\u{1F31F}", name: "Cosmic Rock", threshold: 1000, label: "1k" },
+    { id: "rock-galactic", icon: "\u{1F30C}", name: "Galactic Rock", threshold: 5000, label: "5k" },
+    { id: "rock-eternal", icon: "\u{1FAA8}", name: "Eternal Rock", threshold: 10000, label: "10k" },
+    { id: "rock-meteoric", icon: "\u{2604}\uFE0F", name: "Meteoric Rock", threshold: 20000, label: "20k" },
+    { id: "rock-planetary", icon: "\u{1FA90}", name: "Planetary Rock", threshold: 50000, label: "50k" },
+    { id: "rock-celestial", icon: "\u{1F320}", name: "Celestial Rock", threshold: 100000, label: "100k" },
+    { id: "rock-starstone", icon: "\u{1F48E}", name: "Ancient Starstone", threshold: 500000, label: "500k" },
+    { id: "rock-hells-diplomat", icon: "\u{1F608}", name: "Hell's Diplomat", threshold: 666666, label: "666,666" },
+    { id: "rock-saint", icon: "\u{1F54A}\uFE0F", name: "Saint", threshold: 888888, label: "888,888" },
+    { id: "rock-god", icon: "\u{1F5FF}", name: "Rock God", threshold: 1000000, label: "1M" },
+    { id: "rock-demon", icon: "\u{1F47F}", name: "Demon", threshold: 6666666, label: "6,666,666" },
+    { id: "rock-guardian-angel", icon: "\u{1F47C}", name: "Guardian Angel", threshold: 8888888, label: "8,888,888" },
+  ].map((badge) => ({
+    id: badge.id,
+    icon: badge.icon,
+    name: badge.name,
+    earned: state.petRockPats >= badge.threshold,
+    how: `Pat the pet rock ${badge.label} times.`,
+  }));
 
   useEffect(() => {
     const dailyHits = [
@@ -3032,7 +3223,7 @@ function App() {
     };
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
-  const profileBadgeGroups: Array<{ category: string; source: string; badges: ProfileBadge[] }> = [
+  const profileBadgeGroups: ProfileBadgeGroup[] = [
     {
       category: "Break Room",
       source: "Unlock and play break games from the Break Room.",
@@ -3040,6 +3231,13 @@ function App() {
         ...badge,
         count: badge.daily ? state.badgeCounts[badge.id] ?? 0 : undefined,
       })),
+      subgroups: [
+        {
+          category: "Pet Rock",
+          source: "Earn these by patting the Break Room pet rock.",
+          badges: petRockBadges,
+        },
+      ],
     },
     {
       category: "Focus Fossil",
@@ -3073,6 +3271,18 @@ function App() {
       ],
     },
   ];
+
+  const renderProfileBadgeCard = (badge: ProfileBadge) => (
+    <button key={badge.id} type="button" className={`profile-badge-card ${badge.earned ? "earned" : "locked"}`}>
+      <span className="profile-badge-icon">{badge.icon}</span>
+      <span className="profile-badge-name">{badge.name}</span>
+      {badge.daily ? <span className="profile-badge-count">×{badge.count ?? 0}</span> : null}
+      <span className="profile-badge-tip" role="tooltip">
+        <strong>{badge.earned ? "Unlocked" : "Locked"}</strong>
+        <small>{badge.how}</small>
+      </span>
+    </button>
+  );
 
   function setActiveTab(activeTab: TabKey) {
     if (activeTab === "friends") setHasUnreadSocial(false);
@@ -5163,6 +5373,16 @@ function App() {
     }));
   }
 
+  function clearEndlessInactivityPrompt() {
+    endlessInactivityPromptRef.current = null;
+    setEndlessInactivityPrompt(null);
+  }
+
+  function acknowledgeEndlessInactivityPrompt() {
+    clearEndlessInactivityPrompt();
+    endlessContinuousStartedAtRef.current = new Date().toISOString();
+  }
+
   function startTimer() {
     const isEndless = state.timer.mode === "endless";
     const isExam = state.timer.mode === "exam";
@@ -5176,6 +5396,8 @@ function App() {
     });
 
     if (isEndless) {
+      endlessContinuousStartedAtRef.current = startedAt;
+      clearEndlessInactivityPrompt();
       setState((current) => ({
         ...current,
         activeTab: "timer",
@@ -5220,9 +5442,13 @@ function App() {
 
       if (timer.phase === "stopwatch") {
         if (timer.running) {
+          endlessContinuousStartedAtRef.current = null;
+          clearEndlessInactivityPrompt();
           return { ...current, timer: { ...timer, running: false } };
         }
         const elapsed = timer.remainingSeconds;
+        endlessContinuousStartedAtRef.current = new Date().toISOString();
+        clearEndlessInactivityPrompt();
         return {
           ...current,
           timer: {
@@ -5250,6 +5476,8 @@ function App() {
   }
 
   function resetTimer() {
+    endlessContinuousStartedAtRef.current = null;
+    clearEndlessInactivityPrompt();
     setState((current) => ({
       ...current,
       timer: {
@@ -5273,13 +5501,16 @@ function App() {
     setState((current) => {
       const timer = current.timer;
       if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return current;
-      const minutes = getTimerMinutes(timer);
-      const session = buildSessionFromTimer(timer, new Date().toISOString(), minutes);
-      const socialState = current.social.autoPostSessions ? queueFeedPost(current, session, getSessionCourseName(current, session)) : current;
+      const activeMinutes = getTimerMinutes(timer);
+      const syntheticEndMs = timer.startedAt ? new Date(timer.startedAt).getTime() + activeMinutes * 60000 : Date.now();
+      const endedAt = timer.running || !Number.isFinite(syntheticEndMs) ? new Date().toISOString() : new Date(syntheticEndMs).toISOString();
+      const sessions = buildSessionsFromTimerRange(timer, endedAt);
+      const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
       playBellSound();
+      endlessContinuousStartedAtRef.current = null;
+      clearEndlessInactivityPrompt();
       return {
         ...socialState,
-        sessions: pruneSessionHistory([session, ...socialState.sessions]),
         timer: {
           ...defaultTimer,
           ...keepTimerContext(timer),
@@ -7003,32 +7234,60 @@ function App() {
 
       {renderMenuPanel()}
 
-      {updateNoticeVisible ? (
-        <aside className="update-notice" role="status" aria-live="polite">
-          <div>
-            <strong>New update available.</strong>
-            <span>
-              Go to <button type="button" onClick={openUpdateSettingsFromNotice}>Settings</button> to update the app.
-            </span>
-          </div>
-          <button type="button" className="update-notice-close" onClick={() => setUpdateNoticeVisible(false)} aria-label="Dismiss update notice">
-            X
-          </button>
-        </aside>
-      ) : null}
+      {updateNoticeVisible || feedCommentNotice || endlessInactivityPrompt || timerInactivityNoticeVisible ? (
+        <div className="notice-stack" aria-live="polite">
+          {updateNoticeVisible ? (
+            <aside className="update-notice" role="status">
+              <div>
+                <strong>New update available.</strong>
+                <span>
+                  Go to <button type="button" onClick={openUpdateSettingsFromNotice}>Settings</button> to update the app.
+                </span>
+              </div>
+              <button type="button" className="update-notice-close" onClick={() => setUpdateNoticeVisible(false)} aria-label="Dismiss update notice">
+                X
+              </button>
+            </aside>
+          ) : null}
 
-      {feedCommentNotice ? (
-        <aside className="update-notice comment-notice" role="status" aria-live="polite">
-          <div>
-            <strong>New comment on your post.</strong>
-            <span>
-              {feedCommentNotice.commenterName}: "{feedCommentNotice.body.length > 72 ? `${feedCommentNotice.body.slice(0, 72)}...` : feedCommentNotice.body}" <button type="button" onClick={() => openFeedCommentNotice(feedCommentNotice)}>View</button>
-            </span>
-          </div>
-          <button type="button" className="update-notice-close" onClick={() => setFeedCommentNotice(null)} aria-label="Dismiss comment notice">
-            X
-          </button>
-        </aside>
+          {feedCommentNotice ? (
+            <aside className="update-notice comment-notice" role="status">
+              <div>
+                <strong>New comment on your post.</strong>
+                <span>
+                  {feedCommentNotice.commenterName}: "{feedCommentNotice.body.length > 72 ? `${feedCommentNotice.body.slice(0, 72)}...` : feedCommentNotice.body}" <button type="button" onClick={() => openFeedCommentNotice(feedCommentNotice)}>View</button>
+                </span>
+              </div>
+              <button type="button" className="update-notice-close" onClick={() => setFeedCommentNotice(null)} aria-label="Dismiss comment notice">
+                X
+              </button>
+            </aside>
+          ) : null}
+
+          {endlessInactivityPrompt ? (
+            <aside className="update-notice timer-inactivity-warning" role="alert" aria-live="assertive">
+              <div>
+                <strong>Are you still here?</strong>
+                <span>The endless timer will stop in <b>{endlessInactivityCountdownLabel}</b> unless you confirm. It will save only the time before this warning. <button type="button" onClick={acknowledgeEndlessInactivityPrompt}>I'm here</button></span>
+              </div>
+              <button type="button" className="update-notice-close" onClick={acknowledgeEndlessInactivityPrompt} aria-label="Confirm you are still studying">
+                X
+              </button>
+            </aside>
+          ) : null}
+
+          {timerInactivityNoticeVisible ? (
+            <aside className="update-notice timer-inactivity-notice" role="alert" aria-live="assertive">
+              <div>
+                <strong>Timer was stopped due to inactivity.</strong>
+                <span>The endless timer saved only the time before the inactivity warning.</span>
+              </div>
+              <button type="button" className="update-notice-close" onClick={() => setTimerInactivityNoticeVisible(false)} aria-label="Dismiss inactivity notice">
+                X
+              </button>
+            </aside>
+          ) : null}
+        </div>
       ) : null}
 
       <nav className="tab-row" aria-label="Primary navigation">
@@ -9359,18 +9618,19 @@ function App() {
                     <span>{group.source}</span>
                   </div>
                   <div className="profile-badge-grid">
-                    {group.badges.map((badge) => (
-                      <button key={badge.id} type="button" className={`profile-badge-card ${badge.earned ? "earned" : "locked"}`}>
-                        <span className="profile-badge-icon">{badge.icon}</span>
-                        <span className="profile-badge-name">{badge.name}</span>
-                        {badge.daily ? <span className="profile-badge-count">×{badge.count ?? 0}</span> : null}
-                        <span className="profile-badge-tip" role="tooltip">
-                          <strong>{badge.earned ? "Unlocked" : "Locked"}</strong>
-                          <small>{badge.how}</small>
-                        </span>
-                      </button>
-                    ))}
+                    {group.badges.map(renderProfileBadgeCard)}
                   </div>
+                  {group.subgroups?.map((subgroup) => (
+                    <div key={subgroup.category} className="profile-badge-subgroup">
+                      <div className="profile-badge-subgroup-head">
+                        <h5>{subgroup.category}</h5>
+                        <span>{subgroup.source}</span>
+                      </div>
+                      <div className="profile-badge-grid">
+                        {subgroup.badges.map(renderProfileBadgeCard)}
+                      </div>
+                    </div>
+                  ))}
                 </section>
               ))}
             </div>

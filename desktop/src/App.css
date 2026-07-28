@@ -4677,6 +4677,16 @@ button:hover:not(:disabled) {
   font-weight: 700;
 }
 
+.notice-stack {
+  position: fixed;
+  top: 86px;
+  right: 24px;
+  z-index: 85;
+  width: min(360px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+}
+
 .update-notice {
   position: fixed;
   top: 86px;
@@ -4696,6 +4706,17 @@ button:hover:not(:disabled) {
   animation: update-notice-in 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.notice-stack .update-notice {
+  position: static;
+  width: 100%;
+}
+
+.timer-inactivity-warning,
+.timer-inactivity-notice {
+  border-color: color-mix(in oklch, var(--warn) 56%, var(--accent-line));
+  background: linear-gradient(135deg, var(--surface-raised), color-mix(in oklch, var(--warn) 16%, var(--surface-raised)));
+}
+
 .update-notice + .comment-notice {
   top: 168px;
 }
@@ -4712,6 +4733,11 @@ button:hover:not(:disabled) {
 .update-notice span {
   color: var(--ink-3);
   font-size: 0.92rem;
+}
+
+.update-notice b {
+  color: var(--ink);
+  font-family: var(--font-mono);
 }
 
 .update-notice button {
@@ -4753,6 +4779,13 @@ button:hover:not(:disabled) {
 }
 
 @media (max-width: 620px) {
+  .notice-stack {
+    top: 76px;
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
+
   .update-notice {
     top: 76px;
     right: 16px;
@@ -10002,7 +10035,8 @@ input[type="color"] {
 }
 
 .profile-badges-head h3,
-.profile-badge-group h4 {
+.profile-badge-group h4,
+.profile-badge-subgroup h5 {
   margin: 0;
   color: var(--ink);
 }
@@ -10013,7 +10047,8 @@ input[type="color"] {
 }
 
 .profile-badges-head p,
-.profile-badge-group-head span {
+.profile-badge-group-head span,
+.profile-badge-subgroup-head span {
   margin: 4px 0 0;
   color: var(--ink-4);
   font-size: 0.9rem;
@@ -10038,6 +10073,26 @@ input[type="color"] {
   justify-content: space-between;
   gap: 14px;
   align-items: baseline;
+}
+
+.profile-badge-subgroup {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.profile-badge-subgroup-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: baseline;
+}
+
+.profile-badge-subgroup h5 {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
 }
 
 .profile-badge-grid {
@@ -10169,7 +10224,8 @@ input[type="color"] {
     border-radius: 24px;
   }
 
-  .profile-badge-group-head {
+  .profile-badge-group-head,
+  .profile-badge-subgroup-head {
     display: grid;
   }
 }
