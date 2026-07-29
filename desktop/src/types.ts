@@ -259,6 +259,12 @@ export interface SocialSquadScoreEntry {
 
 export interface SocialSquadDetails extends Omit<SocialSquad, "myRole"> {
   maxMembers: number;
+  statsDate?: string;
+  previousDayDate?: string;
+  previousDayTotalMinutes?: number;
+  previousDayTotalSessions?: number;
+  previousDayMemberCount?: number;
+  previousDayAverageMinutes?: number;
   action: "join" | "request" | "pending" | "full" | "unavailable" | "current";
 }
 

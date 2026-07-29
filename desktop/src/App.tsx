@@ -9927,9 +9927,9 @@ function App() {
                 <>
                   <div className="arena-player-stats squad-details-stats" style={{ marginTop: 0 }}>
                     <div className="arena-mini-stat"><span className="arena-mini-stat__icon">#</span><div><strong>{viewingSquadDetails.memberCount}/{viewingSquadDetails.maxMembers}</strong><span>Members</span></div></div>
-                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(viewingSquadDetails.totalMinutes)}</strong><span>Total focus</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(viewingSquadDetails.totalMinutes)}</strong><span>Today</span></div></div>
                     <div className="arena-mini-stat"><span className="arena-mini-stat__icon">★</span><div><strong>{viewingSquadEntry.points} pts</strong><span>{squadScorePeriod === "season" ? "Season" : squadScorePeriod === "overall" ? "Overall" : "Today if held"}</span></div></div>
-                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(Math.round(viewingSquadEntry.averageMinutes))}</strong><span>Average focus</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(Math.round(viewingSquadDetails.previousDayAverageMinutes ?? 0))}</strong><span>Yesterday avg</span></div></div>
                   </div>
 
                   <div className="squad-details-roster">
@@ -9939,7 +9939,7 @@ function App() {
                         <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
                         <div>
                           <strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong>
-                          <span>{squadRoleLabels[member.role]} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span>
+                          <span>{squadRoleLabels[member.role]} · today {formatMinutes(member.minutes)} · {member.sessions} sessions</span>
                         </div>
                       </div>
                     ))}

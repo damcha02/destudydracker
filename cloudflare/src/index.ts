@@ -71,6 +71,8 @@ const MAX_SQUAD_NAME_LENGTH = 48;
 const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const SQUAD_SEASON_START = "2026-07-29";
+const SERVER_TIME_ZONE = "Europe/Zurich";
+const SQUAD_SCORE_BACKFILL_DAYS = 14;
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
@@ -164,8 +166,52 @@ function parseAvatar(value: unknown, displayName: string): SocialAvatar {
   }
 }
 
+function serverDateIso(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: SERVER_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}
+
+function addIsoDays(date: string, days: number) {
+  const [year, month, day] = date.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + days));
+  return next.toISOString().slice(0, 10);
+}
+
+function serverTimeZoneOffsetMinutes(date: Date) {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: SERVER_TIME_ZONE,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const value = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const zonedAsUtc = Date.UTC(value("year"), value("month") - 1, value("day"), value("hour"), value("minute"), value("second"));
+  return Math.round((zonedAsUtc - date.getTime()) / 60000);
+}
+
+function serverDayStartIso(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const utcGuess = new Date(Date.UTC(year, month - 1, day));
+  const offsetMinutes = serverTimeZoneOffsetMinutes(utcGuess);
+  return new Date(utcGuess.getTime() - offsetMinutes * 60 * 1000).toISOString();
+}
+
 function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return serverDateIso();
+}
+
+function yesterdayIso() {
+  return addIsoDays(todayIso(), -1);
 }
 
 function weekStartIso() {
@@ -414,19 +460,40 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
 }
 
 async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]) {
-  const statements = stats
+  const cleanedStats = stats
     .slice(0, MAX_SYNC_STAT_ROWS)
     .filter((stat) => /^\d{4}-\d{2}-\d{2}$/.test(stat.date))
-    .map((stat) => env.DB.prepare(
+    .map((stat) => ({
+      date: stat.date,
+      minutes: Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(stat.minutes ?? 0)))),
+      sessions: Math.min(MAX_DAILY_SESSIONS, Math.max(0, Math.round(Number(stat.sessions ?? 0)))),
+    }));
+  if (!cleanedStats.length) return [];
+
+  const dates = [...new Set(cleanedStats.map((stat) => stat.date))];
+  const existingRows = await env.DB.prepare(`
+    SELECT date, minutes, sessions
+    FROM daily_stats
+    WHERE user_id = ? AND date IN (${dates.map(() => "?").join(",")})
+  `).bind(userId, ...dates).all<{ date: string; minutes: number; sessions: number }>();
+  const existing = new Map(existingRows.results.map((row) => [row.date, row]));
+  const changedDates = dates.filter((date) => {
+    const next = cleanedStats.find((stat) => stat.date === date);
+    const current = existing.get(date);
+    return Boolean(next && (!current || Number(current.minutes) !== next.minutes || Number(current.sessions) !== next.sessions));
+  });
+
+  const statements = cleanedStats.map((stat) => env.DB.prepare(
       "INSERT INTO daily_stats (user_id, date, minutes, sessions, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(user_id, date) DO UPDATE SET minutes = excluded.minutes, sessions = excluded.sessions, updated_at = CURRENT_TIMESTAMP",
     ).bind(
       userId,
       stat.date,
-      Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(stat.minutes ?? 0)))),
-      Math.min(MAX_DAILY_SESSIONS, Math.max(0, Math.round(Number(stat.sessions ?? 0)))),
+      stat.minutes,
+      stat.sessions,
     ));
 
-  if (statements.length) await env.DB.batch(statements);
+  await env.DB.batch(statements);
+  return changedDates;
 }
 
 async function getFriendIds(env: Env, userId: string) {
@@ -566,8 +633,8 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
 
 async function scoreSquadDate(env: Env, date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-  const dayStart = `${date}T00:00:00.000Z`;
-  const dayEnd = `${date}T23:59:59.999Z`;
+  const dayStart = serverDayStartIso(date);
+  const dayEnd = new Date(new Date(serverDayStartIso(addIsoDays(date, 1))).getTime() - 1).toISOString();
   const historyCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM squad_member_history WHERE joined_at <= ? AND (left_at IS NULL OR left_at >= ?)")
     .bind(dayEnd, dayStart)
     .first<{ count: number }>();
@@ -624,6 +691,27 @@ async function scoreSquadDate(env: Env, date: string) {
     `).bind(row.squadId, date, row.averageMinutes, row.totalMinutes, row.memberCount, rank, points);
   });
   if (statements.length) await env.DB.batch(statements);
+}
+
+async function scoreMissingCompletedSquadDates(env: Env) {
+  const today = todayIso();
+  const since = addIsoDays(today, -SQUAD_SCORE_BACKFILL_DAYS);
+  const rows = await env.DB.prepare(`
+    SELECT ds.date
+    FROM daily_stats ds
+    WHERE ds.date >= ? AND ds.date < ?
+    GROUP BY ds.date
+    HAVING NOT EXISTS (
+      SELECT 1
+      FROM squad_daily_scores score
+      WHERE score.date = ds.date
+    )
+    ORDER BY ds.date ASC
+    LIMIT ?
+  `).bind(since, today, SQUAD_SCORE_BACKFILL_DAYS).all<{ date: string }>();
+
+  await Promise.all(rows.results.map((row) => scoreSquadDate(env, row.date)
+    .catch((error) => console.error("Squad score backfill failed.", row.date, error))));
 }
 
 async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
@@ -708,6 +796,8 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
 }
 
 async function getSquadDetails(env: Env, userId: string, squadId: string) {
+  const today = todayIso();
+  const yesterday = addIsoDays(today, -1);
   const [squad, userMembership, pending] = await Promise.all([
     env.DB.prepare(`
       SELECT s.id, s.name, s.is_private AS isPrivate, s.created_by_user_id AS createdByUserId, s.created_at AS createdAt,
@@ -716,10 +806,10 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
         COUNT(DISTINCT sm.user_id) AS memberCount
       FROM squads s
       LEFT JOIN squad_members sm ON sm.squad_id = s.id
-      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
       WHERE s.id = ?
       GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
-    `).bind(squadId).first<{
+    `).bind(today, squadId).first<{
       id: string;
       name: string;
       isPrivate: number;
@@ -736,6 +826,15 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
   ]);
   if (!squad) return null;
 
+  const previousDayStats = await env.DB.prepare(`
+    SELECT COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(ds.sessions), 0) AS totalSessions,
+      COUNT(DISTINCT sm.user_id) AS memberCount
+    FROM squad_members sm
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+    WHERE sm.squad_id = ?
+  `).bind(yesterday, squadId).first<{ totalMinutes: number; totalSessions: number; memberCount: number }>();
+
   const members = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role, sm.joined_at AS joinedAt, u.last_seen_at AS lastSeenAt,
@@ -743,11 +842,11 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
       COALESCE(SUM(ds.sessions), 0) AS sessions
     FROM squad_members sm
     JOIN users u ON u.id = sm.user_id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
     WHERE sm.squad_id = ?
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, sm.joined_at, u.last_seen_at
     ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
-  `).bind(squadId).all<{
+  `).bind(today, squadId).all<{
     userId: string;
     displayName: string;
     friendCode: string;
@@ -760,6 +859,8 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
   }>();
 
   const memberCount = Number(squad.memberCount);
+  const previousDayMemberCount = Number(previousDayStats?.memberCount ?? 0);
+  const previousDayTotalMinutes = Number(previousDayStats?.totalMinutes ?? 0);
   const action = userMembership
     ? userMembership.squadId === squadId ? "current" : "unavailable"
     : memberCount >= MAX_SQUAD_MEMBERS ? "full"
@@ -777,6 +878,12 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
     totalSessions: Number(squad.totalSessions),
     memberCount,
     maxMembers: MAX_SQUAD_MEMBERS,
+    statsDate: today,
+    previousDayDate: yesterday,
+    previousDayTotalMinutes,
+    previousDayTotalSessions: Number(previousDayStats?.totalSessions ?? 0),
+    previousDayMemberCount,
+    previousDayAverageMinutes: previousDayMemberCount ? previousDayTotalMinutes / previousDayMemberCount : 0,
     action,
     members: members.results.map((member) => ({
       ...member,
@@ -1129,6 +1236,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
 }
 
 async function getSocialSnapshot(request: Request, env: Env, userId: string) {
+  await scoreMissingCompletedSquadDates(env);
   const friends = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
     FROM friendships f
@@ -1221,8 +1329,12 @@ async function handleSync(request: Request, env: Env) {
   if (!payload.user || typeof payload.user !== "object") return text("Missing user identity.", 400);
   await upsertUser(env, payload.user);
   const userId = cleanUserId(payload.user.userId);
-  await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
+  const changedStatDates = await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
   await upsertFeedPosts(env, userId, payload.feedPosts);
+  const today = todayIso();
+  await Promise.all(changedStatDates
+    .filter((date) => date < today)
+    .map((date) => scoreSquadDate(env, date).catch((error) => console.error("Squad rescoring failed.", date, error))));
   return json(await getSocialSnapshot(request, env, userId));
 }
 
@@ -1936,8 +2048,9 @@ export default {
   },
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const yesterday = yesterdayIso();
     await scoreSquadDate(env, yesterday).catch((error) => console.error("Squad scoring failed.", error));
+    await scoreMissingCompletedSquadDates(env);
     const usage = await getR2Usage(env);
     const remainingClassA = Math.max(0, R2_CLASS_A_HARD_MONTHLY - usage.classAOps);
     if (!remainingClassA) return;
