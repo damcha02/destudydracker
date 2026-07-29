@@ -1335,9 +1335,9 @@ function closeTimerSegments(timer: TimerState, endedAt: string): Array<{ started
 }
 
 function getTimerActiveSeconds(timer: TimerState) {
-  if (!timer.startedAt || (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch")) return 0;
+  if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return 0;
 
-  const activeSegments = closeTimerSegments(timer, timer.running ? new Date().toISOString() : new Date().toISOString());
+  const activeSegments = closeTimerSegments(timer, new Date().toISOString());
   if (activeSegments.length) {
     return activeSegments.reduce((sum, segment) => {
       const startMs = new Date(segment.startedAt).getTime();
@@ -1596,42 +1596,32 @@ function nextLocalMidnightAfter(date: Date) {
   return next;
 }
 
-function getFirstMidnightCrossing(startedAt: string, endedAt: string) {
-  const start = new Date(startedAt);
-  const end = new Date(endedAt);
-  const midnight = nextLocalMidnightAfter(start);
-  return midnight.getTime() > start.getTime() && midnight.getTime() <= end.getTime() ? midnight : null;
-}
-
-function buildSessionsForTimerSegment(timer: TimerState, startedAt: string, endedAt: string) {
-  const startMs = new Date(startedAt).getTime();
-  const endMs = new Date(endedAt).getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-    return [];
-  }
-
-  const firstMidnight = getFirstMidnightCrossing(startedAt, endedAt);
-  if (!firstMidnight) {
-    return [buildSessionFromTimer(timer, endedAt, Math.max(1, Math.round((endMs - startMs) / 60000)), startedAt)];
-  }
-
-  const sessions: StudySession[] = [];
-  let cursorMs = startMs;
-  while (cursorMs < endMs) {
-    const cursor = new Date(cursorMs);
-    const midnight = nextLocalMidnightAfter(cursor).getTime();
-    const segmentEndMs = Math.min(endMs, midnight);
-    const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
-    const minutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
-    sessions.push(buildSessionFromTimer(timer, new Date(bucketEndMs).toISOString(), minutes, new Date(cursorMs).toISOString()));
-    cursorMs = segmentEndMs;
-  }
-
-  return sessions;
-}
-
 function buildSessionsFromTimerRange(timer: TimerState, endedAt: string) {
-  return closeTimerSegments(timer, endedAt).flatMap((segment) => buildSessionsForTimerSegment(timer, segment.startedAt, segment.endedAt));
+  const buckets = new Map<string, { startedAt: string; endedAt: string; seconds: number }>();
+  closeTimerSegments(timer, endedAt).forEach((segment) => {
+    let cursorMs = new Date(segment.startedAt).getTime();
+    const endMs = new Date(segment.endedAt).getTime();
+    if (!Number.isFinite(cursorMs) || !Number.isFinite(endMs) || endMs <= cursorMs) return;
+
+    while (cursorMs < endMs) {
+      const midnight = nextLocalMidnightAfter(new Date(cursorMs)).getTime();
+      const segmentEndMs = Math.min(endMs, midnight);
+      const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
+      const startedAt = new Date(cursorMs).toISOString();
+      const bucketEndedAt = new Date(bucketEndMs).toISOString();
+      const key = isoDate(new Date(cursorMs));
+      const current = buckets.get(key);
+      const seconds = Math.max(0, (segmentEndMs - cursorMs) / 1000);
+      buckets.set(key, current ? {
+        startedAt: current.startedAt,
+        endedAt: bucketEndedAt,
+        seconds: current.seconds + seconds,
+      } : { startedAt, endedAt: bucketEndedAt, seconds });
+      cursorMs = segmentEndMs;
+    }
+  });
+
+  return [...buckets.values()].map((bucket) => buildSessionFromTimer(timer, bucket.endedAt, Math.max(1, Math.round(bucket.seconds / 60)), bucket.startedAt));
 }
 
 function prependSessionsToState(state: AppState, sessions: StudySession[], postSession?: StudySession) {
@@ -2516,22 +2506,6 @@ function App() {
             return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
           }
 
-          const midnight = getFirstMidnightCrossing(timer.startedAt, now.toISOString());
-          if (midnight) {
-            const splitSessions = buildSessionsFromTimerRange(timer, midnight.toISOString());
-            const elapsedSinceMidnight = Math.floor((now.getTime() - midnight.getTime()) / 1000);
-            return {
-              ...current,
-              sessions: pruneSessionHistory([...splitSessions, ...current.sessions]),
-              timer: {
-                ...timer,
-                startedAt: midnight.toISOString(),
-                remainingSeconds: elapsedSinceMidnight,
-                activeSegments: [{ startedAt: midnight.toISOString(), endedAt: null }],
-              },
-            };
-          }
-
           if (!endlessContinuousStartedAtRef.current) {
             endlessContinuousStartedAtRef.current = now.toISOString();
           } else if (now.getTime() - new Date(endlessContinuousStartedAtRef.current).getTime() >= ENDLESS_INACTIVITY_PROMPT_MS) {
@@ -2552,24 +2526,6 @@ function App() {
         const now = new Date();
         const diff = Math.ceil((new Date(endsAt).getTime() - now.getTime()) / 1000);
         if (diff > 0) {
-          if ((timer.phase === "study" || timer.phase === "exam") && timer.startedAt) {
-            const midnight = getFirstMidnightCrossing(timer.startedAt, now.toISOString());
-            if (midnight) {
-              const splitSessions = buildSessionsFromTimerRange(timer, midnight.toISOString());
-              return {
-                ...current,
-                sessions: pruneSessionHistory([...splitSessions, ...current.sessions]),
-                timer: {
-                  ...timer,
-                  startedAt: midnight.toISOString(),
-                  loggedSplitSeconds: 0,
-                  activeSegments: [{ startedAt: midnight.toISOString(), endedAt: null }],
-                  remainingSeconds: diff,
-                },
-              };
-            }
-          }
-
           if (diff === timer.remainingSeconds) return current;
           return { ...current, timer: { ...timer, remainingSeconds: diff } };
         }

@@ -385,42 +385,47 @@ function nextLocalMidnightAfter(date: Date) {
   return next;
 }
 
-function buildRecoveredSessionsForRange(timer: TimerState, startedAt: string, endedAt: string) {
-  const startMs = new Date(startedAt).getTime();
-  const endMs = new Date(endedAt).getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-    return [];
-  }
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
-  const sessions: StudySession[] = [];
-  let cursorMs = startMs;
-  while (cursorMs < endMs) {
-    const midnight = nextLocalMidnightAfter(new Date(cursorMs)).getTime();
-    const segmentEndMs = Math.min(endMs, midnight);
-    const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
-    const segmentStartedAt = new Date(cursorMs).toISOString();
-    const segmentEndedAt = new Date(bucketEndMs).toISOString();
-    const minutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
-    sessions.push({
-      id: `recovered-${timer.phase}-${segmentStartedAt}-${segmentEndedAt}`,
+function buildRecoveredSessionsFromSegments(timer: TimerState, segments: Array<{ startedAt: string; endedAt: string }>) {
+  const buckets = new Map<string, { startedAt: string; endedAt: string; seconds: number }>();
+  segments.forEach((segment) => {
+    let cursorMs = new Date(segment.startedAt).getTime();
+    const endMs = new Date(segment.endedAt).getTime();
+    if (!Number.isFinite(cursorMs) || !Number.isFinite(endMs) || endMs <= cursorMs) return;
+
+    while (cursorMs < endMs) {
+      const midnight = nextLocalMidnightAfter(new Date(cursorMs)).getTime();
+      const segmentEndMs = Math.min(endMs, midnight);
+      const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
+      const startedAt = new Date(cursorMs).toISOString();
+      const endedAt = new Date(bucketEndMs).toISOString();
+      const key = localDateKey(new Date(cursorMs));
+      const current = buckets.get(key);
+      const seconds = Math.max(0, (segmentEndMs - cursorMs) / 1000);
+      buckets.set(key, current ? { startedAt: current.startedAt, endedAt, seconds: current.seconds + seconds } : { startedAt, endedAt, seconds });
+      cursorMs = segmentEndMs;
+    }
+  });
+
+  return [...buckets.values()].map((bucket) => ({
+      id: `recovered-${timer.phase}-${bucket.startedAt}-${bucket.endedAt}`,
       semesterId: timer.semesterId,
       courseId: timer.courseId,
       taskId: timer.taskId,
-      kind: timer.phase === "exam" ? "exam" : "study",
+      kind: timer.phase === "exam" ? "exam" as const : "study" as const,
       goal: timer.goal.trim(),
       learned: timer.learned.trim(),
       blocker: timer.blocker.trim(),
       nextStep: timer.nextStep.trim(),
       confidence: timer.confidence,
-      startedAt: segmentStartedAt,
-      endedAt: segmentEndedAt,
-      minutes,
+      startedAt: bucket.startedAt,
+      endedAt: bucket.endedAt,
+      minutes: Math.max(1, Math.round(bucket.seconds / 60)),
       presetLabel: timer.presetLabel,
-    });
-    cursorMs = segmentEndMs;
-  }
-
-  return sessions;
+    }));
 }
 
 function closeTimerSegmentsForRecovery(timer: TimerState, endedAt: string) {
@@ -445,22 +450,25 @@ function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   }
 
   const endedAt = new Date(endsAtTime).toISOString();
-  const recoveredSessions = closeTimerSegmentsForRecovery(timer, endedAt).flatMap((segment) => buildRecoveredSessionsForRange(timer, segment.startedAt, segment.endedAt));
+  const resetTimer = {
+    ...defaultTimer,
+    ...keepTimerContext(timer),
+    running: false,
+    phase: "idle" as const,
+    startedAt: null,
+    endsAt: null,
+    loggedSplitSeconds: 0,
+    activeSegments: [],
+    remainingSeconds: timer.mode === "exam" ? timer.examMinutes * 60 : timer.mode === "endless" ? 0 : timer.studyMinutes * 60,
+  };
+  const recoveredSessions = buildRecoveredSessionsFromSegments(timer, closeTimerSegmentsForRecovery(timer, endedAt));
   if (!recoveredSessions.length || recoveredSessions.every((recoveredSession) => sessions.some((session) => session.id === recoveredSession.id))) {
-    return { timer: rehydrateTimer(timer), sessions };
+    return { timer: resetTimer, sessions };
   }
 
   return {
     sessions: [...recoveredSessions.filter((recoveredSession) => !sessions.some((session) => session.id === recoveredSession.id)), ...sessions],
-    timer: {
-      ...defaultTimer,
-      ...keepTimerContext(timer),
-      running: false,
-      phase: "idle" as const,
-      startedAt: null,
-      endsAt: null,
-      remainingSeconds: timer.mode === "exam" ? timer.examMinutes * 60 : timer.mode === "endless" ? 0 : timer.studyMinutes * 60,
-    },
+    timer: resetTimer,
   };
 }
 
