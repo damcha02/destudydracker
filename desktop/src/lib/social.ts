@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -34,7 +34,7 @@ export interface SquadSearchResult {
   maxMembers: number;
   totalMinutes: number;
   totalSessions: number;
-  action: "join" | "request" | "pending" | "full" | "unavailable";
+  action: "join" | "request" | "pending" | "full" | "unavailable" | "current";
 }
 
 interface SocialFeedResponse {
@@ -367,6 +367,13 @@ export async function searchSquads(social: SocialState, query: string) {
   });
 }
 
+export async function getSquadDetails(social: SocialState, squadId: string) {
+  return requestSocialApi<{ squad: SocialSquadDetails }>("/squads/details", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, squadId }),
+  });
+}
+
 export async function joinSquad(social: SocialState, squadId: string) {
   return requestSocialApi<SocialSyncResponse>("/squads/join", {
     method: "POST",
@@ -392,6 +399,13 @@ export async function sendSquadMessage(social: SocialState, body: string) {
   return requestSocialApi<SocialSyncResponse>("/squads/chat", {
     method: "POST",
     body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, body }),
+  });
+}
+
+export async function deleteSquadMessage(social: SocialState, messageId: string) {
+  return requestSocialApi<SocialSyncResponse>("/squads/chat/delete", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, messageId }),
   });
 }
 

@@ -216,7 +216,7 @@ function makeDefaultSocialState(): SocialState {
       friends: { daily: [], weekly: [], overall: [] },
       squad: { daily: [], weekly: [], overall: [] },
     },
-    cachedSquadScoreLeaderboards: { daily: [], weekly: [], overall: [] },
+    cachedSquadScoreLeaderboards: { daily: [], season: [], overall: [] },
   };
 }
 
@@ -231,6 +231,7 @@ export const defaultTimer: TimerState = {
   phase: "idle",
   mode: "focus",
   remainingSeconds: 25 * 60,
+  loggedSplitSeconds: 0,
   running: false,
   studyMinutes: 25,
   breakMinutes: 5,
@@ -302,7 +303,11 @@ export const defaultState: AppState = {
 };
 
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
-  const merged = { ...defaultTimer, ...timer };
+  const merged = {
+    ...defaultTimer,
+    ...timer,
+    loggedSplitSeconds: typeof timer?.loggedSplitSeconds === "number" && Number.isFinite(timer.loggedSplitSeconds) ? Math.max(0, timer.loggedSplitSeconds) : 0,
+  };
 
   if (!merged.running || !merged.endsAt) {
     return {
@@ -471,7 +476,7 @@ function normalizeSocialState(social: unknown): SocialState {
     },
     cachedSquadScoreLeaderboards: {
       daily: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.daily),
-      weekly: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.weekly),
+      season: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.season ?? (record.cachedSquadScoreLeaderboards as { weekly?: unknown } | undefined)?.weekly),
       overall: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.overall),
     },
   };

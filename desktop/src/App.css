@@ -1373,6 +1373,19 @@
   background: var(--surface-2);
 }
 
+.squad-score-row[role="button"] {
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
+}
+
+.squad-score-row[role="button"]:hover,
+.squad-score-row[role="button"]:focus-visible {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+  background: color-mix(in oklch, var(--accent) 7%, var(--surface-2));
+  outline: none;
+}
+
 .squad-score-row--self {
   border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
   background: color-mix(in oklch, var(--accent) 9%, var(--surface-2));
@@ -1409,6 +1422,60 @@
   padding: 9px;
 }
 
+.squad-details-modal {
+  width: min(560px, 100%);
+  padding: 0;
+  align-self: center;
+}
+
+.squad-details-head {
+  margin-bottom: 16px;
+}
+
+.squad-details-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.squad-details-title-row h3 {
+  margin: 0;
+}
+
+.squad-details-title-row .arena-icon-button {
+  margin-left: auto;
+}
+
+.squad-details-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.squad-details-roster {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.squad-details-member {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--surface-2) 86%, transparent);
+}
+
+.squad-details-member div {
+  display: grid;
+  gap: 3px;
+}
+
+.squad-details-member span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 .squad-chat-list {
   max-height: 360px;
   overflow: auto;
@@ -1433,6 +1500,8 @@
 .squad-chat-message div {
   display: grid;
   gap: 4px;
+  min-width: 0;
+  flex: 1;
 }
 
 .squad-chat-message strong {
@@ -1451,6 +1520,22 @@
   font-size: 0.9rem;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.squad-chat-delete {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: color-mix(in oklch, var(--danger) 12%, transparent);
+  color: color-mix(in oklch, var(--danger) 82%, var(--text));
+  font-size: 0.72rem;
+  font-weight: 850;
+}
+
+.squad-chat-delete:hover,
+.squad-chat-delete:focus-visible {
+  background: color-mix(in oklch, var(--danger) 20%, transparent);
+  outline: none;
 }
 
 @media (max-width: 900px) {

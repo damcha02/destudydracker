@@ -7,7 +7,7 @@ export interface Env {
 type LeaderboardPeriod = "daily" | "weekly" | "overall";
 type LeaderboardScope = "global" | "friends" | "squad";
 type SquadRole = "leader" | "co_leader" | "elder" | "member";
-type SquadScorePeriod = "daily" | "weekly" | "overall";
+type SquadScorePeriod = "daily" | "season" | "overall";
 type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
@@ -70,6 +70,8 @@ const MAX_POLL_OPTIONS = 12;
 const MAX_SQUAD_NAME_LENGTH = 48;
 const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
+const SQUAD_SEASON_START = "2026-07-29";
+const SQUAD_SEASON_END = "2026-08-31";
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
@@ -664,8 +666,8 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
     });
   }
 
-  const periodFilter = period === "weekly" ? "WHERE score.date >= ?" : "";
-  const params = period === "weekly" ? [weekStartIso()] : [];
+  const periodFilter = period === "season" ? "WHERE score.date >= ? AND score.date <= ?" : "";
+  const params = period === "season" ? [SQUAD_SEASON_START, SQUAD_SEASON_END] : [];
   const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
       (SELECT COUNT(*) FROM squad_members sm WHERE sm.squad_id = s.id) AS currentMemberCount,
@@ -704,6 +706,88 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
       scoredDays: Number(row.scoredDays),
     };
   });
+}
+
+async function getSquadDetails(env: Env, userId: string, squadId: string) {
+  const [squad, userMembership, pending] = await Promise.all([
+    env.DB.prepare(`
+      SELECT s.id, s.name, s.is_private AS isPrivate, s.created_by_user_id AS createdByUserId, s.created_at AS createdAt,
+        COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
+        COALESCE(SUM(ds.sessions), 0) AS totalSessions,
+        COUNT(DISTINCT sm.user_id) AS memberCount
+      FROM squads s
+      LEFT JOIN squad_members sm ON sm.squad_id = s.id
+      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+      WHERE s.id = ?
+      GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
+    `).bind(squadId).first<{
+      id: string;
+      name: string;
+      isPrivate: number;
+      createdByUserId: string;
+      createdAt: string;
+      totalMinutes: number;
+      totalSessions: number;
+      memberCount: number;
+    }>(),
+    getUserSquadMember(env, userId),
+    env.DB.prepare("SELECT 1 FROM squad_join_requests WHERE squad_id = ? AND user_id = ? AND status = 'pending'")
+      .bind(squadId, userId)
+      .first(),
+  ]);
+  if (!squad) return null;
+
+  const members = await env.DB.prepare(`
+    SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
+      sm.role, sm.joined_at AS joinedAt, u.last_seen_at AS lastSeenAt,
+      COALESCE(SUM(ds.minutes), 0) AS minutes,
+      COALESCE(SUM(ds.sessions), 0) AS sessions
+    FROM squad_members sm
+    JOIN users u ON u.id = sm.user_id
+    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    WHERE sm.squad_id = ?
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, sm.joined_at, u.last_seen_at
+    ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
+  `).bind(squadId).all<{
+    userId: string;
+    displayName: string;
+    friendCode: string;
+    avatarJson: string;
+    role: SquadRole;
+    joinedAt: string;
+    lastSeenAt: string | null;
+    minutes: number;
+    sessions: number;
+  }>();
+
+  const memberCount = Number(squad.memberCount);
+  const action = userMembership
+    ? userMembership.squadId === squadId ? "current" : "unavailable"
+    : memberCount >= MAX_SQUAD_MEMBERS ? "full"
+    : pending ? "pending"
+    : squad.isPrivate ? "request"
+    : "join";
+
+  return {
+    id: squad.id,
+    name: squad.name,
+    isPrivate: Boolean(squad.isPrivate),
+    createdByUserId: squad.createdByUserId,
+    createdAt: squad.createdAt,
+    totalMinutes: Number(squad.totalMinutes),
+    totalSessions: Number(squad.totalSessions),
+    memberCount,
+    maxMembers: MAX_SQUAD_MEMBERS,
+    action,
+    members: members.results.map((member) => ({
+      ...member,
+      avatar: parseAvatar(member.avatarJson, member.displayName),
+      avatarJson: undefined,
+      minutes: Number(member.minutes),
+      sessions: Number(member.sessions),
+      isSelf: member.userId === userId,
+    })),
+  };
 }
 
 async function getSquadLeaderboards(env: Env, userId: string) {
@@ -1080,7 +1164,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
     ORDER BY r.created_at DESC
   `).bind(userId).all();
 
-  const [globalDaily, globalWeekly, globalOverall, friendsDaily, friendsWeekly, friendsOverall, squadLeaderboards, squadScoreDaily, squadScoreWeekly, squadScoreOverall, globalFeed, friendsFeed, squadSnapshot] = await Promise.all([
+  const [globalDaily, globalWeekly, globalOverall, friendsDaily, friendsWeekly, friendsOverall, squadLeaderboards, squadScoreDaily, squadScoreSeason, squadScoreOverall, globalFeed, friendsFeed, squadSnapshot] = await Promise.all([
     getLeaderboard(env, userId, "global", "daily"),
     getLeaderboard(env, userId, "global", "weekly"),
     getLeaderboard(env, userId, "global", "overall"),
@@ -1089,7 +1173,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
     getLeaderboard(env, userId, "friends", "overall"),
     getSquadLeaderboards(env, userId),
     getSquadScoreLeaderboard(env, "daily"),
-    getSquadScoreLeaderboard(env, "weekly"),
+    getSquadScoreLeaderboard(env, "season"),
     getSquadScoreLeaderboard(env, "overall"),
     getFeed(request, env, userId, "global"),
     getFeed(request, env, userId, "friends"),
@@ -1127,7 +1211,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
       })),
       cachedLeaderboards,
       cachedFeeds,
-      cachedSquadScoreLeaderboards: { daily: squadScoreDaily, weekly: squadScoreWeekly, overall: squadScoreOverall },
+      cachedSquadScoreLeaderboards: { daily: squadScoreDaily, season: squadScoreSeason, overall: squadScoreOverall },
       ...squadSnapshot,
     },
   };
@@ -1600,6 +1684,16 @@ async function handleSquadSearch(request: Request, env: Env) {
   });
 }
 
+async function handleSquadDetails(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; squadId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const squadId = requiredText(payload.squadId, "squadId", MAX_ID_LENGTH);
+  const squad = await getSquadDetails(env, userId, squadId);
+  if (!squad) return text("Squad not found.", 404);
+  return json({ squad });
+}
+
 async function handleSquadJoin(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string; squadId: string }>(request);
   const userId = cleanUserId(payload.userId);
@@ -1733,6 +1827,20 @@ async function handleSquadChat(request: Request, env: Env) {
   return json(await getSocialSnapshot(request, env, userId));
 }
 
+async function handleSquadChatDelete(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; messageId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  const membership = await getUserSquadMember(env, userId);
+  if (!membership) return text("Join a squad before managing chat.", 403);
+  const messageId = requiredText(payload.messageId, "messageId", MAX_ID_LENGTH);
+  const result = await env.DB.prepare("DELETE FROM squad_messages WHERE id = ? AND squad_id = ? AND user_id = ?")
+    .bind(messageId, membership.squadId, userId)
+    .run();
+  if ((result.meta?.changes ?? 0) < 1) return text("Message not found.", 404);
+  return json(await getSocialSnapshot(request, env, userId));
+}
+
 async function handleSquadRole(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string; targetUserId: string; role: SquadRole }>(request);
   const userId = cleanUserId(payload.userId);
@@ -1808,10 +1916,12 @@ export default {
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
       if (request.method === "POST" && url.pathname === "/squads/create") return await handleSquadCreate(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/search") return await handleSquadSearch(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/details") return await handleSquadDetails(request, env);
       if (request.method === "POST" && url.pathname === "/squads/join") return await handleSquadJoin(request, env);
       if (request.method === "POST" && url.pathname === "/squads/respond") return await handleSquadRespond(request, env);
       if (request.method === "POST" && url.pathname === "/squads/leave") return await handleSquadLeave(request, env);
       if (request.method === "POST" && url.pathname === "/squads/chat") return await handleSquadChat(request, env);
+      if (request.method === "POST" && url.pathname === "/squads/chat/delete") return await handleSquadChatDelete(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/status") return await handleFriendStatus(request, env);
       if (request.method === "POST" && (url.pathname === "/squads/promote" || url.pathname === "/squads/demote")) return await handleSquadRole(request, env);
       if (request.method === "POST" && url.pathname === "/squads/kick") return await handleSquadKick(request, env);

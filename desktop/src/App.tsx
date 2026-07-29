@@ -36,10 +36,10 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
 import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadRole, SocialSquadScoreEntry, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 
@@ -1304,24 +1304,25 @@ function getTimeGreeting(date = new Date()) {
   return "Good night";
 }
 
-function getTimerMinutes(timer: TimerState) {
+function getConfiguredTimerSeconds(timer: Pick<TimerState, "phase" | "mode" | "studyMinutes" | "examMinutes">) {
+  return timer.phase === "exam" || timer.mode === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
+}
+
+function getTimerActiveSeconds(timer: TimerState) {
   if (!timer.startedAt || (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch")) return 0;
 
   if (timer.phase === "stopwatch") {
-    return Math.max(1, Math.round(timer.remainingSeconds / 60));
+    return Math.max(0, Math.floor(timer.remainingSeconds));
   }
 
-  if (timer.running) {
-    const startedAt = new Date(timer.startedAt).getTime();
-    if (Number.isFinite(startedAt)) {
-      const elapsed = Math.max(0, Date.now() - startedAt);
-      return Math.max(1, Math.round(elapsed / 60000));
-    }
-  }
+  const configuredSeconds = getConfiguredTimerSeconds(timer);
+  return clamp(configuredSeconds - timer.remainingSeconds - (timer.loggedSplitSeconds ?? 0), 0, configuredSeconds);
+}
 
-  const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
-  const elapsed = clamp(configuredSeconds - timer.remainingSeconds, 0, configuredSeconds);
-  return Math.max(1, Math.round(elapsed / 60));
+function getTimerMinutes(timer: TimerState) {
+  const activeSeconds = getTimerActiveSeconds(timer);
+  if (activeSeconds <= 0) return 0;
+  return Math.max(1, Math.round(activeSeconds / 60));
 }
 
 function getIdleTimerSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
@@ -1575,19 +1576,28 @@ function buildSessionsFromTimerRange(timer: TimerState, endedAt: string) {
   const startedAt = timer.startedAt ?? endedAt;
   const startMs = new Date(startedAt).getTime();
   const endMs = new Date(endedAt).getTime();
+  const activeMinutes = getTimerMinutes(timer);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
-    return [buildSessionFromTimer(timer, endedAt, getTimerMinutes(timer), startedAt)];
+    return [buildSessionFromTimer(timer, endedAt, activeMinutes, startedAt)];
+  }
+
+  const firstMidnight = getFirstMidnightCrossing(startedAt, endedAt);
+  if (!firstMidnight) {
+    return [buildSessionFromTimer(timer, endedAt, activeMinutes, startedAt)];
   }
 
   const sessions: StudySession[] = [];
+  let remainingActiveMinutes = activeMinutes;
   let cursorMs = startMs;
-  while (cursorMs < endMs) {
+  while (cursorMs < endMs && remainingActiveMinutes > 0) {
     const cursor = new Date(cursorMs);
     const midnight = nextLocalMidnightAfter(cursor).getTime();
     const segmentEndMs = Math.min(endMs, midnight);
     const bucketEndMs = segmentEndMs === midnight ? segmentEndMs - 1 : segmentEndMs;
-    const minutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
+    const wallMinutes = Math.max(1, Math.round((segmentEndMs - cursorMs) / 60000));
+    const minutes = Math.min(wallMinutes, remainingActiveMinutes);
     sessions.push(buildSessionFromTimer(timer, new Date(bucketEndMs).toISOString(), minutes, new Date(cursorMs).toISOString()));
+    remainingActiveMinutes -= minutes;
     cursorMs = segmentEndMs;
   }
 
@@ -1943,9 +1953,9 @@ function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEnt
   );
 }
 
-function SquadArenaRow({ entry, period, isSelf }: { entry: SocialSquadScoreEntry; period: SocialLeaderboardPeriod; isSelf: boolean }) {
+function SquadArenaRow({ entry, period, isSelf, onOpen }: { entry: SocialSquadScoreEntry; period: SocialSquadScorePeriod; isSelf: boolean; onOpen?: () => void }) {
   return (
-    <div className={`squad-score-row ${isSelf ? "squad-score-row--self" : ""}`}>
+    <div className={`squad-score-row ${isSelf ? "squad-score-row--self" : ""}`} onClick={onOpen} role={onOpen ? "button" : undefined} tabIndex={onOpen ? 0 : undefined} onKeyDown={onOpen ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } } : undefined}>
       <ArenaRankBadge rank={entry.rank} />
       <div className="squad-score-main">
         <strong>{entry.squadName}{isSelf ? " (Your squad)" : ""}</strong>
@@ -2247,6 +2257,7 @@ function App() {
   const [feedCommentSavingId, setFeedCommentSavingId] = useState<string | null>(null);
   const [socialScope, setSocialScope] = useState<SocialLeaderboardScope>("friends");
   const [socialPeriod, setSocialPeriod] = useState<SocialLeaderboardPeriod>("weekly");
+  const [squadScorePeriod, setSquadScorePeriod] = useState<SocialSquadScorePeriod>("season");
   const [friendCodeDraft, setFriendCodeDraft] = useState("");
   const [squadNameDraft, setSquadNameDraft] = useState("");
   const [squadPrivateDraft, setSquadPrivateDraft] = useState(false);
@@ -2270,6 +2281,9 @@ function App() {
   const [viewingFriend, setViewingFriend] = useState<SocialProfileTarget | null>(null);
   const [viewingFriendStats, setViewingFriendStats] = useState<PlayerStatsResponse | null>(null);
   const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
+  const [viewingSquadEntry, setViewingSquadEntry] = useState<SocialSquadScoreEntry | null>(null);
+  const [viewingSquadDetails, setViewingSquadDetails] = useState<SocialSquadDetails | null>(null);
+  const [viewingSquadLoading, setViewingSquadLoading] = useState(false);
   const [editingFeedPostId, setEditingFeedPostId] = useState<string | null>(null);
   const [editingFeedPostNote, setEditingFeedPostNote] = useState("");
   const [editingFeedPostImage, setEditingFeedPostImage] = useState<PreparedFeedImage | null>(null);
@@ -2503,18 +2517,22 @@ function App() {
         const endsAt = timer.endsAt;
         if (!endsAt) return current;
 
-        const diff = Math.ceil((new Date(endsAt).getTime() - Date.now()) / 1000);
+        const now = new Date();
+        const diff = Math.ceil((new Date(endsAt).getTime() - now.getTime()) / 1000);
         if (diff > 0) {
           if ((timer.phase === "study" || timer.phase === "exam") && timer.startedAt) {
-            const midnight = getFirstMidnightCrossing(timer.startedAt, new Date().toISOString());
+            const midnight = getFirstMidnightCrossing(timer.startedAt, now.toISOString());
             if (midnight) {
-              const splitSession = buildSessionFromTimer(timer, new Date(midnight.getTime() - 1).toISOString(), Math.max(1, Math.round((midnight.getTime() - new Date(timer.startedAt).getTime()) / 60000)), timer.startedAt);
+              const splitSeconds = Math.max(0, Math.round((midnight.getTime() - new Date(timer.startedAt).getTime()) / 1000));
+              if (splitSeconds <= 0) return { ...current, timer: { ...timer, startedAt: midnight.toISOString(), remainingSeconds: diff } };
+              const splitSession = buildSessionFromTimer(timer, new Date(midnight.getTime() - 1).toISOString(), Math.max(1, Math.round(splitSeconds / 60)), timer.startedAt);
               return {
                 ...current,
                 sessions: pruneSessionHistory([splitSession, ...current.sessions]),
                 timer: {
                   ...timer,
                   startedAt: midnight.toISOString(),
+                  loggedSplitSeconds: (timer.loggedSplitSeconds ?? 0) + splitSeconds,
                   remainingSeconds: diff,
                 },
               };
@@ -2538,11 +2556,12 @@ function App() {
                 ...timer,
                 phase: "break",
                 running: true,
-                startedAt: endedAt,
-                endsAt: new Date(Date.now() + timer.breakMinutes * 60000).toISOString(),
-                remainingSeconds: timer.breakMinutes * 60,
-              },
-            };
+                  startedAt: endedAt,
+                  endsAt: new Date(Date.now() + timer.breakMinutes * 60000).toISOString(),
+                  remainingSeconds: timer.breakMinutes * 60,
+                  loggedSplitSeconds: 0,
+                },
+              };
           }
 
           ringBell();
@@ -2926,8 +2945,11 @@ function App() {
   const badgeVeteran = state.totalUnlocks >= 10;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
   const squadMemberLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
-  const squadScoreLeaderboard = state.social.cachedSquadScoreLeaderboards[socialPeriod] ?? [];
+  const squadScoreLeaderboard = state.social.cachedSquadScoreLeaderboards[squadScorePeriod] ?? [];
   const socialArenaTitle = socialScope === "global" ? "World Arena" : socialScope === "squad" ? "Squad Arena" : "Friends Arena";
+  const socialArenaSubtitle = socialScope === "squad"
+    ? squadScorePeriod === "daily" ? "Daily Sprint" : squadScorePeriod === "season" ? "Seasonal Points" : "Overall Points"
+    : socialPeriod === "daily" ? "Daily Sprint" : socialPeriod === "weekly" ? "Weekly League" : "Hall of Focus";
   const socialGlobalWeekly = getLeaderboardWithLocalSelf(state, "global", "weekly");
   const socialFriendsWeekly = getLeaderboardWithLocalSelf(state, "friends", "weekly");
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
@@ -2968,6 +2990,7 @@ function App() {
   const viewingIsSelf = viewingFriend?.userId === state.social.userId;
   const viewingIsFriend = viewingFriend ? socialFriendIds.has(viewingFriend.userId) : false;
   const viewingRequestPending = viewingFriend ? outgoingFriendRequestCodes.has(viewingFriend.friendCode) : false;
+  const viewingSquadAction = viewingSquadDetails?.action;
   const rockStage = state.petRockPats >= 8888888 ? { plant: "\u{1F47C}", label: "Guardian Angel" }
     : state.petRockPats >= 6666666 ? { plant: "\u{1F47F}", label: "Demon" }
     : state.petRockPats >= 1000000 ? { plant: "\u{1F5FF}", label: "Rock God" }
@@ -4197,6 +4220,18 @@ function App() {
     }
   }
 
+  async function deleteOwnSquadMessage(messageId: string) {
+    if (!window.confirm("Delete this message?")) return;
+    try {
+      const result = await deleteSquadMessage(state.social, messageId);
+      applySocialSnapshot(result);
+      setMessage("Message deleted.");
+    } catch (error: unknown) {
+      console.warn("Could not delete squad message.", error);
+      setMessage(getErrorMessage(error, "Could not delete message."));
+    }
+  }
+
   async function changeSquadMemberRole(targetUserId: string, role: SocialSquadRole) {
     setSocialSyncing(true);
     try {
@@ -4426,6 +4461,38 @@ function App() {
       setMessage(getErrorMessage(error, "Could not load profile."));
     } finally {
       setViewingFriendLoading(false);
+    }
+  }
+
+  async function openSquadDetails(entry: SocialSquadScoreEntry) {
+    setViewingSquadEntry(entry);
+    setViewingSquadDetails(null);
+    setViewingSquadLoading(true);
+    try {
+      const result = await getSquadDetails(state.social, entry.squadId);
+      setViewingSquadDetails(result.squad);
+    } catch (error: unknown) {
+      console.warn("Could not load squad details.", error);
+      setMessage(getErrorMessage(error, "Could not load squad."));
+    } finally {
+      setViewingSquadLoading(false);
+    }
+  }
+
+  async function joinOrRequestViewedSquad() {
+    if (!viewingSquadDetails || (viewingSquadDetails.action !== "join" && viewingSquadDetails.action !== "request")) return;
+    setSocialSyncing(true);
+    try {
+      const wasPrivate = viewingSquadDetails.isPrivate;
+      const result = await joinSquad(state.social, viewingSquadDetails.id);
+      applySocialSnapshot(result);
+      setViewingSquadDetails((current) => current ? { ...current, action: wasPrivate ? "pending" : "current" } : current);
+      setMessage(wasPrivate ? "Join request sent." : "Joined squad.");
+    } catch (error: unknown) {
+      console.warn("Could not join squad.", error);
+      setMessage(getErrorMessage(error, "Could not join squad."));
+    } finally {
+      setSocialSyncing(false);
     }
   }
 
@@ -5532,6 +5599,7 @@ function App() {
           startedAt,
           endsAt: null,
           remainingSeconds: 0,
+          loggedSplitSeconds: 0,
         },
       }));
       return;
@@ -5547,6 +5615,7 @@ function App() {
         startedAt,
         endsAt: new Date(Date.now() + totalSeconds * 1000).toISOString(),
         remainingSeconds: totalSeconds,
+        loggedSplitSeconds: 0,
       },
     }));
 
@@ -5585,14 +5654,26 @@ function App() {
 
       if (timer.running && timer.endsAt) {
         const diff = Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000));
-        return { ...current, timer: { ...timer, running: false, endsAt: null, remainingSeconds: diff } };
+        const activeSeconds = getTimerActiveSeconds({ ...timer, remainingSeconds: diff });
+        return {
+          ...current,
+          timer: {
+            ...timer,
+            running: false,
+            startedAt: activeSeconds > 0 ? new Date(Date.now() - activeSeconds * 1000).toISOString() : timer.startedAt,
+            endsAt: null,
+            remainingSeconds: diff,
+          },
+        };
       }
 
+      const activeSeconds = getTimerActiveSeconds(timer);
       return {
         ...current,
         timer: {
           ...timer,
           running: true,
+          startedAt: activeSeconds > 0 ? new Date(Date.now() - activeSeconds * 1000).toISOString() : new Date().toISOString(),
           endsAt: new Date(Date.now() + timer.remainingSeconds * 1000).toISOString(),
         },
       };
@@ -5621,11 +5702,16 @@ function App() {
       setMessage("There is no active study block to save.");
       return;
     }
+    if (getTimerMinutes(state.timer) <= 0) {
+      setMessage("Start the timer before saving a session.");
+      return;
+    }
 
     setState((current) => {
       const timer = current.timer;
       if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return current;
       const activeMinutes = getTimerMinutes(timer);
+      if (activeMinutes <= 0) return current;
       const syntheticEndMs = timer.startedAt ? new Date(timer.startedAt).getTime() + activeMinutes * 60000 : Date.now();
       const endedAt = timer.running || !Number.isFinite(syntheticEndMs) ? new Date().toISOString() : new Date(syntheticEndMs).toISOString();
       const sessions = buildSessionsFromTimerRange(timer, endedAt);
@@ -8297,7 +8383,7 @@ function App() {
                       value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
                       disabled={state.timer.running}
                       onChange={(event) => {
-                        const next = Number(event.target.value) || 1;
+                        const next = Math.max(1, Number(event.target.value) || 1);
                         setState((current) => {
                           const timer = {
                             ...current.timer,
@@ -8327,7 +8413,7 @@ function App() {
                         onChange={(event) =>
                           setState((current) => ({
                             ...current,
-                            timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
+                            timer: { ...current.timer, breakMinutes: Math.max(0, Number(event.target.value) || 0), presetLabel: "Custom" },
                           }))
                         }
                       />
@@ -8384,7 +8470,9 @@ function App() {
                         running: false,
                         phase: current.timer.phase === "break" ? "study" : "break",
                         remainingSeconds: (current.timer.phase === "break" ? current.timer.studyMinutes : current.timer.breakMinutes) * 60,
+                        startedAt: null,
                         endsAt: null,
+                        loggedSplitSeconds: 0,
                       },
                     }));
                   }}
@@ -8497,7 +8585,7 @@ function App() {
                       min="1"
                       value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
                       onChange={(event) => {
-                        const next = Number(event.target.value) || 1;
+                        const next = Math.max(1, Number(event.target.value) || 1);
                         setState((current) => {
                           const timer = {
                             ...current.timer,
@@ -8526,7 +8614,7 @@ function App() {
                       onChange={(event) =>
                         setState((current) => ({
                           ...current,
-                          timer: { ...current.timer, breakMinutes: Number(event.target.value) || 0, presetLabel: "Custom" },
+                          timer: { ...current.timer, breakMinutes: Math.max(0, Number(event.target.value) || 0), presetLabel: "Custom" },
                         }))
                       }
                     />
@@ -9559,6 +9647,7 @@ function App() {
                         <div key={message.id} className={`squad-chat-message ${message.isSelf ? "squad-chat-message--self" : ""}`}>
                           <ArenaAvatar name={message.displayName} avatar={message.avatar} self={message.isSelf} size="sm" />
                           <div><strong>{message.displayName} <span>{squadRoleLabels[message.role]}</span></strong><p>{message.body}</p></div>
+                          {message.isSelf ? <button type="button" className="squad-chat-delete" onClick={() => void deleteOwnSquadMessage(message.id)} title="Delete message">Delete</button> : null}
                         </div>
                       ))}
                       {!state.social.squadMessages.length ? <div className="arena-empty small">No messages yet. Start the squad chat.</div> : null}
@@ -9664,7 +9753,7 @@ function App() {
                   <div>
                     <span className="arena-kicker">Arena standings</span>
                     <h2>{socialArenaTitle}</h2>
-                    <p>{socialPeriod === "daily" ? "Daily Sprint" : socialPeriod === "weekly" ? "Weekly League" : "Hall of Focus"}</p>
+                    <p>{socialArenaSubtitle}</p>
                   </div>
                 </div>
                 <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
@@ -9680,13 +9769,23 @@ function App() {
                 ))}
               </div>
 
-              <div className="arena-period-chips" aria-label="Leaderboard period">
-                {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => (
-                  <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>
-                    {period === "daily" ? "Daily Sprint" : period === "weekly" ? "Weekly League" : "Hall of Focus"}
-                  </button>
-                ))}
-              </div>
+              {socialScope === "squad" ? (
+                <div className="arena-period-chips" aria-label="Squad leaderboard period">
+                  {(["daily", "season", "overall"] as SocialSquadScorePeriod[]).map((period) => (
+                    <button key={period} type="button" className={squadScorePeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSquadScorePeriod(period)}>
+                      {period === "daily" ? "Daily" : period === "season" ? "Seasonal Points" : "Overall Points"}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="arena-period-chips" aria-label="Leaderboard period">
+                  {(["daily", "weekly", "overall"] as SocialLeaderboardPeriod[]).map((period) => (
+                    <button key={period} type="button" className={socialPeriod === period ? "arena-period-chip arena-period-chip--active" : "arena-period-chip"} onClick={() => setSocialPeriod(period)}>
+                      {period === "daily" ? "Daily Sprint" : period === "weekly" ? "Weekly League" : "Hall of Focus"}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {socialScope === "global" && state.social.isPrivate ? (
                 <div className="arena-empty small arena-private-notice">
@@ -9716,7 +9815,7 @@ function App() {
 
               <div className="arena-lb-rows">
                 {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
-                  <SquadArenaRow key={entry.squadId} entry={entry} period={socialPeriod} isSelf={entry.squadId === state.social.squad?.id} />
+                  <SquadArenaRow key={entry.squadId} entry={entry} period={squadScorePeriod} isSelf={entry.squadId === state.social.squad?.id} onOpen={() => void openSquadDetails(entry)} />
                 )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
                   const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
                   return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
@@ -9779,6 +9878,63 @@ function App() {
                 </div>
               ) : (
                 <div className="arena-error">Could not load stats.</div>
+              )}
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {viewingSquadEntry ? (
+        <div className="calendar-drawer-backdrop" style={{ justifyContent: "center", alignItems: "center" }} onClick={() => { setViewingSquadEntry(null); setViewingSquadDetails(null); }} role="presentation">
+          <article className="arena-player-card squad-details-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={`${viewingSquadEntry.squadName} squad details`}>
+            <div className="arena-player-card__inner">
+              <div className="arena-title-cluster squad-details-head">
+                <ArenaRankBadge rank={viewingSquadEntry.rank} large />
+                <div style={{ flex: 1 }}>
+                  <span className="arena-kicker">{viewingSquadDetails?.isPrivate ?? viewingSquadEntry.isPrivate ? "Private squad" : "Public squad"}</span>
+                  <div className="squad-details-title-row">
+                    <h3>{viewingSquadDetails?.name ?? viewingSquadEntry.squadName}</h3>
+                    <button type="button" className="arena-icon-button" onClick={() => { setViewingSquadEntry(null); setViewingSquadDetails(null); }} title="Close">×</button>
+                  </div>
+                  <div className="profile-action-row">
+                    <span className="arena-pending-badge">
+                      {viewingSquadAction === "current" ? "Your squad" : viewingSquadAction === "pending" ? "Request pending" : viewingSquadAction === "full" ? "Full" : viewingSquadAction === "unavailable" ? "Unavailable" : viewingSquadAction === "request" ? "Request to join" : "Open to join"}
+                    </span>
+                    {viewingSquadAction === "join" || viewingSquadAction === "request" ? (
+                      <button type="button" className="arena-btn arena-btn--send" onClick={() => void joinOrRequestViewedSquad()} disabled={socialSyncing || !socialConfigured}>
+                        {viewingSquadAction === "join" ? "Join squad" : "Request to join"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              {viewingSquadLoading ? (
+                <div className="arena-empty">Loading squad...</div>
+              ) : viewingSquadDetails ? (
+                <>
+                  <div className="arena-player-stats squad-details-stats" style={{ marginTop: 0 }}>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">#</span><div><strong>{viewingSquadDetails.memberCount}/{viewingSquadDetails.maxMembers}</strong><span>Members</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(viewingSquadDetails.totalMinutes)}</strong><span>Total focus</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">★</span><div><strong>{viewingSquadEntry.points} pts</strong><span>{squadScorePeriod === "season" ? "Season" : squadScorePeriod === "overall" ? "Overall" : "Today if held"}</span></div></div>
+                    <div className="arena-mini-stat"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(Math.round(viewingSquadEntry.averageMinutes))}</strong><span>Average focus</span></div></div>
+                  </div>
+
+                  <div className="squad-details-roster">
+                    <div className="section-label">Members</div>
+                    {viewingSquadDetails.members.map((member) => (
+                      <div key={member.userId} className="squad-details-member">
+                        <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                        <div>
+                          <strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong>
+                          <span>{squadRoleLabels[member.role]} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <div className="arena-error">Could not load squad details.</div>
               )}
             </div>
           </article>

@@ -5,6 +5,7 @@ export type TimerMode = "focus" | "exam" | "endless";
 export type TabKey = "dashboard" | "planner" | "timer" | "vault" | "friends" | "break";
 export type SocialLeaderboardScope = "global" | "friends" | "squad";
 export type SocialLeaderboardPeriod = "daily" | "weekly" | "overall";
+export type SocialSquadScorePeriod = "daily" | "season" | "overall";
 export type SocialFeedScope = "global" | "friends";
 export type SocialSubtab = "feed" | "leaderboard" | "friends" | "squad" | "profile";
 export type SocialFriendRequestStatus = "pending" | "accepted" | "declined";
@@ -256,6 +257,11 @@ export interface SocialSquadScoreEntry {
   scoredDays?: number;
 }
 
+export interface SocialSquadDetails extends Omit<SocialSquad, "myRole"> {
+  maxMembers: number;
+  action: "join" | "request" | "pending" | "full" | "unavailable" | "current";
+}
+
 export interface SocialState {
   userId: string;
   deviceSecret: string;
@@ -277,13 +283,14 @@ export interface SocialState {
   cachedFeeds: Record<SocialFeedScope, SocialFeedPost[]>;
   pendingFeedPosts: SocialFeedPost[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
-  cachedSquadScoreLeaderboards: Record<SocialLeaderboardPeriod, SocialSquadScoreEntry[]>;
+  cachedSquadScoreLeaderboards: Record<SocialSquadScorePeriod, SocialSquadScoreEntry[]>;
 }
 
 export interface TimerState {
   phase: TimerPhase;
   mode: TimerMode;
   remainingSeconds: number;
+  loggedSplitSeconds: number;
   running: boolean;
   studyMinutes: number;
   breakMinutes: number;
