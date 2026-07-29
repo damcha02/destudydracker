@@ -100,6 +100,7 @@ export interface Settings {
   backgroundEffect: boolean;
   hideFeedImages: boolean;
   hideFeedPolls: boolean;
+  telemetryEnabled: boolean;
   vaultPath: string | null;
   vaultName: string;
   visibleTabs: Record<TabKey, boolean>;

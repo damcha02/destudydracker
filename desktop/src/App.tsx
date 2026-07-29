@@ -36,8 +36,8 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
-import type { PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
+import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
@@ -449,10 +449,14 @@ const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
+const DISMISSED_ANNOUNCEMENTS_KEY = "study-tracker-dismissed-announcements";
+const TELEMETRY_INSTALL_ID_KEY = "study-tracker-telemetry-install-id";
 const SESSION_HISTORY_DAYS = 365;
 const SESSION_HISTORY_MAX = 3000;
 const ENDLESS_INACTIVITY_PROMPT_MS = 2 * 60 * 60 * 1000;
 const ENDLESS_INACTIVITY_GRACE_MS = 60 * 60 * 1000;
+const ANNOUNCEMENT_POLL_INTERVAL_MS = 2 * 60 * 1000;
+const TELEMETRY_HEARTBEAT_INTERVAL_MS = 60 * 60 * 1000;
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const RELEASES_PAGE_URL = "https://github.com/damcha02/destudydracker/releases/latest";
 const SOURCE_LINUX_UPDATE_COMMAND = "cd /path/to/destudydracker\ngit pull\ncd desktop\nnpm install\nnpm run tauri:build\n./src-tauri/target/release/app";
@@ -531,6 +535,9 @@ const squadRoleLabels: Record<SocialSquadRole, string> = {
 };
 
 const squadRoles: SocialSquadRole[] = ["leader", "co_leader", "elder", "member"];
+const SQUAD_TRACKING_START_LABEL = "29.07.2026";
+const SQUAD_SEASON_NAME = "Summer Season 26";
+const SQUAD_SEASON_RANGE_LABEL = "29.07.2026 - 31.08.2026";
 
 function squadRoleRank(role: SocialSquadRole) {
   return role === "leader" ? 4 : role === "co_leader" ? 3 : role === "elder" ? 2 : 1;
@@ -635,6 +642,31 @@ type CheckForUpdatesOptions = {
   silent?: boolean;
   automatic?: boolean;
 };
+
+function loadDismissedAnnouncementIds() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(DISMISSED_ANNOUNCEMENTS_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveDismissedAnnouncementIds(ids: Set<string>) {
+  localStorage.setItem(DISMISSED_ANNOUNCEMENTS_KEY, JSON.stringify([...ids].slice(-100)));
+}
+
+function getTelemetryInstallId() {
+  const existing = localStorage.getItem(TELEMETRY_INSTALL_ID_KEY);
+  if (existing) return existing;
+  const next = crypto.randomUUID();
+  localStorage.setItem(TELEMETRY_INSTALL_ID_KEY, next);
+  return next;
+}
+
+function isValidAppVersion(version: string) {
+  return /^\d+(?:\.\d+)*$/.test(version.trim());
+}
 
 type CalendarDay = {
   date: Date;
@@ -2253,6 +2285,10 @@ function App() {
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
   const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
   const [updateNoticeVisible, setUpdateNoticeVisible] = useState(false);
+  const [appAnnouncement, setAppAnnouncement] = useState<AppAnnouncement | null>(null);
+  const [updateNoticeSending, setUpdateNoticeSending] = useState(false);
+  const [adminUsage, setAdminUsage] = useState<AdminUsageResponse | null>(null);
+  const [adminUsageLoading, setAdminUsageLoading] = useState(false);
   const [feedCommentNotice, setFeedCommentNotice] = useState<FeedCommentNotice | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
@@ -2314,6 +2350,15 @@ function App() {
   const [showDurakPuzzle, setShowDurakPuzzle] = useState(false);
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
+  const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
+
+  function getAppMetadata(): AppMetadata {
+    return {
+      version: currentAppVersion && currentAppVersion !== "loading..." ? currentAppVersion : "unknown",
+      platform: navigator.platform || "unknown",
+      runtimeChannel: updateInstallSupport.runtimeChannel || "unknown",
+    };
+  }
 
   useEffect(() => {
     latestStateRef.current = state;
@@ -3429,6 +3474,16 @@ function App() {
     }));
   }
 
+  function toggleTelemetry() {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        telemetryEnabled: !current.settings.telemetryEnabled,
+      },
+    }));
+  }
+
   async function copyFriendCode() {
     try {
       await navigator.clipboard.writeText(state.social.friendCode);
@@ -3478,7 +3533,7 @@ function App() {
 
     setSocialSyncing(true);
     try {
-      const result = await syncSocialState(syncState);
+      const result = await syncSocialState(syncState, getAppMetadata());
       const syncedAt = new Date().toISOString();
       updateFeedCommentNoticeFromFeeds([
         { scope: "global", feed: result.social.cachedFeeds.global },
@@ -4299,6 +4354,45 @@ function App() {
     openMenuPanel("settings");
   }
 
+  function dismissAppAnnouncement(announcementId: string) {
+    const dismissedIds = loadDismissedAnnouncementIds();
+    dismissedIds.add(announcementId);
+    saveDismissedAnnouncementIds(dismissedIds);
+    setAppAnnouncement(null);
+  }
+
+  async function sendUpdateNoticeToUsers() {
+    const targetVersion = currentAppVersion.trim();
+    if (!isValidAppVersion(targetVersion)) {
+      setMessage("Wait until the current app version is loaded before notifying users.");
+      return;
+    }
+    if (!window.confirm(`Notify users below version ${targetVersion} about the update?`)) return;
+    setUpdateNoticeSending(true);
+    try {
+      const result = await notifyUsersAboutUpdate(state.social, targetVersion);
+      setAppAnnouncement(null);
+      setMessage(`Update notice sent to users below ${result.targetVersion}.`);
+    } catch (error: unknown) {
+      console.warn("Could not send update notice.", error);
+      setMessage(getErrorMessage(error, "Could not notify users about the update."));
+    } finally {
+      setUpdateNoticeSending(false);
+    }
+  }
+
+  async function loadAdminUsage() {
+    setAdminUsageLoading(true);
+    try {
+      setAdminUsage(await getAdminUsage(state.social));
+    } catch (error: unknown) {
+      console.warn("Could not load usage data.", error);
+      setMessage(getErrorMessage(error, "Could not load usage data."));
+    } finally {
+      setAdminUsageLoading(false);
+    }
+  }
+
   function savePersonalSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const userName = personalNameDraft.trim();
@@ -4389,6 +4483,31 @@ function App() {
     void checkForUpdates({ silent: true, automatic: true });
   });
 
+  const refreshAppAnnouncement = useEffectEvent(async () => {
+    if (!isSocialApiConfigured()) return;
+    try {
+      const result = await getCurrentAnnouncement(getAppMetadata());
+      const announcement = result.announcement;
+      if (!announcement) {
+        setAppAnnouncement(null);
+        return;
+      }
+
+      setAppAnnouncement(loadDismissedAnnouncementIds().has(announcement.id) ? null : announcement);
+    } catch (error: unknown) {
+      console.warn("Could not refresh app announcement.", error);
+    }
+  });
+
+  const sendOptInTelemetryHeartbeat = useEffectEvent(async () => {
+    if (!state.settings.telemetryEnabled || !isSocialApiConfigured()) return;
+    try {
+      await sendTelemetryHeartbeat(getTelemetryInstallId(), getAppMetadata());
+    } catch (error: unknown) {
+      console.warn("Could not send telemetry heartbeat.", error);
+    }
+  });
+
   const runAutomaticSocialSync = useEffectEvent(() => {
     if (shouldAutoSyncSocial(state.social)) void runSocialSync({ silent: true });
   });
@@ -4398,7 +4517,7 @@ function App() {
   });
 
   const presencePingEffect = useEffectEvent(() => {
-    if (socialConfigured) void presencePing(state.social).catch(() => {});
+    if (socialConfigured) void presencePing(state.social, getAppMetadata()).catch(() => {});
   });
 
   async function refreshFriendStatusNow() {
@@ -4542,6 +4661,19 @@ function App() {
     const interval = window.setInterval(runAutomaticUpdateCheck, AUTO_UPDATE_CHECK_INTERVAL_MS);
     return () => window.clearInterval(interval);
   }, [updateInstallSupport.packageHint, updateInstallSupport.runtimeChannel]);
+
+  useEffect(() => {
+    void refreshAppAnnouncement();
+    const interval = window.setInterval(() => void refreshAppAnnouncement(), ANNOUNCEMENT_POLL_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (!state.settings.telemetryEnabled) return undefined;
+    void sendOptInTelemetryHeartbeat();
+    const interval = window.setInterval(() => void sendOptInTelemetryHeartbeat(), TELEMETRY_HEARTBEAT_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [state.settings.telemetryEnabled]);
 
   useEffect(() => {
     presencePingEffect();
@@ -4796,6 +4928,8 @@ function App() {
     localStorage.removeItem("study-tracker-desktop-v1");
     localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
     localStorage.removeItem(CUSTOM_DASHBOARD_LAYOUT_KEY);
+    localStorage.removeItem(DISMISSED_ANNOUNCEMENTS_KEY);
+    localStorage.removeItem(TELEMETRY_INSTALL_ID_KEY);
     closeMenuPanel();
     setMessage("All study tracker data deleted.");
   }
@@ -7217,6 +7351,18 @@ function App() {
                   />
                   <span className="ios-switch" aria-hidden="true" />
                 </label>
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Anonymous usage telemetry</strong>
+                    <small>{state.settings.telemetryEnabled ? "On" : "Off"} · shares only app version, platform, runtime channel, and last-opened time</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={state.settings.telemetryEnabled}
+                    onChange={toggleTelemetry}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
               </div>
               <button
                 type="button"
@@ -7284,8 +7430,43 @@ function App() {
                   <button type="button" className="ghost-button" onClick={() => openExternalLink(updateInfo.releaseUrl ?? RELEASES_PAGE_URL)}>
                     {updateInfo.status === "available" && (updateInstallSupport.packageHint === "source-linux" || updateInstallSupport.packageHint === "source-build") ? "Open repository" : updateInfo.status === "available" && !updateInstallSupport.canAutoInstall ? "Download manually" : "Open release page"}
                   </button>
+                  {canViewR2Usage ? (
+                    <button type="button" className="ghost-button" onClick={() => void sendUpdateNoticeToUsers()} disabled={updateNoticeSending || !canSendUpdateNotice}>
+                      {updateNoticeSending ? "Notifying..." : canSendUpdateNotice ? `Notify users below ${currentAppVersion}` : "Version not ready"}
+                    </button>
+                  ) : null}
                 </div>
               </div>
+              {canViewR2Usage ? (
+                <div className="linux-update-command-card">
+                  <div>
+                    <strong>Usage and versions</strong>
+                    <span>Owner-only view of synced users plus anonymous opt-in telemetry installs.</span>
+                    {adminUsage?.summary ? (
+                      <span>{Number(adminUsage.summary.userCount ?? 0)} synced users · {Number(adminUsage.summary.active24h ?? 0)} active 24h · {Number(adminUsage.summary.active7d ?? 0)} active 7d · {adminUsage.telemetry.length} opt-in installs</span>
+                    ) : null}
+                  </div>
+                  <div className="update-actions">
+                    <button type="button" onClick={() => void loadAdminUsage()} disabled={adminUsageLoading}>
+                      {adminUsageLoading ? "Loading..." : "Load usage data"}
+                    </button>
+                  </div>
+                  {adminUsage ? (
+                    <textarea
+                      className="linux-update-command"
+                      readOnly
+                      rows={10}
+                      value={[
+                        "Synced users:",
+                        ...adminUsage.users.map((user) => `${user.displayName} (${user.friendCode}) | seen ${user.lastSeenAt} | ${user.appVersion ?? "unknown version"} | ${user.deviceLabel ?? user.appPlatform ?? "unknown device"} | ${user.appRuntimeChannel ?? "unknown channel"}`),
+                        "",
+                        "Opt-in telemetry installs:",
+                        ...adminUsage.telemetry.map((install) => `${install.installId.slice(0, 8)}... | seen ${install.lastSeenAt} | ${install.appVersion || "unknown version"} | ${install.appPlatform || "unknown platform"} | ${install.appRuntimeChannel || "unknown channel"}`),
+                      ].join("\n")}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
               {linuxUpdateDownload ? (
                 <div className="linux-update-command-card">
                   <div>
@@ -7465,7 +7646,7 @@ function App() {
 
       {renderMenuPanel()}
 
-      {updateNoticeVisible || feedCommentNotice || endlessInactivityPrompt || timerInactivityNoticeVisible ? (
+      {updateNoticeVisible || appAnnouncement || feedCommentNotice || endlessInactivityPrompt || timerInactivityNoticeVisible ? (
         <div className="notice-stack" aria-live="polite">
           {updateNoticeVisible ? (
             <aside className="update-notice" role="status">
@@ -7476,6 +7657,20 @@ function App() {
                 </span>
               </div>
               <button type="button" className="update-notice-close" onClick={() => setUpdateNoticeVisible(false)} aria-label="Dismiss update notice">
+                X
+              </button>
+            </aside>
+          ) : null}
+
+          {appAnnouncement ? (
+            <aside className="update-notice" role="status">
+              <div>
+                <strong>New update available.</strong>
+                <span>
+                  Go to <button type="button" onClick={openUpdateSettingsFromNotice}>Settings</button> to update the app.
+                </span>
+              </div>
+              <button type="button" className="update-notice-close" onClick={() => dismissAppAnnouncement(appAnnouncement.id)} aria-label="Dismiss announcement">
                 X
               </button>
             </aside>
@@ -9803,6 +9998,13 @@ function App() {
                 <div className="arena-empty small arena-private-notice">
                   <strong>Private profile enabled</strong>
                   <span>You are hidden from the global leaderboard. Switch to Friends Arena to compare with friends.</span>
+                </div>
+              ) : null}
+
+              {socialScope === "squad" ? (
+                <div className="arena-empty small arena-private-notice">
+                  <strong>{SQUAD_SEASON_NAME}</strong>
+                  <span>Season: {SQUAD_SEASON_RANGE_LABEL} · Overall tracking started: {SQUAD_TRACKING_START_LABEL}</span>
                 </div>
               ) : null}
 

@@ -25,6 +25,7 @@ interface SyncPayload {
       fingerprintHash?: string;
       label?: string;
     };
+    app?: AppMetadata;
   };
   stats: Array<{
     date: string;
@@ -49,6 +50,12 @@ interface SyncPayload {
   }>;
 }
 
+interface AppMetadata {
+  version?: string;
+  platform?: string;
+  runtimeChannel?: string;
+}
+
 type SyncFeedPoll = NonNullable<NonNullable<SyncPayload["feedPosts"]>[number]["poll"]> | null | undefined;
 
 const corsHeaders = {
@@ -71,6 +78,7 @@ const MAX_SQUAD_NAME_LENGTH = 48;
 const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const SQUAD_SEASON_START = "2026-07-29";
+const SQUAD_SEASON_END = "2026-08-31";
 const SERVER_TIME_ZONE = "Europe/Zurich";
 const SQUAD_SCORE_BACKFILL_DAYS = 14;
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -244,6 +252,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const isPrivate = payload.isPrivate ? 1 : 0;
   const deviceFingerprintHash = cleanText(payload.device?.fingerprintHash, 120);
   const deviceLabel = cleanText(payload.device?.label, 120);
+  const app = cleanAppMetadata(payload.app);
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
   const existing = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
@@ -259,23 +268,60 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
         device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
         device_label = COALESCE(NULLIF(?, ''), device_label),
         device_seen_at = CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE device_seen_at END,
+        app_version = COALESCE(NULLIF(?, ''), app_version),
+        app_platform = COALESCE(NULLIF(?, ''), app_platform),
+        app_runtime_channel = COALESCE(NULLIF(?, ''), app_runtime_channel),
+        app_seen_at = CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE app_seen_at END,
         updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `)
-      .bind(friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, userId)
+      .bind(friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
       .run();
   } else {
     await env.DB.prepare(`
-      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, device_fingerprint_hash, device_label, device_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
+      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
     `)
-      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash)
+      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
       .run();
   }
 }
 
 function cleanText(value: unknown, max = 180) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function cleanAppMetadata(value: unknown) {
+  const record = value && typeof value === "object" ? value as AppMetadata : {};
+  return {
+    version: cleanText(record.version, 40),
+    platform: cleanText(record.platform, 120),
+    runtimeChannel: cleanText(record.runtimeChannel, 80),
+  };
+}
+
+function parseVersionParts(version: string) {
+  const match = version.trim().match(/^(\d+(?:\.\d+)*)/);
+  if (!match) return null;
+  return match[1].split(".").map((part) => Number(part));
+}
+
+function compareVersions(a: string, b: string) {
+  const aParts = parseVersionParts(a);
+  const bParts = parseVersionParts(b);
+  if (!aParts || !bParts) return null;
+  const length = Math.max(aParts.length, bParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const left = aParts[index] ?? 0;
+    const right = bParts[index] ?? 0;
+    if (left !== right) return left < right ? -1 : 1;
+  }
+  return 0;
+}
+
+function isOlderVersion(currentVersion: string, targetVersion: string) {
+  const comparison = compareVersions(currentVersion, targetVersion);
+  return comparison === null || comparison < 0;
 }
 
 function cleanPoll(value: SyncFeedPoll) {
@@ -633,13 +679,10 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
 
 async function scoreSquadDate(env: Env, date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+  if (date < SQUAD_SEASON_START) return;
   const dayStart = serverDayStartIso(date);
   const dayEnd = new Date(new Date(serverDayStartIso(addIsoDays(date, 1))).getTime() - 1).toISOString();
-  const historyCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM squad_member_history WHERE joined_at <= ? AND (left_at IS NULL OR left_at >= ?)")
-    .bind(dayEnd, dayStart)
-    .first<{ count: number }>();
-  const hasHistory = Number(historyCount?.count ?? 0) > 0;
-  const rows = hasHistory ? await env.DB.prepare(`
+  const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name,
       COUNT(DISTINCT h.user_id) AS memberCount,
       COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
@@ -649,17 +692,7 @@ async function scoreSquadDate(env: Env, date: string) {
     LEFT JOIN daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
     GROUP BY s.id, s.name
     HAVING memberCount >= 2
-  `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>() : await env.DB.prepare(`
-    SELECT s.id AS squadId, s.name,
-      COUNT(DISTINCT sm.user_id) AS memberCount,
-      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
-      COALESCE(SUM(ds.sessions), 0) AS totalSessions
-    FROM squads s
-    JOIN squad_members sm ON sm.squad_id = s.id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
-    GROUP BY s.id, s.name
-    HAVING memberCount >= 2
-  `).bind(date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>();
+  `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>();
 
   const ranked = rows.results
     .map((row) => ({
@@ -673,7 +706,7 @@ async function scoreSquadDate(env: Env, date: string) {
 
   let previousAverage: number | null = null;
   let previousRank = 0;
-  const statements = ranked.map((row, index) => {
+  const statements = [env.DB.prepare("DELETE FROM squad_daily_scores WHERE date = ?").bind(date), ...ranked.map((row, index) => {
     const rank = previousAverage !== null && row.averageMinutes === previousAverage ? previousRank : index + 1;
     previousAverage = row.averageMinutes;
     previousRank = rank;
@@ -689,13 +722,14 @@ async function scoreSquadDate(env: Env, date: string) {
         points = excluded.points,
         scored_at = CURRENT_TIMESTAMP
     `).bind(row.squadId, date, row.averageMinutes, row.totalMinutes, row.memberCount, rank, points);
-  });
-  if (statements.length) await env.DB.batch(statements);
+  })];
+  await env.DB.batch(statements);
 }
 
 async function scoreMissingCompletedSquadDates(env: Env) {
   const today = todayIso();
-  const since = addIsoDays(today, -SQUAD_SCORE_BACKFILL_DAYS);
+  const backfillStart = addIsoDays(today, -SQUAD_SCORE_BACKFILL_DAYS);
+  const since = backfillStart > SQUAD_SEASON_START ? backfillStart : SQUAD_SEASON_START;
   const rows = await env.DB.prepare(`
     SELECT ds.date
     FROM daily_stats ds
@@ -753,8 +787,8 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
     });
   }
 
-  const periodFilter = period === "season" ? "WHERE score.date >= ?" : "";
-  const params = period === "season" ? [SQUAD_SEASON_START] : [];
+  const periodFilter = period === "season" ? "WHERE score.date >= ? AND score.date <= ?" : "WHERE score.date >= ?";
+  const params = period === "season" ? [SQUAD_SEASON_START, SQUAD_SEASON_END] : [SQUAD_SEASON_START];
   const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
       (SELECT COUNT(*) FROM squad_members sm WHERE sm.squad_id = s.id) AS currentMemberCount,
@@ -1654,10 +1688,35 @@ async function handleFriendRequest(request: Request, env: Env) {
 }
 
 async function handlePresence(request: Request, env: Env) {
-  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const payload = await readJson<{ userId: string; deviceSecret: string; app?: AppMetadata }>(request);
   const userId = String(payload.userId ?? "").trim();
   await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
-  await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
+  const app = cleanAppMetadata(payload.app);
+  await env.DB.prepare(`
+    UPDATE users
+    SET last_seen_at = CURRENT_TIMESTAMP,
+      app_version = COALESCE(NULLIF(?, ''), app_version),
+      app_platform = COALESCE(NULLIF(?, ''), app_platform),
+      app_runtime_channel = COALESCE(NULLIF(?, ''), app_runtime_channel),
+      app_seen_at = CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE app_seen_at END
+    WHERE id = ?
+  `).bind(app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId).run();
+  return json({ ok: true });
+}
+
+async function handleTelemetryHeartbeat(request: Request, env: Env) {
+  const payload = await readJson<{ installId: string; app?: AppMetadata }>(request);
+  const installId = requiredText(payload.installId, "installId", MAX_ID_LENGTH);
+  const app = cleanAppMetadata(payload.app);
+  await env.DB.prepare(`
+    INSERT INTO app_telemetry_installs (install_id, app_version, app_platform, app_runtime_channel, last_seen_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(install_id) DO UPDATE SET
+      app_version = COALESCE(NULLIF(excluded.app_version, ''), app_telemetry_installs.app_version),
+      app_platform = COALESCE(NULLIF(excluded.app_platform, ''), app_telemetry_installs.app_platform),
+      app_runtime_channel = COALESCE(NULLIF(excluded.app_runtime_channel, ''), app_telemetry_installs.app_runtime_channel),
+      last_seen_at = CURRENT_TIMESTAMP
+  `).bind(installId, app.version, app.platform, app.runtimeChannel).run();
   return json({ ok: true });
 }
 
@@ -2005,6 +2064,73 @@ async function handleSquadSettings(request: Request, env: Env) {
   return json(await getSocialSnapshot(request, env, userId));
 }
 
+async function handleCurrentAnnouncement(request: Request, env: Env) {
+  const now = new Date().toISOString();
+  const params = new URL(request.url).searchParams;
+  const appVersion = cleanText(params.get("appVersion"), 40);
+  const announcements = await env.DB.prepare(`
+    SELECT id, title, body, target_version AS targetVersion, created_at AS createdAt, expires_at AS expiresAt
+    FROM app_announcements
+    WHERE active = 1 AND (expires_at IS NULL OR expires_at > ?)
+    ORDER BY created_at DESC
+    LIMIT 20
+  `).bind(now).all<{ id: string; title: string; body: string; targetVersion: string | null; createdAt: string; expiresAt: string | null }>();
+
+  const announcement = announcements.results.find((item) => !item.targetVersion || isOlderVersion(appVersion, item.targetVersion));
+
+  return json({ announcement: announcement ?? null });
+}
+
+async function handleCreateUpdateNotice(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; targetVersion?: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  const owner = await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can notify users about updates.", 403);
+  const targetVersion = cleanText(payload.targetVersion, 40);
+  if (!parseVersionParts(targetVersion)) return text("Missing valid target version.", 400);
+
+  const id = `update-${targetVersion}-${Date.now()}`;
+  await env.DB.prepare("INSERT INTO app_announcements (id, title, body, target_version, active) VALUES (?, ?, ?, ?, 1)")
+    .bind(id, "New update available.", "Go to Settings to update the app.", targetVersion)
+    .run();
+
+  return json({ ok: true, id, targetVersion });
+}
+
+async function handleAdminUsage(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  const owner = await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
+  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can view usage data.", 403);
+
+  const [summary, users, telemetry] = await Promise.all([
+    env.DB.prepare(`
+      SELECT COUNT(*) AS userCount,
+        SUM(CASE WHEN last_seen_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS active24h,
+        SUM(CASE WHEN last_seen_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS active7d,
+        SUM(CASE WHEN app_version IS NOT NULL AND app_version != '' THEN 1 ELSE 0 END) AS usersWithAppVersion
+      FROM users
+    `).first(),
+    env.DB.prepare(`
+      SELECT display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt,
+        device_label AS deviceLabel, app_version AS appVersion, app_platform AS appPlatform,
+        app_runtime_channel AS appRuntimeChannel, app_seen_at AS appSeenAt
+      FROM users
+      ORDER BY last_seen_at DESC
+      LIMIT 100
+    `).all(),
+    env.DB.prepare(`
+      SELECT install_id AS installId, app_version AS appVersion, app_platform AS appPlatform,
+        app_runtime_channel AS appRuntimeChannel, created_at AS createdAt, last_seen_at AS lastSeenAt
+      FROM app_telemetry_installs
+      ORDER BY last_seen_at DESC
+      LIMIT 100
+    `).all(),
+  ]);
+
+  return json({ summary, users: users.results, telemetry: telemetry.results });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -2012,6 +2138,10 @@ export default {
     try {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
+      if (request.method === "GET" && url.pathname === "/announcements/current") return await handleCurrentAnnouncement(request, env);
+      if (request.method === "POST" && url.pathname === "/announcements/update-notice") return await handleCreateUpdateNotice(request, env);
+      if (request.method === "POST" && url.pathname === "/telemetry/heartbeat") return await handleTelemetryHeartbeat(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/admin/usage") return await handleAdminUsage(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);

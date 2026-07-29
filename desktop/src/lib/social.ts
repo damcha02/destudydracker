@@ -21,6 +21,12 @@ interface DeviceIdentity {
   label: string;
 }
 
+export interface AppMetadata {
+  version: string;
+  platform: string;
+  runtimeChannel: string;
+}
+
 interface SocialStatusResponse {
   social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedSquadScoreLeaderboards" | "cachedFeeds" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
 }
@@ -42,6 +48,15 @@ interface SocialFeedResponse {
   r2Usage?: R2UsageStatus;
 }
 
+export interface AppAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  targetVersion?: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
 export interface R2UsageStatus {
   month: string;
   storageBytes: number;
@@ -57,6 +72,33 @@ export interface R2UsageStatus {
     classBWarningMonthly: number;
     classBHardMonthly: number;
   };
+}
+
+export interface AdminUsageResponse {
+  summary: {
+    userCount: number;
+    active24h: number;
+    active7d: number;
+    usersWithAppVersion: number;
+  } | null;
+  users: Array<{
+    displayName: string;
+    friendCode: string;
+    lastSeenAt: string;
+    deviceLabel: string | null;
+    appVersion: string | null;
+    appPlatform: string | null;
+    appRuntimeChannel: string | null;
+    appSeenAt: string | null;
+  }>;
+  telemetry: Array<{
+    installId: string;
+    appVersion: string;
+    appPlatform: string;
+    appRuntimeChannel: string;
+    createdAt: string;
+    lastSeenAt: string;
+  }>;
 }
 
 function sessionDateKey(session: StudySession) {
@@ -208,7 +250,7 @@ async function requestSocialForm<T>(path: string, form: FormData): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function syncSocialState(state: AppState) {
+export async function syncSocialState(state: AppState, app?: AppMetadata) {
   const device = await getDeviceIdentity();
   const payload = {
     user: {
@@ -219,6 +261,7 @@ export async function syncSocialState(state: AppState) {
       avatar: state.social.avatar,
       isPrivate: state.social.isPrivate,
       device,
+      app,
     },
     stats: getLocalSocialStats(state.sessions),
     feedPosts: state.social.pendingFeedPosts,
@@ -237,6 +280,23 @@ export async function getSocialFeed(social: SocialState, scope: SocialFeedScope)
       scope,
       userId: social.userId,
       deviceSecret: social.deviceSecret,
+    }),
+  });
+}
+
+export async function getCurrentAnnouncement(app: AppMetadata) {
+  return requestSocialApi<{ announcement: AppAnnouncement | null }>(`/announcements/current?appVersion=${encodeURIComponent(app.version)}`, {
+    method: "GET",
+  });
+}
+
+export async function notifyUsersAboutUpdate(social: SocialState, targetVersion: string) {
+  return requestSocialApi<{ ok: boolean; id: string; targetVersion: string }>("/announcements/update-notice", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: social.userId,
+      deviceSecret: social.deviceSecret,
+      targetVersion,
     }),
   });
 }
@@ -437,13 +497,28 @@ export function getNextAutoSyncAt() {
   return new Date(Math.min(intervalSyncAt.getTime(), dailyResetAt.getTime(), weeklyResetAt.getTime())).toISOString();
 }
 
-export async function presencePing(social: SocialState) {
+export async function presencePing(social: SocialState, app?: AppMetadata) {
   return requestSocialApi<{ ok: boolean }>("/presence", {
     method: "POST",
     body: JSON.stringify({
       userId: social.userId,
       deviceSecret: social.deviceSecret,
+      app,
     }),
+  });
+}
+
+export async function sendTelemetryHeartbeat(installId: string, app: AppMetadata) {
+  return requestSocialApi<{ ok: boolean }>("/telemetry/heartbeat", {
+    method: "POST",
+    body: JSON.stringify({ installId, app }),
+  });
+}
+
+export async function getAdminUsage(social: SocialState) {
+  return requestSocialApi<AdminUsageResponse>("/admin/usage", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret }),
   });
 }
 
