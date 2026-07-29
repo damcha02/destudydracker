@@ -71,7 +71,6 @@ const MAX_SQUAD_NAME_LENGTH = 48;
 const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const SQUAD_SEASON_START = "2026-07-29";
-const SQUAD_SEASON_END = "2026-08-31";
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
@@ -666,8 +665,8 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
     });
   }
 
-  const periodFilter = period === "season" ? "WHERE score.date >= ? AND score.date <= ?" : "";
-  const params = period === "season" ? [SQUAD_SEASON_START, SQUAD_SEASON_END] : [];
+  const periodFilter = period === "season" ? "WHERE score.date >= ?" : "";
+  const params = period === "season" ? [SQUAD_SEASON_START] : [];
   const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
       (SELECT COUNT(*) FROM squad_members sm WHERE sm.squad_id = s.id) AS currentMemberCount,

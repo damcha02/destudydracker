@@ -232,6 +232,7 @@ export const defaultTimer: TimerState = {
   mode: "focus",
   remainingSeconds: 25 * 60,
   loggedSplitSeconds: 0,
+  activeSegments: [],
   running: false,
   studyMinutes: 25,
   breakMinutes: 5,
@@ -302,11 +303,38 @@ export const defaultState: AppState = {
   },
 };
 
+function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerState["activeSegments"] {
+  if (Array.isArray(timer?.activeSegments)) {
+    return timer.activeSegments.flatMap((segment) => {
+      if (!segment || typeof segment !== "object") return [];
+      const startedAt = typeof segment.startedAt === "string" ? segment.startedAt : null;
+      const endedAt = typeof segment.endedAt === "string" ? segment.endedAt : null;
+      if (!startedAt || Number.isNaN(new Date(startedAt).getTime())) return [];
+      if (endedAt && Number.isNaN(new Date(endedAt).getTime())) return [];
+      return [{ startedAt, endedAt }];
+    });
+  }
+
+  if (typeof timer?.startedAt === "string" && !Number.isNaN(new Date(timer.startedAt).getTime()) && (timer.phase === "study" || timer.phase === "exam" || timer.phase === "stopwatch")) {
+    const startedAtMs = new Date(timer.startedAt).getTime();
+    const studySeconds = typeof timer.studyMinutes === "number" ? timer.studyMinutes * 60 : defaultTimer.studyMinutes * 60;
+    const examSeconds = typeof timer.examMinutes === "number" ? timer.examMinutes * 60 : defaultTimer.examMinutes * 60;
+    const remainingSeconds = typeof timer.remainingSeconds === "number" ? timer.remainingSeconds : 0;
+    const loggedSplitSeconds = typeof timer.loggedSplitSeconds === "number" ? timer.loggedSplitSeconds : 0;
+    const configuredSeconds = timer.phase === "stopwatch" ? Math.max(0, remainingSeconds) : timer.phase === "exam" ? examSeconds : studySeconds;
+    const activeSeconds = timer.phase === "stopwatch" ? configuredSeconds : Math.max(0, Math.min(configuredSeconds, configuredSeconds - remainingSeconds - loggedSplitSeconds));
+    return [{ startedAt: timer.startedAt, endedAt: timer.running ? null : new Date(startedAtMs + activeSeconds * 1000).toISOString() }];
+  }
+
+  return [];
+}
+
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
   const merged = {
     ...defaultTimer,
     ...timer,
     loggedSplitSeconds: typeof timer?.loggedSplitSeconds === "number" && Number.isFinite(timer.loggedSplitSeconds) ? Math.max(0, timer.loggedSplitSeconds) : 0,
+    activeSegments: normalizeTimerSegments(timer),
   };
 
   if (!merged.running || !merged.endsAt) {
@@ -357,7 +385,7 @@ function nextLocalMidnightAfter(date: Date) {
   return next;
 }
 
-function buildRecoveredSessions(timer: TimerState, startedAt: string, endedAt: string) {
+function buildRecoveredSessionsForRange(timer: TimerState, startedAt: string, endedAt: string) {
   const startMs = new Date(startedAt).getTime();
   const endMs = new Date(endedAt).getTime();
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
@@ -395,6 +423,17 @@ function buildRecoveredSessions(timer: TimerState, startedAt: string, endedAt: s
   return sessions;
 }
 
+function closeTimerSegmentsForRecovery(timer: TimerState, endedAt: string) {
+  const segments = timer.activeSegments.length ? timer.activeSegments : normalizeTimerSegments(timer);
+  return segments.flatMap((segment) => {
+    const startedAt = new Date(segment.startedAt).getTime();
+    const closedAt = new Date(segment.endedAt ?? endedAt).getTime();
+    const finalEnd = Math.min(closedAt, new Date(endedAt).getTime());
+    if (!Number.isFinite(startedAt) || !Number.isFinite(finalEnd) || finalEnd <= startedAt) return [];
+    return [{ startedAt: segment.startedAt, endedAt: new Date(finalEnd).toISOString() }];
+  });
+}
+
 function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   if (!timer.running || !timer.endsAt || (timer.phase !== "study" && timer.phase !== "exam")) {
     return { timer: rehydrateTimer(timer), sessions };
@@ -406,8 +445,7 @@ function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   }
 
   const endedAt = new Date(endsAtTime).toISOString();
-  const startedAt = timer.startedAt ?? endedAt;
-  const recoveredSessions = buildRecoveredSessions(timer, startedAt, endedAt);
+  const recoveredSessions = closeTimerSegmentsForRecovery(timer, endedAt).flatMap((segment) => buildRecoveredSessionsForRange(timer, segment.startedAt, segment.endedAt));
   if (!recoveredSessions.length || recoveredSessions.every((recoveredSession) => sessions.some((session) => session.id === recoveredSession.id))) {
     return { timer: rehydrateTimer(timer), sessions };
   }

@@ -286,11 +286,17 @@ export interface SocialState {
   cachedSquadScoreLeaderboards: Record<SocialSquadScorePeriod, SocialSquadScoreEntry[]>;
 }
 
+export interface TimerActiveSegment {
+  startedAt: string;
+  endedAt: string | null;
+}
+
 export interface TimerState {
   phase: TimerPhase;
   mode: TimerMode;
   remainingSeconds: number;
   loggedSplitSeconds: number;
+  activeSegments: TimerActiveSegment[];
   running: boolean;
   studyMinutes: number;
   breakMinutes: number;
