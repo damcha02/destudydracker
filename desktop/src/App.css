@@ -11290,7 +11290,7 @@ input[type="color"] {
   height: 78px;
   border-radius: 8px;
   border: 1.5px solid var(--border);
-  background: var(--surface);
+  background: #fff;
   display: grid;
   place-items: center;
   font-weight: 700;
@@ -11335,7 +11335,7 @@ input[type="color"] {
   transform: translateY(-10px);
   box-shadow: 0 4px 12px rgba(0,0,0,0.2);
   border-color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+  background: color-mix(in oklch, var(--accent) 10%, #fff);
 }
 
 .durak-card--table {
@@ -11345,7 +11345,7 @@ input[type="color"] {
 .durak-card--undefended {
   border-style: dashed;
   border-color: var(--muted);
-  background: color-mix(in oklch, var(--muted) 8%, transparent);
+  background: color-mix(in oklch, var(--muted) 8%, #fff);
 }
 
 .durak-card-empty {

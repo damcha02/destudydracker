@@ -327,6 +327,7 @@ const studyBreakGames = [
   { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
   { name: "Geodle", url: "https://geodle.me", desc: "Guess the location from a photo" },
 ];
+const STUDY_BREAK_GAME_COUNT = studyBreakGames.length;
 
 const breakQuotes = [
   { text: "Almost everything will work again if you unplug it for a few minutes, including you.", author: "Anne Lamott" },
@@ -3315,25 +3316,25 @@ function App() {
   const unitsCompletedToday = useMemo(() => getUnitsCompletedToday({ calendarEntries: state.calendarEntries } as AppState, calendarToday), [state.calendarEntries, calendarToday]);
   const streakDays = useMemo(() => getStreakDays({ sessions: state.sessions } as AppState, calendarToday), [state.sessions, calendarToday]);
   const focusMomentum = useMemo(() => getFocusMomentum({ sessions: state.sessions } as AppState, calendarToday), [state.sessions, calendarToday]);
-  const studyBreakTokens = Math.min(5, Math.floor(todayMinutes / 45));
+  const studyBreakTokens = Math.min(STUDY_BREAK_GAME_COUNT, Math.floor(todayMinutes / 45));
   const todayStr = calendarToday;
   const effectiveUnlocked = state.unlockedGamesDate === todayStr ? state.unlockedGames : [];
   const canUnlockMore = effectiveUnlocked.length < studyBreakTokens;
-  const minsUntilNext = studyBreakTokens < 5 ? Math.max(1, 45 - (todayMinutes % 45)) : 0;
+  const minsUntilNext = studyBreakTokens < STUDY_BREAK_GAME_COUNT ? Math.max(1, 45 - (todayMinutes % 45)) : 0;
   const xpProgress = todayMinutes % 45;
   const xpPercent = (xpProgress / 45) * 100;
   const effectivePlayed: PlayedBreak[] = state.playedBreaksDate === todayStr ? state.playedBreaks : [];
   const todayPlayedNames = [...new Set(effectivePlayed.map(p => p.name))];
   const waterCount = state.waterDate === todayStr ? state.waterGlasses : 0;
-  const badgeFullHouse = effectiveUnlocked.length === 5;
+  const badgeFullHouse = effectiveUnlocked.length === STUDY_BREAK_GAME_COUNT;
   const badgeFirstBreak = state.totalUnlocks >= 1;
   const badgeOnFire = state.unlockStreak >= 3;
   const badgeEarlyBird = effectivePlayed.some(p => new Date(p.playedAt).getHours() < 9);
   const badgeNightOwl = effectivePlayed.some(p => new Date(p.playedAt).getHours() >= 22);
   const badgeSpeedrunnerToday = state.speedrunnerToday && state.lastUnlockDate === todayStr;
   const badgeSpeedrunner = badgeSpeedrunnerToday || (state.badgeCounts.speedrunner ?? 0) > 0;
-  const badgeExplorer = state.playedGamesAllTime.length >= 5;
-  const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === 5;
+  const badgeExplorer = state.playedGamesAllTime.length >= STUDY_BREAK_GAME_COUNT;
+  const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === STUDY_BREAK_GAME_COUNT;
   const badgeVeteran = state.totalUnlocks >= 10;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
   const squadMemberLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
@@ -3428,14 +3429,14 @@ function App() {
   const currentRockBadge = petRockMilestones.findLast((badge) => state.petRockPats >= badge.threshold);
   const nextRockBadge = petRockMilestones.find((badge) => state.petRockPats < badge.threshold);
   const badges: ProfileBadge[] = [
-    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: "Unlock all 5 break games in one day." },
+    { id: "full-house", icon: "\u{1F3C6}", name: "Full House", earned: badgeFullHouse || (state.badgeCounts["full-house"] ?? 0) > 0, daily: true, how: `Unlock all ${STUDY_BREAK_GAME_COUNT} break games in one day.` },
     { id: "first-break", icon: "\u{2B50}", name: "First Break", earned: badgeFirstBreak, how: "Unlock any Break Room game once." },
     { id: "on-fire", icon: "\u{1F525}", name: "On Fire", earned: badgeOnFire, how: "Unlock at least one break game on 3 consecutive days." },
     { id: "early-bird", icon: "\u{1F305}", name: "Early Bird", earned: badgeEarlyBird || (state.badgeCounts["early-bird"] ?? 0) > 0, daily: true, how: "Play an unlocked break game before 9:00 AM." },
     { id: "night-owl", icon: "\u{1F989}", name: "Night Owl", earned: badgeNightOwl || (state.badgeCounts["night-owl"] ?? 0) > 0, daily: true, how: "Play an unlocked break game at or after 10:00 PM." },
     { id: "speedrunner", icon: "\u{26A1}", name: "Speedrunner", earned: badgeSpeedrunner, daily: true, how: "Unlock your first break after earning a 45-minute break token from one single study or exam session." },
-    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: "Play all 5 different break games at least once." },
-    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: "Unlock all 5 games and play all 5 games on the same day." },
+    { id: "explorer", icon: "\u{1F5FA}\uFE0F", name: "Explorer", earned: badgeExplorer, how: `Play all ${STUDY_BREAK_GAME_COUNT} different break games at least once.` },
+    { id: "perfectionist", icon: "\u{1F3AF}", name: "Perfectionist", earned: badgePerfectionist || (state.badgeCounts.perfectionist ?? 0) > 0, daily: true, how: `Unlock all ${STUDY_BREAK_GAME_COUNT} games and play all ${STUDY_BREAK_GAME_COUNT} games on the same day.` },
     { id: "veteran", icon: "\u{1F48E}", name: "Veteran", earned: badgeVeteran, how: "Unlock break games 10 total times." },
     { id: "rock-current", icon: currentRockBadge?.icon ?? "\u{1FAA8}", name: currentRockBadge?.name ?? "Pet Rock", earned: Boolean(currentRockBadge), how: nextRockBadge ? `Pat the pet rock ${nextRockBadge.label} times.` : "Reach the final pet rock form." },
   ];
@@ -10944,7 +10945,7 @@ function App() {
                 <h2>Break Room</h2>
               </div>
               <div className="page-head-actions">
-                <span className="section-note">{effectiveUnlocked.length} of 5 breaks available</span>
+                <span className="section-note">{effectiveUnlocked.length} of {STUDY_BREAK_GAME_COUNT} breaks available</span>
               </div>
             </div>
 
@@ -11004,7 +11005,7 @@ function App() {
             </div>
 
             <div className="break-stats-row" data-tour="break-stats">
-              <span className="break-stats-chip">{'\u{1F513}'} Unlocked {effectiveUnlocked.length}/5</span>
+              <span className="break-stats-chip">{'\u{1F513}'} Unlocked {effectiveUnlocked.length}/{STUDY_BREAK_GAME_COUNT}</span>
               <span className="break-stats-chip">{'\u25B6'} Played {todayPlayedNames.length} today</span>
               {badgeFullHouse ? <span className="break-stats-chip collection">{'\u{1F3C6}'} Full house!</span> : null}
             </div>
