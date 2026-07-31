@@ -35,6 +35,7 @@ export interface Task {
   semesterId: string;
   courseId: string;
   title: string;
+  unitLabel: string;
   totalUnits: number;
   completedUnits: number;
   dueDate: string | null;

@@ -497,6 +497,31 @@ type DashboardWidgetLayout = {
 type CalendarView = "month" | "week";
 type MenuPanel = "theme" | "personal" | "settings" | "options" | null;
 type VaultSpace = "daily" | "references" | "summaries";
+type PageHelp = {
+  title: string;
+  purpose: string;
+  steps: string[];
+  tour: TourStep[];
+};
+
+type TourStep = {
+  target: string;
+  title: string;
+  body: string;
+  tab?: TabKey;
+};
+
+type HelpExample = {
+  task: string;
+  unitLabel: string;
+  total: number;
+  done: number;
+  next: number;
+  caption: string;
+  result: string;
+  heading: string;
+  tone: "c1" | "c2" | "c3";
+};
 
 const primaryTabs: Array<{ id: TabKey; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
@@ -506,6 +531,194 @@ const primaryTabs: Array<{ id: TabKey; label: string }> = [
   { id: "break", label: "Break Room" },
   { id: "friends", label: "Social" },
 ];
+
+const TUTORIAL_SEMESTER_ID = "tutorial-semester";
+const TUTORIAL_COURSE_ID = "tutorial-course";
+const TUTORIAL_TASK_ID = "tutorial-task";
+const TUTORIAL_SEMESTER_NAME = "Tutorial Semester";
+const TUTORIAL_COURSE_NAME = "Tutorial Course";
+const TUTORIAL_TASK_TITLE = "Watch tutorial lectures";
+
+const pageHelp: Record<TabKey, PageHelp> = {
+  dashboard: {
+    title: "Dashboard",
+    purpose: "Start here when you are not sure what to study. It turns all your tasks, sessions, deadlines, and exams into a short daily overview.",
+    steps: [
+      "Pick a layout that feels clear to you.",
+      "Check Today's Focus and urgent tasks first.",
+      "Send one task to the Timer instead of trying to fix everything at once.",
+    ],
+    tour: [
+      { target: "dashboard-layout", title: "Choose a dashboard view", body: "Start by picking the layout that feels easiest. Focus is the simplest, Cockpit shows everything, Analyst is stats-heavy, and Custom lets you arrange widgets." },
+      { target: "dashboard-today", title: "Read today's focus", body: "This is the first place to look each day. It combines your progress, due dates, and study history into a quick recommendation." },
+      { target: "dashboard-urgent", title: "Check planned work", body: "This list shows what is scheduled for today. If you are overwhelmed, pick only one item here and move it to the Timer." },
+      { target: "dashboard-focus-button", title: "Send work to Timer", body: "The Focus button takes a planned task and links it to the Timer, so your study session counts toward the right course and task." },
+      { target: "dashboard-weekly", title: "Review study rhythm", body: "Weekly Focus shows whether you studied consistently. Use it as feedback, not as a guilt chart." },
+      { target: "dashboard-garden", title: "Understand the garden", body: "The garden is a visual reward for recent focus. More consistent study makes it grow." },
+      { target: "dashboard-course-radar", title: "Scan course health", body: "Course Radar helps you spot courses that are falling behind before they become emergencies." },
+      { target: "dashboard-exam-runway", title: "Watch exam pressure", body: "Exam Runway shows upcoming exams and preparedness so you know when revision should override normal tasks." },
+    ],
+  },
+  planner: {
+    title: "Planner",
+    purpose: "Use this page to create the structure of your semester: semesters, courses, tasks, exams, and calendar work blocks. Units are the countable pieces of a task, not minutes or hours. The unit label tells the app what to call each piece.",
+    steps: [
+      "Create one semester.",
+      "Add courses inside that semester.",
+      "Add tasks or exams inside each course.",
+      "Set the unit label, like Lecture, Sheet, or Exam.",
+      "Set total units to the number of pieces you need to finish, then mark units complete as you work.",
+      "Schedule units on the calendar if you want a day-by-day plan.",
+    ],
+    tour: [
+      { target: "planner-add-semester", title: "Normally, start here", body: "A real setup starts with + Add semester. For this tutorial, Study Tracker has already created a Tutorial Semester so you can see the full workflow immediately." },
+      { target: "planner-tutorial-semester", title: "Tutorial Semester", body: "This temporary semester was created for the tutorial. Semesters are containers for courses, tasks, exams, and calendar planning." },
+      { target: "planner-tutorial-semester-health", title: "Semester health", body: "The score summarizes pressure inside this semester: task progress, overdue work, and upcoming exams." },
+      { target: "planner-add-course", title: "Add courses here", body: "Normally you add each real course from this button. The tutorial has already created Tutorial Course inside Tutorial Semester." },
+      { target: "planner-tutorial-course", title: "Tutorial Course", body: "Courses group related tasks and sessions. They also give Timer and Dashboard enough context to show where your study time went." },
+      { target: "planner-add-task", title: "Add tasks here", body: "Tasks are the actual pieces of work: lectures, sheets, readings, old exams, projects, or revision sets." },
+      { target: "planner-tutorial-task", title: "Tutorial task", body: "This task is Watch tutorial lectures. It has 10 total units, 3 already completed, and the next unit is Lecture 4 of 10." },
+      { target: "planner-tutorial-task-meta", title: "Understand units", body: "The row shows completed units, total units, the next unit, and due date. Units are countable pieces, not hours." },
+      { target: "planner-tutorial-task-progress", title: "Adjust progress", body: "After finishing a lecture, sheet, or exam, use plus. Use minus if you marked one by mistake. During the tutorial these controls are locked until Finish." },
+      { target: "planner-tutorial-task-focus", title: "Focus from Planner", body: "Focus sends this task to the Timer already linked, so your session saves under the right semester, course, and task." },
+      { target: "timer-links", title: "Arrive in Timer linked", body: "After focusing a task, the Timer can show the linked semester, course, and task so the session saves to the right place.", tab: "timer" },
+      { target: "timer-presets", title: "Choose session length", body: "Pick a preset or custom timer after the task is linked. The task context stays attached." , tab: "timer"},
+      { target: "timer-actions", title: "Start and save", body: "Start begins the focus block. Save records the session and pushes progress into the rest of the app.", tab: "timer" },
+      { target: "planner-calendar", title: "Schedule units", body: "Back in Planner, use the calendar to spread task units across days or time blocks instead of guessing when to study.", tab: "planner" },
+      { target: "planner-tutorial-task-remove", title: "Remove tutorial task", body: "At the end, press Finish first. Then you can click this Remove button yourself to delete the tutorial task." },
+      { target: "planner-tutorial-course-remove", title: "Remove tutorial course", body: "After removing the task, remove Tutorial Course if you do not want to keep it." },
+      { target: "planner-tutorial-semester-remove", title: "Remove tutorial semester", body: "Finally, remove Tutorial Semester. The tutorial cannot click this for you; you stay in control of deleting data." },
+    ],
+  },
+  timer: {
+    title: "Timer",
+    purpose: "Use this page when you are ready to study. It tracks focus time and can link sessions back to courses and tasks.",
+    steps: [
+      "Choose a preset or Custom.",
+      "Optionally link a semester, course, or task.",
+      "Press Start. When done, press Save so the session counts in your stats.",
+    ],
+    tour: [
+      { target: "timer-presets", title: "Pick a timer mode", body: "Presets are the fastest way to start. Use Pomodoro for short work, Deep Work for longer blocks, Exam for timed practice, and Endless when you do not know the duration." },
+      { target: "timer-custom", title: "Custom timing", body: "Custom lets you choose your own focus and break minutes when the presets do not fit." },
+      { target: "timer-links", title: "Link the session", body: "These fields connect the session to a semester, course, and task. Linked sessions make Dashboard, Planner, and Vault more useful." },
+      { target: "timer-task-select", title: "Choose a task", body: "When a task is selected, the Timer shows the next unit, like Lecture 4 of 10, so you know exactly what to do." },
+      { target: "timer-face", title: "Read the timer face", body: "The center shows remaining time, current mode, linked work, and logged minutes." },
+      { target: "timer-start", title: "Start, pause, resume", body: "This button starts the block. During a session it becomes Pause, then Resume." },
+      { target: "timer-save", title: "Save the session", body: "Save records the session. Without saving, the work will not appear in your history or stats." },
+      { target: "timer-reset", title: "Reset when needed", body: "Reset clears the current timer if you started the wrong block or need to abandon it." },
+      { target: "timer-advanced-toggle", title: "Optional session log", body: "Open this when you want to write what you learned, blockers, next steps, and confidence." },
+      { target: "timer-goal", title: "Set the goal", body: "A good goal says what should exist when the timer ends, not just what subject you will study." },
+      { target: "timer-learned", title: "Capture learning", body: "Write one sentence about what you learned. This can later become a Vault note." },
+      { target: "timer-blocker", title: "Name the blocker", body: "If something is still weak, write it here so the next session knows what to fix." },
+      { target: "timer-next-step", title: "Choose the next step", body: "This prevents the classic problem of ending a session and forgetting where to continue." },
+      { target: "timer-confidence", title: "Rate confidence", body: "Confidence is a quick self-check. Low confidence means the task may need revision soon." },
+      { target: "timer-session-log", title: "Recent sessions", body: "Saved sessions appear here and feed your Dashboard, statistics, and Vault draft context." },
+    ],
+  },
+  vault: {
+    title: "Vault",
+    purpose: "Use this page for markdown notes that stay compatible with Obsidian or any normal text editor.",
+    steps: [
+      "Create or link a vault folder.",
+      "Use Daily notes for session reflections.",
+      "Use References and Summaries for course material.",
+    ],
+    tour: [
+      { target: "vault-setup", title: "Open vault setup", body: "The Vault needs a folder before it can save notes. Setup is where you create or link that folder." },
+      { target: "vault-name", title: "Vault name", body: "This is the display name for your markdown vault. It can match your Obsidian vault name." },
+      { target: "vault-path", title: "Vault path", body: "This shows where notes will be written. If no path exists yet, create or link a vault." },
+      { target: "vault-create", title: "Create vault", body: "Create new vault makes a fresh folder structure for Daily, References, and Summaries." },
+      { target: "vault-link", title: "Link existing vault", body: "Use this if you already have an Obsidian vault or folder you want Study Tracker to write into." },
+      { target: "vault-markdown", title: "Markdown cheatsheet", body: "Markdown help shows examples for headings, lists, links, quotes, and code blocks." },
+      { target: "vault-spaces", title: "Switch vault spaces", body: "Daily is for study logs, References is for course notes, and Summaries is for PDFs or imported material." },
+      { target: "vault-daily-date", title: "Choose daily note date", body: "Daily notes are date-based. Pick the day you want to load, edit, or save." },
+      { target: "vault-load", title: "Load note", body: "Load reads the markdown file from disk if it already exists." },
+      { target: "vault-session-draft", title: "Use session draft", body: "This pulls your recent timer reflection into the note so you do not start from a blank page." },
+      { target: "vault-edit", title: "Edit note", body: "Edit opens the markdown editor. The preview lets you check how the note will read." },
+      { target: "vault-editor", title: "Editor and preview", body: "Write markdown on one side and preview it on the other. Save when the note is ready." },
+      { target: "vault-recent", title: "Recent exports", body: "Recently saved daily notes appear here so you can confirm what was written." },
+    ],
+  },
+  friends: {
+    title: "Social",
+    purpose: "Use this page to share finished sessions, compete on leaderboards, manage friends, and participate in squads.",
+    steps: [
+      "Finish a timer session first.",
+      "Share your latest session to the feed if you want accountability.",
+      "Use Friends, Leaderboard, and Squad when you want social motivation.",
+    ],
+    tour: [
+      { target: "social-nav", title: "Social sections", body: "The Social page is split into Feed, Leaderboard, Friends, Squad, and Profile. Each one supports a different motivation loop." },
+      { target: "social-feed-scope", title: "Choose feed scope", body: "Friends Feed is quieter and more personal. Global Feed shows more activity." },
+      { target: "social-refresh", title: "Refresh social data", body: "Refresh syncs feed posts, leaderboard data, friend requests, and squad updates." },
+      { target: "social-stories", title: "Study circle", body: "Stories show your friends and recent activity so the page feels alive without opening every profile." },
+      { target: "social-live", title: "Live activity", body: "This shows who was recently active. Use it as lightweight accountability." },
+      { target: "social-composer", title: "Share latest session", body: "After saving a timer session, this composer lets you post it with a note, image, or poll." },
+      { target: "social-note", title: "Write a short note", body: "One sentence is enough. You can also leave it blank and use the default post text." },
+      { target: "social-image", title: "Attach image", body: "Use this when you want to share a screenshot, whiteboard, or study proof." },
+      { target: "social-poll", title: "Create poll", body: "Polls are useful for quick questions, accountability checks, or deciding what to study next." },
+      { target: "social-post", title: "Post session", body: "Post publishes the latest saved study session. Finish and save a Timer session first." },
+      { target: "social-feed", title: "Read activity", body: "The feed shows sessions, milestones, comments, and reactions." },
+      { target: "social-leaderboard-tab", title: "Leaderboard", body: "Use Leaderboard when competition helps you study. You can compare friends, squads, or global activity." },
+      { target: "social-friends-tab", title: "Friends", body: "Use Friends to add people by code, accept requests, and build your study circle." },
+      { target: "social-squad-tab", title: "Squad", body: "Squads are for group motivation and longer-term competition." },
+      { target: "social-profile-tab", title: "Profile", body: "Profile controls how you appear to others, including avatar and badges." },
+    ],
+  },
+  break: {
+    title: "Break Room",
+    purpose: "Use this page for intentional breaks. Study time unlocks small rewards so breaks feel earned instead of accidental.",
+    steps: [
+      "Study with the Timer to gain XP.",
+      "Unlock or play a short break activity.",
+      "Track water, stretches, and achievements as quick reset cues.",
+    ],
+    tour: [
+      { target: "break-xp", title: "Break XP", body: "Study sessions fill this bar. The room rewards focus first, then breaks." },
+      { target: "break-games", title: "Break activities", body: "Each card is a short break option. Locked cards show how much more study time is needed." },
+      { target: "break-game-action", title: "Play or unlock", body: "Unlocked activities show Play. Locked activities show Unlock when you have earned enough XP." },
+      { target: "break-stats", title: "Break stats", body: "These chips show how many activities are unlocked and how many you already played today." },
+      { target: "break-water", title: "Water tracker", body: "Use this as a simple reset cue. One click adds a glass for today." },
+      { target: "break-achievements", title: "Achievements", body: "Achievements reward good break habits and consistent use." },
+      { target: "break-stretch", title: "Stretch prompt", body: "This gives you a quick physical reset idea. Refresh it if the current one does not fit." },
+      { target: "break-rock", title: "Pet rock", body: "A tiny playful interaction. It is intentionally low-stakes: click it, smile, then return to focus." },
+    ],
+  },
+};
+
+const helpExamples: Record<TabKey, HelpExample[]> = {
+  dashboard: [
+    { task: "Pick today's focus", unitLabel: "Step", total: 4, done: 1, next: 2, caption: "Open Dashboard, then inspect the top recommendation", result: "Next: Check urgent tasks", heading: "Fast daily workflow", tone: "c1" },
+    { task: "Read workload pressure", unitLabel: "Signal", total: 5, done: 3, next: 4, caption: "Health, urgent work, and exams tell you where pressure is building", result: "Next: Choose one task", heading: "Focus signals", tone: "c2" },
+    { task: "Review weekly rhythm", unitLabel: "Day", total: 7, done: 4, next: 5, caption: "Use the focus chart to see consistency without overthinking one bad day", result: "Next: Fill the next gap", heading: "Weekly check", tone: "c3" },
+  ],
+  planner: [
+    { task: "Watch lectures", unitLabel: "Lecture", total: 10, done: 3, next: 4, caption: "3 down, the glowing one is up next", result: "Next: Lecture 4 of 10", heading: "Three ways students use units", tone: "c1" },
+    { task: "Exercise sheets", unitLabel: "Sheet", total: 14, done: 6, next: 7, caption: "Halfway through the pile", result: "Next: Sheet 7 of 14", heading: "Three ways students use units", tone: "c2" },
+    { task: "Old exams", unitLabel: "Exam", total: 5, done: 1, next: 2, caption: "One solved, four to go", result: "Next: Exam 2 of 5", heading: "Three ways students use units", tone: "c3" },
+  ],
+  timer: [
+    { task: "Start a focus block", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Choose a preset, link work if useful, then start", result: "Next: Start timer", heading: "Common timer flows", tone: "c1" },
+    { task: "Link a task", unitLabel: "Field", total: 3, done: 1, next: 2, caption: "Semester, course, and task links make the session count in the right place", result: "Next: Pick course", heading: "Common timer flows", tone: "c2" },
+    { task: "Save a session", unitLabel: "Step", total: 5, done: 4, next: 5, caption: "Saving turns your focus block into dashboard stats and vault context", result: "Next: Save session", heading: "Common timer flows", tone: "c3" },
+  ],
+  vault: [
+    { task: "Create your vault", unitLabel: "Step", total: 3, done: 1, next: 2, caption: "Connect a folder once so notes save as normal markdown files", result: "Next: Link folder", heading: "Note-taking examples", tone: "c1" },
+    { task: "Write a daily note", unitLabel: "Part", total: 4, done: 2, next: 3, caption: "Daily notes can collect what you learned, blockers, and next steps", result: "Next: Add reflection", heading: "Note-taking examples", tone: "c2" },
+    { task: "Use markdown", unitLabel: "Format", total: 5, done: 3, next: 4, caption: "Headings, lists, links, and code blocks preview inside the app", result: "Next: Try a link", heading: "Note-taking examples", tone: "c3" },
+  ],
+  friends: [
+    { task: "Share a session", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Finish a timer block, write one sentence, then post it", result: "Next: Add note", heading: "Social examples", tone: "c1" },
+    { task: "Check accountability", unitLabel: "Space", total: 5, done: 1, next: 2, caption: "Feed, leaderboard, friends, squad, and profile each support a different kind of motivation", result: "Next: Open leaderboard", heading: "Social examples", tone: "c2" },
+    { task: "Build your circle", unitLabel: "Step", total: 3, done: 1, next: 2, caption: "Use friend codes and squads when you want focused competition", result: "Next: Add friend", heading: "Social examples", tone: "c3" },
+  ],
+  break: [
+    { task: "Earn a break", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Study time fills XP so breaks feel intentional, not accidental", result: "Next: Unlock activity", heading: "Break examples", tone: "c1" },
+    { task: "Reset properly", unitLabel: "Cue", total: 5, done: 3, next: 4, caption: "Use water, stretch prompts, and short games as a real reset", result: "Next: Drink water", heading: "Break examples", tone: "c2" },
+    { task: "Return to focus", unitLabel: "Step", total: 3, done: 2, next: 3, caption: "A good break ends by sending you back to the next focus block", result: "Next: Start timer", heading: "Break examples", tone: "c3" },
+  ],
+};
 
 const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
   { id: "daily", label: "Daily" },
@@ -1154,12 +1367,38 @@ type TaskDraft = {
   semesterId: string;
   courseId: string;
   title: string;
+  unitLabel: string;
   totalUnits: string;
   completedUnits: string;
   dueDate: string;
   priority: Priority;
   notes: string;
 };
+
+function inferUnitLabel(title: string) {
+  const normalized = title.toLowerCase();
+  if (normalized.includes("lecture")) return "Lecture";
+  if (normalized.includes("sheet") || normalized.includes("exercise")) return "Sheet";
+  if (normalized.includes("exam")) return "Exam";
+  if (normalized.includes("chapter")) return "Chapter";
+  if (normalized.includes("reading")) return "Reading";
+  return "Unit";
+}
+
+function cleanUnitLabel(label: string, title: string) {
+  return label.trim() || inferUnitLabel(title);
+}
+
+function formatUnitLabel(label: string, count: number) {
+  const clean = label.trim() || "Unit";
+  return count === 1 || clean.endsWith("s") ? clean.toLowerCase() : `${clean.toLowerCase()}s`;
+}
+
+function getNextUnitLabel(task: Task) {
+  const next = Math.min(task.totalUnits, Math.max(1, Math.floor(task.completedUnits) + 1));
+  const label = task.unitLabel || "Unit";
+  return task.completedUnits >= task.totalUnits ? `All ${formatUnitLabel(label, task.totalUnits)} done` : `Next: ${label} ${next} of ${task.totalUnits}`;
+}
 
 type ExamDraft = {
   semesterId: string;
@@ -2143,6 +2382,106 @@ function SummaryPdfViewer({ vaultPath, path, title }: { vaultPath: string; path:
   );
 }
 
+function GuidedTourOverlay({ help, stepIndex, onBack, onNext, onClose }: { help: PageHelp; stepIndex: number; onBack: () => void; onNext: () => void; onClose: () => void }) {
+  const step = help.tour[stepIndex];
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useLayoutEffect(() => {
+    if (!step) return undefined;
+
+    let frame = 0;
+    const updateRect = () => {
+      const target = document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
+      if (!target) {
+        setRect(null);
+        return;
+      }
+      frame = window.requestAnimationFrame(() => setRect(target.getBoundingClientRect()));
+    };
+
+    document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`)?.scrollIntoView({ block: "center", inline: "center", behavior: "smooth" });
+    updateRect();
+    window.addEventListener("resize", updateRect);
+    window.addEventListener("scroll", updateRect, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateRect);
+      window.removeEventListener("scroll", updateRect, true);
+    };
+  }, [step]);
+
+  if (!step) return null;
+
+  const highlightStyle = rect
+    ? ({ top: rect.top - 8, left: rect.left - 8, width: rect.width + 16, height: rect.height + 16 } as CSSProperties)
+    : undefined;
+  const bubbleStyle = rect
+    ? ({
+      top: Math.min(window.innerHeight - 220, Math.max(18, rect.bottom + 18)),
+      left: Math.min(window.innerWidth - 340, Math.max(18, rect.left)),
+    } as CSSProperties)
+    : undefined;
+  const arrowStyle = rect
+    ? ({ top: rect.bottom + 2, left: Math.min(window.innerWidth - 42, Math.max(26, rect.left + rect.width / 2)) } as CSSProperties)
+    : undefined;
+
+  return (
+    <div className="tour-layer" role="dialog" aria-modal="true" aria-label={`${help.title} tutorial`}>
+      <div className="tour-dim" />
+      {rect ? <div className="tour-highlight" style={highlightStyle} /> : null}
+      {rect ? <div className="tour-arrow" style={arrowStyle} /> : null}
+      <section className="tour-bubble" style={bubbleStyle}>
+        <div className="tour-progress">Step {stepIndex + 1} of {help.tour.length}</div>
+        <h3>{step.title}</h3>
+        <p>{step.body}</p>
+        {!rect ? <small className="tour-missing">This feature is not visible right now. Try opening the relevant section, or continue.</small> : null}
+        <div className="tour-actions">
+          <button type="button" className="ghost-button small-button" onClick={onClose}>Finish</button>
+          <button type="button" className="ghost-button small-button" onClick={onBack} disabled={stepIndex === 0}>Back</button>
+          <button type="button" onClick={onNext}>{stepIndex === help.tour.length - 1 ? "Done" : "Next"}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function HelpExampleCards({ examples }: { examples: HelpExample[] }) {
+  const heading = examples[0]?.heading ?? "Examples";
+  return (
+    <div className="planner-unit-examples">
+      <div className="help-example-heading">
+        <span>{heading}</span>
+        <hr />
+      </div>
+      <div className="hp-stack">
+        {examples.map((example) => {
+          const progress = Math.round((example.done / example.total) * 100);
+          return (
+            <article key={example.task} className={`hp-card ${example.tone}`}>
+              <div className="hp-head">
+                <span className="hp-task">{example.task}</span>
+                <span className="hp-unit">{example.unitLabel.toLowerCase()} · <b>{example.next}</b> next · {example.total} total</span>
+              </div>
+              <div className="hp-row" aria-label={`${example.done} completed, ${example.next} next, ${example.total} total`}>
+                {Array.from({ length: example.total }, (_, index) => {
+                  const unit = index + 1;
+                  const stateClass = unit <= example.done ? "done" : unit === example.next ? "next" : "";
+                  return <span key={unit} className={`hp-cell ${stateClass}`}>{unit}</span>;
+                })}
+              </div>
+              <p className="hp-caption">{example.caption} <span aria-hidden="true">-&gt;</span> <b>{example.result}</b></p>
+              <div className="hp-progress" aria-label={`${progress}% complete`}>
+                <span className="hp-pct">{progress}%</span>
+                <div className="hp-track"><div className="hp-fill" style={{ width: `${progress}%` }} /></div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -2168,6 +2507,8 @@ function App() {
   const [visibleTabsOptionsOpen, setVisibleTabsOptionsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
+  const [helpTab, setHelpTab] = useState<TabKey | null>(null);
+  const [tourState, setTourState] = useState<{ tab: TabKey; step: number } | null>(null);
   const [semesterName, setSemesterName] = useState("");
   const [courseDraft, setCourseDraft] = useState<CourseDraft>({
     semesterId: "",
@@ -2179,6 +2520,7 @@ function App() {
     semesterId: "",
     courseId: "",
     title: "",
+    unitLabel: "Unit",
     totalUnits: "10",
     completedUnits: "0",
     dueDate: "",
@@ -2213,6 +2555,7 @@ function App() {
     semesterId: "",
     courseId: "",
     title: "",
+    unitLabel: "Unit",
     totalUnits: "10",
     completedUnits: "0",
     dueDate: "",
@@ -3374,8 +3717,146 @@ function App() {
 
   function setActiveTab(activeTab: TabKey) {
     if (activeTab === "friends") setHasUnreadSocial(false);
+    setTourState(null);
     setState((current) => ({ ...current, activeTab }));
   }
+
+  function openPageHelp(tab: TabKey) {
+    setHelpTab(tab);
+    setTourState(null);
+  }
+
+  function ensurePlannerTutorialData() {
+    const createdAt = new Date().toISOString();
+    setState((current) => {
+      const hasSemester = current.semesters.some((semester) => semester.id === TUTORIAL_SEMESTER_ID);
+      const hasCourse = current.courses.some((course) => course.id === TUTORIAL_COURSE_ID);
+      const hasTask = current.tasks.some((task) => task.id === TUTORIAL_TASK_ID);
+
+      if (hasSemester && hasCourse && hasTask) return current;
+
+      const semesters = hasSemester
+        ? current.semesters
+        : [{ id: TUTORIAL_SEMESTER_ID, name: TUTORIAL_SEMESTER_NAME, createdAt }, ...current.semesters];
+      const courses = hasCourse
+        ? current.courses
+        : [{ id: TUTORIAL_COURSE_ID, semesterId: TUTORIAL_SEMESTER_ID, name: TUTORIAL_COURSE_NAME, targetGrade: 5, color: "#8fb4ff", createdAt }, ...current.courses];
+      const tasks = hasTask
+        ? current.tasks
+        : [{
+            id: TUTORIAL_TASK_ID,
+            semesterId: TUTORIAL_SEMESTER_ID,
+            courseId: TUTORIAL_COURSE_ID,
+            title: TUTORIAL_TASK_TITLE,
+            unitLabel: "Lecture",
+            totalUnits: 10,
+            completedUnits: 3,
+            dueDate: null,
+            priority: "medium" as Priority,
+            notes: "This task was created by the Planner tutorial. Remove it when you are done.",
+            createdAt,
+          }, ...current.tasks];
+
+      return { ...current, semesters, courses, tasks };
+    });
+    setExpandedSemesterIds((current) => (current.includes(TUTORIAL_SEMESTER_ID) ? current : [...current, TUTORIAL_SEMESTER_ID]));
+    setExpandedCourseIds((current) => (current.includes(TUTORIAL_COURSE_ID) ? current : [...current, TUTORIAL_COURSE_ID]));
+    setAddingCourseSemesterId(null);
+    setAddingTaskCourseId(null);
+    setSelectedTaskId(TUTORIAL_TASK_ID);
+  }
+
+  function startPageTour(tab: TabKey) {
+    setHelpTab(null);
+    if (tab === "planner") ensurePlannerTutorialData();
+    setActiveTab(tab);
+    setTourState({ tab, step: 0 });
+  }
+
+  const ensurePlannerTutorialDataForEffect = useEffectEvent(() => {
+    ensurePlannerTutorialData();
+  });
+
+  useEffect(() => {
+    if (!tourState) return;
+    const step = pageHelp[tourState.tab].tour[tourState.step];
+    if (!step) return;
+
+    const desiredTab = step.tab ?? tourState.tab;
+    if (state.activeTab !== desiredTab) {
+      setState((current) => ({ ...current, activeTab: desiredTab }));
+    }
+
+    if (desiredTab === "planner") {
+      if (tourState.tab === "planner") ensurePlannerTutorialDataForEffect();
+
+      if (step.target === "planner-semester-name" || step.target === "planner-create-semester") {
+        setShowSemesterForm(true);
+      }
+
+      const firstSemester = state.semesters.find((semester) => semester.id === TUTORIAL_SEMESTER_ID) ?? state.semesters[0];
+      const firstCourse = state.courses.find((course) => course.id === TUTORIAL_COURSE_ID) ?? (firstSemester ? state.courses.find((course) => course.semesterId === firstSemester.id) : null);
+      if (firstSemester && (step.target.startsWith("planner-add-course") || step.target.startsWith("planner-course"))) {
+        setExpandedSemesterIds((current) => (current.includes(firstSemester.id) ? current : [...current, firstSemester.id]));
+        setAddingCourseSemesterId(firstSemester.id);
+      }
+      if (firstSemester && firstCourse && (step.target.startsWith("planner-add-task") || step.target.startsWith("planner-task"))) {
+        setExpandedSemesterIds((current) => (current.includes(firstSemester.id) ? current : [...current, firstSemester.id]));
+        setExpandedCourseIds((current) => (current.includes(firstCourse.id) ? current : [...current, firstCourse.id]));
+        setAddingTaskCourseId(firstCourse.id);
+      }
+      if (firstSemester?.id === TUTORIAL_SEMESTER_ID) {
+        setExpandedSemesterIds((current) => (current.includes(TUTORIAL_SEMESTER_ID) ? current : [...current, TUTORIAL_SEMESTER_ID]));
+        setExpandedCourseIds((current) => (current.includes(TUTORIAL_COURSE_ID) ? current : [...current, TUTORIAL_COURSE_ID]));
+      }
+    }
+
+    if (desiredTab === "timer" && tourState.tab === "planner") {
+      setState((current) => ({
+        ...current,
+        timer: {
+          ...current.timer,
+          semesterId: TUTORIAL_SEMESTER_ID,
+          courseId: TUTORIAL_COURSE_ID,
+          taskId: TUTORIAL_TASK_ID,
+          goal: current.timer.goal || TUTORIAL_TASK_TITLE,
+        },
+      }));
+    }
+
+    if (desiredTab === "timer" && step.target === "timer-custom") {
+      setState((current) => ({
+        ...current,
+        timer: {
+          ...current.timer,
+          mode: "focus",
+          presetLabel: "Custom",
+        },
+      }));
+    }
+
+    if (desiredTab === "timer" && step.target.startsWith("timer-") && step.target !== "timer-presets" && step.target !== "timer-links" && step.target !== "timer-face" && step.target !== "timer-actions") {
+      setTimerAdvancedOpen(true);
+    }
+
+    if (desiredTab === "vault") {
+      if (step.target.startsWith("vault-setup") || step.target === "vault-name" || step.target === "vault-path" || step.target === "vault-create" || step.target === "vault-link") {
+        setVaultSetupOpen(true);
+      }
+      if (step.target.startsWith("vault-daily") || step.target === "vault-load" || step.target === "vault-session-draft" || step.target === "vault-edit" || step.target === "vault-editor" || step.target === "vault-recent") {
+        setVaultSpace("daily");
+      }
+      if (step.target === "vault-editor") setVaultDailyEditing(true);
+    }
+
+    if (desiredTab === "friends") {
+      if (step.target === "social-leaderboard-tab") setSocialSubtab("leaderboard");
+      else if (step.target === "social-friends-tab") setSocialSubtab("friends");
+      else if (step.target === "social-squad-tab") setSocialSubtab("squad");
+      else if (step.target === "social-profile-tab") setSocialSubtab("profile");
+      else setSocialSubtab("feed");
+    }
+  }, [tourState, state.activeTab, state.courses, state.semesters]);
 
   function updateFeedCommentNoticeFromFeeds(feedsByScope: Array<{ scope: SocialFeedScope; feed: SocialFeedPost[] }>) {
     const currentState = latestStateRef.current;
@@ -4911,7 +5392,7 @@ function App() {
     setSelectedTaskId(TOTAL_WORKLOAD_ID);
     setSemesterName("");
     setCourseDraft({ semesterId: "", name: "", targetGrade: "4.0", color: "#8fb4ff" });
-    setTaskDraft({ semesterId: "", courseId: "", title: "", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" });
+    setTaskDraft({ semesterId: "", courseId: "", title: "", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" });
     setExamDraft({ semesterId: "", courseId: "", title: "", examDate: "", weight: "40", preparedness: "35" });
     setShowSemesterForm(false);
     setExpandedSemesterIds([]);
@@ -5020,6 +5501,7 @@ function App() {
       semesterId: taskDraft.semesterId,
       courseId: taskDraft.courseId,
       title: taskDraft.title.trim(),
+      unitLabel: cleanUnitLabel(taskDraft.unitLabel, taskDraft.title),
       totalUnits: Math.max(1, Number(taskDraft.totalUnits) || 1),
       completedUnits: clamp(Number(taskDraft.completedUnits) || 0, 0, Number(taskDraft.totalUnits) || 1),
       dueDate: taskDraft.dueDate || null,
@@ -5032,6 +5514,7 @@ function App() {
     setTaskDraft((current) => ({
       ...current,
       title: "",
+      unitLabel: "Unit",
       totalUnits: "10",
       completedUnits: "0",
       dueDate: "",
@@ -5084,6 +5567,7 @@ function App() {
       semesterId: task.semesterId,
       courseId: task.courseId,
       title: task.title,
+      unitLabel: task.unitLabel || inferUnitLabel(task.title),
       totalUnits: task.totalUnits.toString(),
       completedUnits: task.completedUnits.toString(),
       dueDate: task.dueDate ?? "",
@@ -5102,6 +5586,7 @@ function App() {
     }
 
     const title = taskEditDraft.title.trim();
+    const unitLabel = cleanUnitLabel(taskEditDraft.unitLabel, title);
     const totalUnits = Math.max(1, Number(taskEditDraft.totalUnits) || 1);
     const completedUnits = clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
     setState((current) => ({
@@ -5111,6 +5596,7 @@ function App() {
           ? {
               ...task,
               title,
+              unitLabel,
               totalUnits,
               completedUnits,
               dueDate: taskEditDraft.dueDate || null,
@@ -6150,6 +6636,11 @@ function App() {
 
   const getCalendarEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
   const getCalendarEntryTitle = (entry: CalendarEntry) => getCalendarEntryTask(entry)?.title ?? entry.adHocTitle ?? "Calendar task";
+  const getCalendarEntryUnitLabel = (entry: CalendarEntry) => {
+    const task = getCalendarEntryTask(entry);
+    if (!task) return formatUnitAmount(getCalendarEntryAmount(entry));
+    return entry.unitAmount === 1 ? getNextUnitLabel(task).replace("Next: ", "") : `${formatUnitAmount(entry.unitAmount)} ${formatUnitLabel(task.unitLabel, 2)}`;
+  };
   const getCalendarEntryCourse = (entry: CalendarEntry) => {
     const task = getCalendarEntryTask(entry);
     return task ? courseLookup.get(task.courseId) ?? null : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) ?? null : null;
@@ -6219,8 +6710,8 @@ function App() {
           <>
             <div className="calendar-timeline-entry-copy">
               <strong>{getCalendarEntryTitle(entry)}</strong>
-              <span>{course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
-              <small>{formatTimeRange(entry)} · {formatUnitAmount(getCalendarEntryAmount(entry))}{task ? "" : " · calendar only"}</small>
+              <span>{getCalendarEntryUnitLabel(entry)} · {course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
+              <small>{formatTimeRange(entry)}{task ? "" : " · calendar only"}</small>
             </div>
             <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
             <div className="calendar-timeline-entry-actions">
@@ -6508,7 +6999,7 @@ function App() {
     const weekdayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     return (
-      <article className="panel-card planner-calendar-card">
+      <article className="panel-card planner-calendar-card" data-tour="planner-calendar">
         <div className="section-head planner-calendar-head">
           <div>
             <p className="eyebrow">Calendar</p>
@@ -6591,7 +7082,7 @@ function App() {
                         />
                         <span className="calendar-task-copy">
                           <span className="calendar-task-title">{getCalendarEntryTitle(entry)}</span>
-                          <span className="calendar-task-course">{course?.name ?? "No course"} · {formatUnitAmount(getCalendarEntryAmount(entry))}</span>
+                          <span className="calendar-task-course">{getCalendarEntryUnitLabel(entry)} · {course?.name ?? "No course"}</span>
                         </span>
                       </div>
                     );
@@ -6628,7 +7119,7 @@ function App() {
     const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
     const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
     return (
-      <article className="panel-card design-card design-today-card">
+      <article className="panel-card design-card design-today-card" data-tour="dashboard-today">
         <div className="design-today-top">
           <div className="design-today-focus-stat">
             <p className="eyebrow">Today · {todayLabel}</p>
@@ -6693,7 +7184,7 @@ function App() {
     };
 
     return (
-      <article className={`panel-card design-card design-weekly-card fossil-card ${rangeDensityClass} ${heightClass}`}>
+      <article className={`panel-card design-card design-weekly-card fossil-card ${rangeDensityClass} ${heightClass}`} data-tour="dashboard-weekly">
         <div className="fossil-card-grain" aria-hidden="true" />
 
         <div className="fossil-head">
@@ -6895,7 +7386,7 @@ function App() {
 
   function renderGardenCard(heightClass = "") {
     return (
-      <article className={`panel-card design-card design-garden-card ${heightClass}`}>
+      <article className={`panel-card design-card design-garden-card ${heightClass}`} data-tour="dashboard-garden">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Knowledge Garden</p>
@@ -6910,7 +7401,7 @@ function App() {
   function renderUrgentTasks(limit = 5) {
     const entries = todayCalendarEntries.slice(0, limit);
     return (
-      <article className="panel-card design-card design-priority-card">
+      <article className="panel-card design-card design-priority-card" data-tour="dashboard-urgent">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Do this next</p>
@@ -6939,6 +7430,7 @@ function App() {
                         <em className={`priority-chip ${entry.completed ? "low" : task?.priority ?? "medium"}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
                       </span>
                       <span className="design-task-meta">
+                        <span>{task ? getNextUnitLabel(task) : formatUnitAmount(getCalendarEntryAmount(entry))}</span>
                         <span>{course?.name ?? "General"}</span>
                         <span>{semester?.name ?? "No semester"}</span>
                         <span>{task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</span>
@@ -6954,7 +7446,7 @@ function App() {
                       title="Mark scheduled unit done"
                     />
                     {task ? (
-                      <button type="button" className="ghost-button small-button" onClick={() => focusTaskFromDashboard(task)}>
+                      <button type="button" className="ghost-button small-button" data-tour="dashboard-focus-button" onClick={() => focusTaskFromDashboard(task)}>
                         Focus
                       </button>
                     ) : null}
@@ -6972,7 +7464,7 @@ function App() {
 
   function renderCourseRadar() {
     return (
-      <article className="panel-card design-card design-course-radar">
+      <article className="panel-card design-card design-course-radar" data-tour="dashboard-course-radar">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Course radar</p>
@@ -7014,7 +7506,7 @@ function App() {
 
   function renderExamRunway() {
     return (
-      <article className="panel-card design-card design-exam-runway">
+      <article className="panel-card design-card design-exam-runway" data-tour="dashboard-exam-runway">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Exam runway</p>
@@ -7533,6 +8025,8 @@ function App() {
   }
 
   const showWindowTitlebar = isTauriApp();
+  const openHelp = helpTab ? pageHelp[helpTab] : null;
+  const activeTourHelp = tourState ? pageHelp[tourState.tab] : null;
 
   return (
     <>
@@ -7717,29 +8211,74 @@ function App() {
       ) : null}
 
       <nav className="tab-row" aria-label="Primary navigation">
-        {primaryTabs.filter(({ id }) => (state.settings.visibleTabs ?? defaultState.settings.visibleTabs)[id] !== false).map(({ id: key, label }) => (
-          <button
-            key={key}
-            className={`tab-button ${state.activeTab === key ? "active" : ""}`}
-            onClick={() => setActiveTab(key)}
-            type="button"
-          >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              {key === "dashboard" && <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 7h6V4h-6zM4 20h6v-3H4z" />}
-              {key === "planner" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M7 14h5M7 17h8" /></>}
-              {key === "timer" && <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M12 5V3M9 3h6" /></>}
-              {key === "vault" && <><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z" /><path d="M9 12l2 2 4-4" /></>}
-              {key === "friends" && <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.4 3-5 6-5s5.2 1.6 6 5" /><path d="M16 11a2.5 2.5 0 1 0 0-5" /><path d="M17 15c2.1.5 3.4 2 4 5" /></>}
-              {key === "break" && <><path d="M6 12h4M14 12h4M8 10V8M16 10V8" /><rect x="2" y="7" width="20" height="12" rx="3" /></>}
-            </svg>
-            {label}{key === "friends" && hasUnreadSocial ? <span className="nav-badge" /> : null}
-          </button>
-        ))}
+        <div className="tab-row-scroll">
+          {primaryTabs.filter(({ id }) => (state.settings.visibleTabs ?? defaultState.settings.visibleTabs)[id] !== false).map(({ id: key, label }) => (
+            <button
+              key={key}
+              className={`tab-button ${state.activeTab === key ? "active" : ""}`}
+              onClick={() => setActiveTab(key)}
+              type="button"
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                {key === "dashboard" && <path d="M4 13h6V4H4zM14 20h6v-9h-6zM14 7h6V4h-6zM4 20h6v-3H4z" />}
+                {key === "planner" && <><rect x="3" y="4" width="18" height="17" rx="2" /><path d="M3 9h18M8 2v4M16 2v4M7 14h5M7 17h8" /></>}
+                {key === "timer" && <><circle cx="12" cy="13" r="8" /><path d="M12 13V9M12 5V3M9 3h6" /></>}
+                {key === "vault" && <><path d="M12 2 4 6v6c0 5 3.4 8 8 10 4.6-2 8-5 8-10V6z" /><path d="M9 12l2 2 4-4" /></>}
+                {key === "friends" && <><circle cx="9" cy="8" r="3" /><path d="M3 20c.8-3.4 3-5 6-5s5.2 1.6 6 5" /><path d="M16 11a2.5 2.5 0 1 0 0-5" /><path d="M17 15c2.1.5 3.4 2 4 5" /></>}
+                {key === "break" && <><path d="M6 12h4M14 12h4M8 10V8M16 10V8" /><rect x="2" y="7" width="20" height="12" rx="3" /></>}
+              </svg>
+              {label}{key === "friends" && hasUnreadSocial ? <span className="nav-badge" /> : null}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="page-help-button tab-help-button" onClick={() => openPageHelp(state.activeTab)} aria-label={`Open ${pageHelp[state.activeTab].title} help`} title={`${pageHelp[state.activeTab].title} help`}>
+          ?
+        </button>
       </nav>
 
       {message ? <div className="message-banner">{message}</div> : null}
 
       {renderCalendarDayOverlay()}
+
+      {openHelp ? (
+        <div className="help-modal-backdrop" onMouseDown={() => setHelpTab(null)}>
+          <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${openHelp.title} help`}>
+            <div className="help-modal-head">
+              <div>
+                <p className="eyebrow">Page guide</p>
+                <h2>{openHelp.title}</h2>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => setHelpTab(null)} aria-label="Close page guide">X</button>
+            </div>
+            <p className="help-purpose">{openHelp.purpose}</p>
+            <div className="help-section">
+              <h3>Start here</h3>
+              <ol>
+                {openHelp.steps.map((step) => <li key={step}>{step}</li>)}
+              </ol>
+            </div>
+            {helpTab === "planner" ? <HelpExampleCards examples={helpExamples.planner} /> : null}
+            <div className="help-modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setHelpTab(null)}>Close</button>
+              <button type="button" className="help-tutorial-button" onClick={() => startPageTour(helpTab!)}>Start tutorial <span aria-hidden="true">-&gt;</span></button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {tourState && activeTourHelp ? (
+        <GuidedTourOverlay
+          help={activeTourHelp}
+          stepIndex={tourState.step}
+          onBack={() => setTourState((current) => current ? { ...current, step: Math.max(0, current.step - 1) } : current)}
+          onNext={() => setTourState((current) => {
+            if (!current) return current;
+            const nextStep = current.step + 1;
+            return nextStep >= pageHelp[current.tab].tour.length ? null : { ...current, step: nextStep };
+          })}
+          onClose={() => setTourState(null)}
+        />
+      ) : null}
 
       {state.activeTab === "dashboard" ? (
         <section className="dashboard-design fade-up">
@@ -7748,7 +8287,7 @@ function App() {
               <h2>{dashboardGreeting}</h2>
               <p>Here's what deserves your focus today.</p>
             </div>
-            <div className="layout-control" aria-label="Dashboard layout">
+            <div className="layout-control" aria-label="Dashboard layout" data-tour="dashboard-layout">
               <span className="eyebrow">Layout</span>
               {([
                 ["focus", "Focus"],
@@ -7832,25 +8371,27 @@ function App() {
 
       {state.activeTab === "planner" ? (
         <section className="planner-stack">
-          <article className="panel-card planner-board-panel">
+          <article className="panel-card planner-board-panel" data-tour="planner-semesters">
             <div className="section-head planner-header">
               <div>
                 <p className="eyebrow">Planner</p>
                 <h2>Semesters, courses, and tasks</h2>
                 <p className="section-note">Click a semester or course to expand it. Click it again to collapse.</p>
               </div>
-              <button type="button" className="ghost-button" onClick={() => setShowSemesterForm((current) => !current)}>
-                {showSemesterForm ? "Close" : "+ Add semester"}
-              </button>
+              <div className="page-head-actions">
+                <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
+                  {showSemesterForm ? "Close" : "+ Add semester"}
+                </button>
+              </div>
             </div>
 
             {showSemesterForm ? (
               <form className="inline-form-card" onSubmit={addSemester}>
                 <label className="field">
                   <span>Semester name</span>
-                  <input value={semesterName} onChange={(event) => setSemesterName(event.target.value)} placeholder="e.g. Semester 1 2026" />
+                  <input data-tour="planner-semester-name" value={semesterName} onChange={(event) => setSemesterName(event.target.value)} placeholder="e.g. Semester 1 2026" />
                 </label>
-                <button type="submit">Create semester</button>
+                <button type="submit" data-tour="planner-create-semester">Create semester</button>
               </form>
             ) : null}
 
@@ -7864,7 +8405,7 @@ function App() {
                   const semesterExams = state.exams.filter((exam) => exam.semesterId === semester.id);
 
                   return (
-                    <section key={semester.id} className={`semester-card ${semesterExpanded ? "open" : ""}`}>
+                    <section key={semester.id} className={`semester-card ${semesterExpanded ? "open" : ""}`} data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester" : undefined}>
                       <div className="semester-header-row">
                         <button type="button" className="accordion-toggle semester-toggle" onClick={() => toggleSemester(semester.id)}>
                           <span className="accordion-title-group">
@@ -7876,13 +8417,14 @@ function App() {
                         </button>
 
                         <div className="accordion-actions">
-                          <div className="mini-health">
+                          <div className="mini-health" data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester-health" : undefined}>
                             <strong>{semesterHealth.score}</strong>
                             <span>{semesterHealth.label}</span>
                           </div>
                           <button
                             type="button"
                             className="ghost-button small-button"
+                            data-tour="planner-add-course"
                             onClick={() => {
                               setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
                               setCourseDraft((current) => ({ ...current, semesterId: semester.id }));
@@ -7894,7 +8436,7 @@ function App() {
                           <button type="button" className="ghost-button small-button" onClick={() => startEditingSemester(semester)}>
                             Edit
                           </button>
-                          <button type="button" className="mini-danger" onClick={() => removeSemester(semester.id)}>
+                          <button type="button" className="mini-danger" data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester-remove" : undefined} onClick={() => removeSemester(semester.id)}>
                             Remove
                           </button>
                         </div>
@@ -7923,6 +8465,7 @@ function App() {
                                 <label className="field">
                                   <span>Course name</span>
                                   <input
+                                    data-tour="planner-course-name"
                                     value={courseDraft.name}
                                     onChange={(event) => setCourseDraft((current) => ({ ...current, name: event.target.value, semesterId: semester.id }))}
                                     placeholder="e.g. Numerical Methods"
@@ -7930,7 +8473,7 @@ function App() {
                                 </label>
                                 <label className="field">
                                   <span>Target grade</span>
-                                  <select value={courseDraft.targetGrade} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, targetGrade: event.target.value }))}>
+                                  <select data-tour="planner-course-target" value={courseDraft.targetGrade} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, targetGrade: event.target.value }))}>
                                     {swissGrades.map((grade) => (
                                       <option key={grade} value={grade.toString()}>
                                         {formatSwissGrade(grade)}
@@ -7944,7 +8487,7 @@ function App() {
                                 </label>
                               </div>
                               <div className="inline-form-actions">
-                                <button type="submit">Add course</button>
+                                <button type="submit" data-tour="planner-course-submit">Add course</button>
                                 <button type="button" className="ghost-button" onClick={() => setAddingCourseSemesterId(null)}>
                                   Cancel
                                 </button>
@@ -7960,7 +8503,7 @@ function App() {
                                 const courseExpanded = expandedCourseIds.includes(course.id);
 
                                 return (
-                                  <article key={course.id} className={`course-sheet ${courseExpanded ? "open" : ""}`}>
+                                  <article key={course.id} className={`course-sheet ${courseExpanded ? "open" : ""}`} data-tour={course.id === TUTORIAL_COURSE_ID ? "planner-tutorial-course" : undefined}>
                                     <div className="course-header-row">
                                       <button type="button" className="accordion-toggle course-toggle" onClick={() => toggleCourse(course.id)}>
                                         <div className="course-toggle-main">
@@ -7979,6 +8522,7 @@ function App() {
                                           <button
                                             type="button"
                                             className="ghost-button small-button"
+                                            data-tour="planner-add-task"
                                             onClick={() => {
                                               setExpandedSemesterIds((current) => (current.includes(semester.id) ? current : [...current, semester.id]));
                                               setExpandedCourseIds((current) => (current.includes(course.id) ? current : [...current, course.id]));
@@ -8005,7 +8549,7 @@ function App() {
                                           <button type="button" className="ghost-button small-button" onClick={() => startEditingCourse(course)}>
                                             Edit
                                           </button>
-                                          <button type="button" className="mini-danger" onClick={() => removeCourse(course.id)}>
+                                          <button type="button" className="mini-danger" data-tour={course.id === TUTORIAL_COURSE_ID ? "planner-tutorial-course-remove" : undefined} onClick={() => removeCourse(course.id)}>
                                             Remove
                                           </button>
                                         </div>
@@ -8051,22 +8595,31 @@ function App() {
                                               <label className="field task-title-field">
                                                 <span>Task title</span>
                                                 <input
+                                                  data-tour="planner-task-title"
                                                   value={taskDraft.title}
-                                                  onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, title: event.target.value }))}
+                                                  onChange={(event) => setTaskDraft((current) => {
+                                                    const title = event.target.value;
+                                                    const shouldInfer = !current.unitLabel.trim() || current.unitLabel === "Unit" || current.unitLabel === inferUnitLabel(current.title);
+                                                    return { ...current, semesterId: semester.id, courseId: course.id, title, unitLabel: shouldInfer ? inferUnitLabel(title) : current.unitLabel };
+                                                  })}
                                                   placeholder="Sheet 4, reading pack, chapter summary..."
                                                 />
                                               </label>
                                               <label className="field">
+                                                <span>Unit label</span>
+                                                <input data-tour="planner-task-unit-label" value={taskDraft.unitLabel} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
+                                              </label>
+                                              <label className="field">
                                                 <span>Total units</span>
-                                                <input type="number" min="1" value={taskDraft.totalUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, totalUnits: event.target.value }))} />
+                                                <input data-tour="planner-task-total" type="number" min="1" value={taskDraft.totalUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, totalUnits: event.target.value }))} />
                                               </label>
                                               <label className="field">
                                                 <span>Done</span>
-                                                <input type="number" min="0" value={taskDraft.completedUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, completedUnits: event.target.value }))} />
+                                                <input data-tour="planner-task-done" type="number" min="0" value={taskDraft.completedUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, completedUnits: event.target.value }))} />
                                               </label>
                                               <label className="field">
                                                 <span>Priority</span>
-                                                <select value={taskDraft.priority} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, priority: event.target.value as Priority }))}>
+                                                <select data-tour="planner-task-priority" value={taskDraft.priority} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, priority: event.target.value as Priority }))}>
                                                   <option value="high">High</option>
                                                   <option value="medium">Medium</option>
                                                   <option value="low">Low</option>
@@ -8076,6 +8629,7 @@ function App() {
                                                 <span>Due date (optional)</span>
                                                 <input
                                                   type="date"
+                                                  data-tour="planner-task-due"
                                                   value={taskDraft.dueDate}
                                                   onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, dueDate: event.target.value }))}
                                                   onKeyDown={confirmTaskDueDate}
@@ -8083,11 +8637,12 @@ function App() {
                                               </label>
                                               <label className="field task-notes-field">
                                                 <span>Notes</span>
-                                                <textarea value={taskDraft.notes} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
+                                                <textarea data-tour="planner-task-notes" value={taskDraft.notes} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
                                               </label>
                                             </div>
+                                            <p className="unit-label-hint">One unit means one piece of work: Lecture 1 of 10, Sheet 3 of 14, Exam 2 of 5.</p>
                                             <div className="inline-form-actions">
-                                              <button type="submit">Add task</button>
+                                              <button type="submit" data-tour="planner-task-submit">Add task</button>
                                               <button type="button" className="ghost-button" onClick={() => setAddingTaskCourseId(null)}>
                                                 Cancel
                                               </button>
@@ -8136,13 +8691,13 @@ function App() {
                                               const progress = getTaskProgress(task);
                                               return (
                                                 <div key={task.id}>
-                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`}>
+                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`} data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task" : "planner-task-row"}>
                                                     <div className="task-row-main">
                                                       <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
                                                         <strong>{task.title}</strong>
                                                       </button>
-                                                      <p>
-                                                        {task.completedUnits}/{task.totalUnits} units • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
+                                                      <p data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task-meta" : undefined}>
+                                                        {task.completedUnits}/{task.totalUnits} {formatUnitLabel(task.unitLabel, task.totalUnits)} • {getNextUnitLabel(task)} • {task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}
                                                       </p>
                                                     </div>
                                                     <div className="task-row-progress">
@@ -8154,7 +8709,7 @@ function App() {
                                                         <div className="health-fill" style={{ width: `${progress}%`, background: course.color }} />
                                                       </div>
                                                     </div>
-                                                    <div className="task-row-actions">
+                                                    <div className="task-row-actions" data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task-progress" : "planner-task-progress"}>
                                                       <button type="button" onClick={() => adjustTask(task.id, -1)}>
                                                         -
                                                       </button>
@@ -8167,6 +8722,7 @@ function App() {
                                                       <button
                                                         type="button"
                                                         className="ghost-button small-button"
+                                                        data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task-focus" : "planner-task-focus"}
                                                         onClick={() => {
                                                           setSelectedTaskId(task.id);
                                                           setState((current) => ({
@@ -8184,7 +8740,7 @@ function App() {
                                                       >
                                                         Focus
                                                       </button>
-                                                      <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>
+                                                      <button type="button" className="mini-danger" data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task-remove" : undefined} onClick={() => removeTask(task.id)}>
                                                         Remove
                                                       </button>
                                                     </div>
@@ -8194,7 +8750,15 @@ function App() {
                                                       <div className="inline-form-grid inline-form-grid-task">
                                                         <label className="field task-title-field">
                                                           <span>Task title</span>
-                                                          <input value={taskEditDraft.title} onChange={(event) => setTaskEditDraft((current) => ({ ...current, title: event.target.value }))} />
+                                                          <input value={taskEditDraft.title} onChange={(event) => setTaskEditDraft((current) => {
+                                                            const title = event.target.value;
+                                                            const shouldInfer = !current.unitLabel.trim() || current.unitLabel === "Unit" || current.unitLabel === inferUnitLabel(current.title);
+                                                            return { ...current, title, unitLabel: shouldInfer ? inferUnitLabel(title) : current.unitLabel };
+                                                          })} />
+                                                        </label>
+                                                        <label className="field">
+                                                          <span>Unit label</span>
+                                                          <input value={taskEditDraft.unitLabel} onChange={(event) => setTaskEditDraft((current) => ({ ...current, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
                                                         </label>
                                                         <label className="field">
                                                           <span>Total units</span>
@@ -8226,6 +8790,7 @@ function App() {
                                                           <textarea value={taskEditDraft.notes} onChange={(event) => setTaskEditDraft((current) => ({ ...current, notes: event.target.value }))} />
                                                         </label>
                                                       </div>
+                                                      <p className="unit-label-hint">This controls labels like {cleanUnitLabel(taskEditDraft.unitLabel, taskEditDraft.title)} {Math.min(Math.max(1, Number(taskEditDraft.completedUnits) + 1 || 1), Math.max(1, Number(taskEditDraft.totalUnits) || 1))} of {Math.max(1, Number(taskEditDraft.totalUnits) || 1)}.</p>
                                                       <div className="inline-form-actions">
                                                         <button type="submit">Save task</button>
                                                         <button type="button" className="ghost-button" onClick={() => setEditingTaskId(null)}>
@@ -8349,7 +8914,7 @@ function App() {
                       <div className="calculator-grid single-column-metrics">
                         <div>
                           <span>Remaining</span>
-                          <strong>{getRemainingUnits(selectedTask)} units</strong>
+                          <strong>{getRemainingUnits(selectedTask)} {formatUnitLabel(selectedTask.unitLabel, getRemainingUnits(selectedTask))}</strong>
                         </div>
                         <div>
                           <span>Days left</span>
@@ -8467,11 +9032,13 @@ function App() {
                 <p className="eyebrow">Focus Engine</p>
                 <h2>Start a focus block</h2>
               </div>
-              <span className="section-note">Keep the default view simple. Add course, task, and reflection only when you need it.</span>
+              <div className="page-head-actions">
+                <span className="section-note">Keep the default view simple. Add course, task, and reflection only when you need it.</span>
+              </div>
             </div>
 
             <div className="timer-board roomy-top">
-              <div className="timer-preset-cards">
+              <div className="timer-preset-cards" data-tour="timer-presets">
                 {focusPresets.map((preset) => (
                   <button
                     key={preset.label}
@@ -8513,10 +9080,11 @@ function App() {
                 </button>
               </div>
 
-              <div className="timer-link-strip">
+              <div className="timer-link-strip" data-tour="timer-links">
                 <label className="field compact-field">
                   <span>Semester</span>
                   <select
+                    data-tour="timer-semester-select"
                     value={state.timer.semesterId ?? ""}
                     onChange={(event) => {
                       const semesterId = event.target.value || null;
@@ -8536,6 +9104,7 @@ function App() {
                 <label className="field compact-field">
                   <span>Course</span>
                   <select
+                    data-tour="timer-course-select"
                     value={state.timer.courseId ?? ""}
                     onChange={(event) => {
                       const courseId = event.target.value || null;
@@ -8555,6 +9124,7 @@ function App() {
                 <label className="field compact-field task-switch-field">
                   <span>Task</span>
                   <select
+                    data-tour="timer-task-select"
                     value={state.timer.taskId ?? ""}
                     onChange={(event) => {
                       const taskId = event.target.value || null;
@@ -8580,7 +9150,7 @@ function App() {
               </div>
 
               {isCustomTimerPreset || state.timer.mode === "exam" ? (
-                <div className="timer-custom-row">
+                <div className="timer-custom-row" data-tour="timer-custom">
                   <label className="field compact-field">
                     <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
                     <input
@@ -8628,26 +9198,27 @@ function App() {
                 </div>
               ) : null}
 
-              <div className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
+              <div className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} data-tour="timer-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
                 <div className="timer-phase-row">
                   <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
-                  <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
+                  <span>{timerTask ? `${timerTask.title} · ${getNextUnitLabel(timerTask)}` : timerCourse?.name ?? "General focus"}</span>
                 </div>
                 <strong>{formatClock(state.timer.remainingSeconds)}</strong>
                 <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
               </div>
 
-              <div className="timer-action-row roomy-top">
+              <div className="timer-action-row roomy-top" data-tour="timer-actions">
                 <button
                   type="button"
                   className="timer-primary-action"
+                  data-tour="timer-start"
                   onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}
                 >
                   <span>{"\u25B7"}</span>
                   {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "Start tracking" : "Start") : state.timer.running ? "Pause" : "Resume"}
                 </button>
-                <button type="button" className="timer-save-action" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
+                <button type="button" className="timer-save-action" data-tour="timer-save" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
                   ▣ Save
                 </button>
                 {state.timer.running && state.timer.phase !== "idle" ? (
@@ -8655,7 +9226,7 @@ function App() {
                     ⛶
                   </button>
                 ) : null}
-                <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
+                <button type="button" className="timer-reset-action" data-tour="timer-reset" onClick={resetTimer} title="Reset">
                   ↻
                 </button>
               </div>
@@ -8689,7 +9260,7 @@ function App() {
               ) : null}
             </div>
 
-            <button type="button" className="timer-advanced-toggle ghost-button" onClick={() => setTimerAdvancedOpen((current) => !current)}>
+            <button type="button" className="timer-advanced-toggle ghost-button" data-tour="timer-advanced-toggle" onClick={() => setTimerAdvancedOpen((current) => !current)}>
               <span>✎ Session log & links</span>
               <em>optional</em>
               <strong>{timerAdvancedOpen ? "⌄" : "›"}</strong>
@@ -8829,6 +9400,7 @@ function App() {
                   <label className="field wide">
                     <span>Goal for this block</span>
                     <input
+                      data-tour="timer-goal"
                       value={state.timer.goal}
                       onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, goal: event.target.value } }))}
                       placeholder="What should exist when the timer ends?"
@@ -8837,6 +9409,7 @@ function App() {
                   <label className="field wide">
                     <span>What did you learn?</span>
                     <textarea
+                      data-tour="timer-learned"
                       value={state.timer.learned}
                       onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, learned: event.target.value } }))}
                       placeholder="Short reflection that can go straight into Obsidian later."
@@ -8845,6 +9418,7 @@ function App() {
                   <label className="field">
                     <span>What is still weak?</span>
                     <input
+                      data-tour="timer-blocker"
                       value={state.timer.blocker}
                       onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, blocker: event.target.value } }))}
                       placeholder="Weak topic or blocker"
@@ -8853,6 +9427,7 @@ function App() {
                   <label className="field">
                     <span>Next step</span>
                     <input
+                      data-tour="timer-next-step"
                       value={state.timer.nextStep}
                       onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, nextStep: event.target.value } }))}
                       placeholder="What comes next?"
@@ -8861,6 +9436,7 @@ function App() {
                   <label className="field">
                     <span>Confidence</span>
                     <input
+                      data-tour="timer-confidence"
                       type="range"
                       min="1"
                       max="5"
@@ -8875,7 +9451,7 @@ function App() {
             ) : null}
           </article>
 
-          <article className="panel-card session-log-card">
+          <article className="panel-card session-log-card" data-tour="timer-session-log">
             <div className="section-head">
               <div>
                 <p className="eyebrow">Recent Sessions</p>
@@ -8920,10 +9496,10 @@ function App() {
               {state.settings.vaultPath ? (
                 <span className="vault-status-pill"><span />{state.settings.vaultName || "Linked vault"}</span>
               ) : null}
-              <button type="button" className="ghost-button" onClick={() => setMarkdownCheatsheetOpen(true)}>
+              <button type="button" className="ghost-button" data-tour="vault-markdown" onClick={() => setMarkdownCheatsheetOpen(true)}>
                 Markdown
               </button>
-              <button type="button" className="ghost-button vault-settings-button" onClick={() => setVaultSetupOpen((current) => !current)}>
+              <button type="button" className="ghost-button vault-settings-button" data-tour="vault-setup" onClick={() => setVaultSetupOpen((current) => !current)}>
                 {vaultSetupOpen ? "Close setup" : "Vault setup"}
               </button>
             </div>
@@ -8983,8 +9559,8 @@ function App() {
               <h2>Connect your markdown vault</h2>
               <p className="section-note">Notes are saved as standard `.md` files you can open in Obsidian or any editor.</p>
               <div className="control-row roomy-top">
-                <button type="button" onClick={handleLinkVault}>Link existing vault</button>
-                <button type="button" className="ghost-button" onClick={handleCreateVault}>Create new vault</button>
+                <button type="button" data-tour="vault-link" onClick={handleLinkVault}>Link existing vault</button>
+                <button type="button" className="ghost-button" data-tour="vault-create" onClick={handleCreateVault}>Create new vault</button>
               </div>
             </article>
           ) : null}
@@ -9001,6 +9577,7 @@ function App() {
                 <label className="field">
                   <span>Vault name</span>
                   <input
+                    data-tour="vault-name"
                     value={state.settings.vaultName}
                     onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
                     placeholder="StudyTrackerVault"
@@ -9008,22 +9585,22 @@ function App() {
                 </label>
                 <label className="field wide">
                   <span>Current vault path</span>
-                  <input value={state.settings.vaultPath ?? "Not created yet"} readOnly />
+                  <input data-tour="vault-path" value={state.settings.vaultPath ?? "Not created yet"} readOnly />
                 </label>
               </div>
               <div className="vault-folder-strip" aria-label="Vault folders">
                 {["Daily", "References", "Summaries"].map((folder) => <span key={folder}>{folder}</span>)}
               </div>
               <div className="control-row left roomy-top">
-                <button type="button" onClick={handleCreateVault}>Create new vault</button>
-                <button type="button" className="ghost-button" onClick={handleLinkVault}>Link existing vault</button>
+                <button type="button" data-tour="vault-create" onClick={handleCreateVault}>Create new vault</button>
+                <button type="button" className="ghost-button" data-tour="vault-link" onClick={handleLinkVault}>Link existing vault</button>
               </div>
             </article>
           ) : null}
 
           {state.settings.vaultPath ? (
             <>
-              <nav className="vault-nav" aria-label="Vault spaces">
+              <nav className="vault-nav" aria-label="Vault spaces" data-tour="vault-spaces">
                 {vaultSpaces.map((space) => {
                   const active = space.id === vaultSpace;
                   return (
@@ -9040,13 +9617,14 @@ function App() {
               </nav>
 
               {vaultSpace === "daily" ? (
-                <div className="vault-space-panel">
+                <div className="vault-space-panel" data-tour="vault-editor">
                   <div className="vault-toolbar">
                     <div className="vault-toolbar-main">
                       <label className="vault-compact-field">
                         <span>Daily</span>
                         <input
                           type="date"
+                          data-tour="vault-daily-date"
                           value={vaultNoteDate}
                           onChange={(event) => {
                             setVaultNoteDate(event.target.value || localIsoDate());
@@ -9060,12 +9638,12 @@ function App() {
                       <span className="vault-path-chip">{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</span>
                     </div>
                     <div className="vault-toolbar-actions">
-                      <button type="button" className="ghost-button" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>{vaultNoteLoading ? "Working..." : "Load"}</button>
-                      <button type="button" className="ghost-button" onClick={handleUseGeneratedNote}>Use session draft</button>
+                      <button type="button" className="ghost-button" data-tour="vault-load" onClick={() => loadVaultNote()} disabled={vaultNoteLoading}>{vaultNoteLoading ? "Working..." : "Load"}</button>
+                      <button type="button" className="ghost-button" data-tour="vault-session-draft" onClick={handleUseGeneratedNote}>Use session draft</button>
                       {vaultDailyEditing ? (
-                        <button type="button" className="ghost-button" onClick={handleSaveVaultNote} disabled={vaultNoteLoading}>Save</button>
+                        <button type="button" className="ghost-button" data-tour="vault-save" onClick={handleSaveVaultNote} disabled={vaultNoteLoading}>Save</button>
                       ) : (
-                        <button type="button" className="ghost-button" onClick={() => setVaultDailyEditing(true)}>Edit</button>
+                        <button type="button" className="ghost-button" data-tour="vault-edit" onClick={() => setVaultDailyEditing(true)}>Edit</button>
                       )}
                       <span className="design-chip">{vaultNoteDirty ? "Unsaved" : "Saved"}</span>
                     </div>
@@ -9100,7 +9678,7 @@ function App() {
                         <div className="markdown-preview vault-prose">{renderMarkdownPreview(dailyPreviewContent)}</div>
                       </article>
 
-                      <div className="vault-recent-list">
+                      <div className="vault-recent-list" data-tour="vault-recent">
                         <p className="eyebrow">Recent exports</p>
                         {state.exports.length ? state.exports.slice(0, 4).map((item) => (
                           <div key={item.id} className="vault-recent-row">
@@ -9315,11 +9893,11 @@ function App() {
             <span className="arena-hero-sub">Compete. Focus. Rise.</span>
           </div>
 
-          <nav className="social-nav" aria-label="Social spaces">
+          <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
             {socialSubtabs.map((space) => {
               const active = space.id === socialSubtab;
               return (
-                <button key={space.id} type="button" className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
+                <button key={space.id} type="button" data-tour={`social-${space.id}-tab`} className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
                   {space.label}
                   {space.id === "friends" && incomingFriendRequestCount > 0 ? (
                     <span className="social-nav-request-badge" aria-label={`${incomingFriendRequestCount} incoming friend request${incomingFriendRequestCount === 1 ? "" : "s"}`}>
@@ -9334,18 +9912,18 @@ function App() {
 
           {socialSubtab === "feed" ? (
             <div className="social-feed-shell">
-              <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope">
+              <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope" data-tour="social-feed-scope">
                 {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
                   <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
                     {scope === "global" ? "Global Feed" : "Friends Feed"}
                   </button>
                 ))}
-                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" data-tour="social-refresh" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
                   {socialSyncing ? "Syncing..." : "Refresh"}
                 </button>
               </div>
 
-              <div className="stories" aria-label="Study circle stories">
+              <div className="stories" aria-label="Study circle stories" data-tour="social-stories">
                 <div className="story">
                   <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} avatar={state.social.avatar} self size="md" /></div>
                   <span>You</span>
@@ -9358,7 +9936,7 @@ function App() {
                 ))}
               </div>
 
-              <div className="live-bar">
+              <div className="live-bar" data-tour="social-live">
                 <span className="live-dot" />
                 <strong>{liveFriends.length ? `${liveFriends.length} friends` : "No friends"}</strong>
                 <span>recently active</span>
@@ -9375,21 +9953,21 @@ function App() {
                 </div>
               ) : null}
 
-              <form className="feed-composer" onSubmit={postLatestSessionToFeed}>
+              <form className="feed-composer" data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
                 <div>
                   <span className="arena-kicker">Share latest session</span>
                   <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
                   <p>{latestFeedSession ? "Write one sentence, or leave it blank for a chaotic default." : "Finish a study or exam block, then publish it here."}</p>
                 </div>
-                <input className="arena-input" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
+                <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
                 <div className="feed-composer-actions">
-                  <label className="feed-action-icon" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
+                  <label className="feed-action-icon" data-tour="social-image" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
                     <span aria-hidden="true">▧</span>
                   </label>
-                  <button type="button" className={`feed-action-icon ${feedPollHasDraft ? "feed-action-icon--active" : ""}`} onClick={() => setFeedPollPanelOpen((open) => !open)} disabled={!latestFeedSession || latestFeedSessionPosted} title="Create poll" aria-label="Create poll">◉</button>
+                  <button type="button" className={`feed-action-icon ${feedPollHasDraft ? "feed-action-icon--active" : ""}`} data-tour="social-poll" onClick={() => setFeedPollPanelOpen((open) => !open)} disabled={!latestFeedSession || latestFeedSessionPosted} title="Create poll" aria-label="Create poll">◉</button>
                 </div>
-                <button type="submit" className="arena-btn arena-btn--send" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
+                <button type="submit" className="arena-btn arena-btn--send" data-tour="social-post" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
                 {feedPollPanelOpen ? (
                   <div className="feed-poll-popover">
                     <div className="feed-poll-popover__head">
@@ -9424,7 +10002,7 @@ function App() {
                 ) : null}
               </form>
 
-              <div className="section-label">Activity {feedLoading ? "· Refreshing" : ""}</div>
+              <div className="section-label" data-tour="social-feed">Activity {feedLoading ? "· Refreshing" : ""}</div>
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
                 const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: item.avatar };
@@ -10270,10 +10848,12 @@ function App() {
                 <p className="eyebrow">Recharge</p>
                 <h2>Break Room</h2>
               </div>
-              <span className="section-note">{effectiveUnlocked.length} of 5 breaks available</span>
+              <div className="page-head-actions">
+                <span className="section-note">{effectiveUnlocked.length} of 5 breaks available</span>
+              </div>
             </div>
 
-            <div className="break-xp-bar-wrap">
+            <div className="break-xp-bar-wrap" data-tour="break-xp">
               <div className="break-xp-bar">
                 <div className="break-xp-fill" style={{ width: `${xpPercent}%` }} />
                 <div className="break-xp-tick" style={{ left: "25%" }} />
@@ -10288,7 +10868,7 @@ function App() {
 
             <p className="break-quote">{"\u201C"}{quote.text}{"\u201D"} — {quote.author}</p>
 
-            <div className="break-card-grid">
+            <div className="break-card-grid" data-tour="break-games">
               {studyBreakGames.map((game) => {
                 const unlocked = effectiveUnlocked.includes(game.name);
                 return (
@@ -10306,17 +10886,17 @@ function App() {
                         game.name === "Daily Durak" ? (
                           <div className="break-game-durak">
                             <span className="break-durak-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span>
-                            <button type="button" className="design-chip" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>
                               Play
                             </button>
                           </div>
                         ) : (
-                          <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" onClick={() => logPlayedBreak(game.name)}>
+                          <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>
                             Play
                           </a>
                         )
                       ) : canUnlockMore ? (
-                        <button type="button" className="break-unlock-btn" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>
+                        <button type="button" className="break-unlock-btn" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>
                           Unlock
                         </button>
                       ) : (
@@ -10328,13 +10908,13 @@ function App() {
               })}
             </div>
 
-            <div className="break-stats-row">
+            <div className="break-stats-row" data-tour="break-stats">
               <span className="break-stats-chip">{'\u{1F513}'} Unlocked {effectiveUnlocked.length}/5</span>
               <span className="break-stats-chip">{'\u25B6'} Played {todayPlayedNames.length} today</span>
               {badgeFullHouse ? <span className="break-stats-chip collection">{'\u{1F3C6}'} Full house!</span> : null}
             </div>
 
-            <div className="break-water-row">
+            <div className="break-water-row" data-tour="break-water">
               <button type="button" className="break-water-btn" onClick={addWater}>{'\u{1F4A7}'}</button>
               <span className="break-water-count">{waterCount} glass{waterCount !== 1 ? "es" : ""} today</span>
               <button type="button" className="break-water-btn plus" onClick={addWater}>+</button>
@@ -10342,7 +10922,7 @@ function App() {
 
             <div className="break-badge-heading">Achievements</div>
 
-            <div className="break-badge-row">
+            <div className="break-badge-row" data-tour="break-achievements">
               {badges.map(b => (
                 <div key={b.id} className={`break-badge ${b.earned ? "earned" : ""}`}>
                   <span>{b.icon}</span>
@@ -10351,7 +10931,7 @@ function App() {
               ))}
             </div>
 
-            <div className="break-stretch-card">
+            <div className="break-stretch-card" data-tour="break-stretch">
               <span className="stretch-icon">{'\u{1F9D8}'}</span>
               <span className="stretch-text">{stretch}</span>
               <button type="button" className="stretch-refresh" onClick={() => setStretchIndex(i => (i + 1) % stretchIdeas.length)}>
@@ -10359,7 +10939,7 @@ function App() {
               </button>
             </div>
 
-            <div className="break-pet-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.repeat) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patRock(); } }}>
+            <div className="break-pet-rock" data-tour="break-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(e) => { if (e.repeat) return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); patRock(); } }}>
               <div className="rock-area">
                 <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
                 {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}

@@ -380,6 +380,11 @@ function keepTimerContext(timer: TimerState) {
   };
 }
 
+function normalizeTaskUnitLabel(task: Partial<Task>) {
+  const label = typeof task.unitLabel === "string" ? task.unitLabel.trim() : "";
+  return label || "Unit";
+}
+
 function nextLocalMidnightAfter(date: Date) {
   const next = new Date(date);
   next.setHours(24, 0, 0, 0);
@@ -574,6 +579,7 @@ function migrateSemesters(parsed: Record<string, unknown>) {
   const tasks = rawTasks.map((task) => ({
     ...task,
     semesterId: task.semesterId ?? courseSemesterLookup.get(task.courseId) ?? importedSemesterId,
+    unitLabel: normalizeTaskUnitLabel(task),
   }));
 
   const exams = rawExams.map((exam) => ({
@@ -664,7 +670,7 @@ export function loadAppState(): AppState {
             targetGrade: typeof course.targetGrade === "number" && course.targetGrade >= 4 && course.targetGrade <= 6 ? course.targetGrade : 4,
           }))
         : [],
-      tasks: Array.isArray(migrated.tasks) ? migrated.tasks : [],
+      tasks: Array.isArray(migrated.tasks) ? migrated.tasks.map((task) => ({ ...task, unitLabel: normalizeTaskUnitLabel(task) })) : [],
       exams: Array.isArray(migrated.exams) ? migrated.exams : [],
       calendarEntries: normalizeCalendarEntries(parsed.calendarEntries),
       settings: {
