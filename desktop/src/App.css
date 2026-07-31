@@ -201,6 +201,11 @@
   margin-left: auto;
 }
 
+.menu-help-button {
+  width: 44px;
+  height: 44px;
+}
+
 .help-modal-backdrop,
 .tour-layer {
   position: fixed;
@@ -468,6 +473,31 @@
 .help-modal-actions {
   align-items: center;
   justify-content: flex-end;
+}
+
+.menu-help-list {
+  display: grid;
+  gap: 10px;
+}
+
+.menu-help-item {
+  display: grid;
+  gap: 5px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: color-mix(in oklch, var(--surface-2) 84%, transparent);
+  border: 1px solid var(--border);
+}
+
+.menu-help-item strong {
+  color: var(--text);
+  font-size: 0.98rem;
+}
+
+.menu-help-item span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .help-tutorial-button {
@@ -7038,6 +7068,15 @@ input[type="color"] {
   .timer-face {
     width: min(420px, calc(100% - 40px));
   }
+
+  .timer-context-title {
+    max-width: 145px;
+  }
+
+  .timer-context-unit {
+    max-width: 78%;
+    font-size: 0.66rem;
+  }
 }
 
 /* Planner geometry intentionally mirrors the previous full-width flow. */
@@ -7628,6 +7667,49 @@ input[type="color"] {
   height: 21px;
 }
 
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+  overflow: visible;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy {
+  max-height: none;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy strong {
+  font-size: 1rem;
+  line-height: 1.15;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy span,
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy small {
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-actions .small-button {
+  min-height: 34px;
+  padding: 7px 12px;
+}
+
 .calendar-resize-handle {
   position: absolute;
   right: 12px;
@@ -8116,7 +8198,7 @@ input[type="color"] {
 
 .dash-focus-claude .design-mini-metrics {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 22px;
+  gap: 16px;
 }
 
 .dash-focus-claude .design-mini-metrics > div {
@@ -8280,10 +8362,12 @@ input[type="color"] {
 }
 
 .timer-phase-row {
+  max-width: 82%;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  row-gap: 7px;
   flex-wrap: wrap;
   color: var(--ink-3);
   font-size: 0.95rem;
@@ -8300,6 +8384,29 @@ input[type="color"] {
   width: 10px;
   height: 10px;
   border-radius: 999px;
+  flex: 0 0 auto;
+}
+
+.timer-context-title {
+  min-width: 0;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timer-context-unit {
+  max-width: min(260px, 80%);
+  margin-top: -4px;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 82%, var(--ink-4));
+  font-family: var(--font-mono);
+  font-size: 0.57rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .timer-face strong {
@@ -8447,6 +8554,11 @@ input[type="color"] {
 
   .timer-face {
     width: min(420px, calc(100% - 40px));
+  }
+
+  .timer-context-unit {
+    max-width: 78%;
+    font-size: 0.55rem;
   }
 }
 

@@ -101,6 +101,7 @@ export interface Settings {
   backgroundEffect: boolean;
   hideFeedImages: boolean;
   hideFeedPolls: boolean;
+  showHelpButton: boolean;
   telemetryEnabled: boolean;
   vaultPath: string | null;
   vaultName: string;

@@ -523,6 +523,11 @@ type HelpExample = {
   tone: "c1" | "c2" | "c3";
 };
 
+type MenuHelpItem = {
+  title: string;
+  body: string;
+};
+
 const primaryTabs: Array<{ id: TabKey; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "planner", label: "Planner" },
@@ -530,6 +535,16 @@ const primaryTabs: Array<{ id: TabKey; label: string }> = [
   { id: "vault", label: "Vault" },
   { id: "break", label: "Break Room" },
   { id: "friends", label: "Social" },
+];
+
+const menuHelpItems: MenuHelpItem[] = [
+  { title: "Backup JSON", body: "Downloads a copy of your local Study Tracker data. Use it before big changes or when moving data manually." },
+  { title: "Change theme", body: "Opens color palettes and the light/dark mode selector. The small sun/moon button is the fastest light/dark toggle." },
+  { title: "Personal", body: "Set your display name and daily focus goal. The goal is used by Dashboard progress and daily study context." },
+  { title: "Options", body: "Control visual effects, social feed images and polls, the help/info buttons, telemetry, and which tabs appear in navigation." },
+  { title: "Settings", body: "Check app version, updates, install options, source update commands, and the dangerous delete-all-data action." },
+  { title: "Main tab bar", body: "The row below the header is primary navigation. It switches between Dashboard, Planner, Timer, Vault, Break Room, and Social." },
+  { title: "Page help", body: "The tab-bar question mark opens help for the current page. Its tutorial walks through that page step by step." },
 ];
 
 const TUTORIAL_SEMESTER_ID = "tutorial-semester";
@@ -2508,6 +2523,7 @@ function App() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
   const [helpTab, setHelpTab] = useState<TabKey | null>(null);
+  const [menuHelpOpen, setMenuHelpOpen] = useState(false);
   const [tourState, setTourState] = useState<{ tab: TabKey; step: number } | null>(null);
   const [semesterName, setSemesterName] = useState("");
   const [courseDraft, setCourseDraft] = useState<CourseDraft>({
@@ -3723,6 +3739,13 @@ function App() {
 
   function openPageHelp(tab: TabKey) {
     setHelpTab(tab);
+    setMenuHelpOpen(false);
+    setTourState(null);
+  }
+
+  function openMenuHelp() {
+    setMenuHelpOpen(true);
+    setHelpTab(null);
     setTourState(null);
   }
 
@@ -3951,6 +3974,16 @@ function App() {
       settings: {
         ...current.settings,
         hideFeedPolls: !current.settings.hideFeedPolls,
+      },
+    }));
+  }
+
+  function toggleHelpButton() {
+    setState((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        showHelpButton: current.settings.showHelpButton === false,
       },
     }));
   }
@@ -6713,15 +6746,31 @@ function App() {
               <span>{getCalendarEntryUnitLabel(entry)} · {course?.name ?? "General"}{semester ? ` · ${semester.name}` : ""}</span>
               <small>{formatTimeRange(entry)}{task ? "" : " · calendar only"}</small>
             </div>
-            <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
-            <div className="calendar-timeline-entry-actions">
-              <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
-                Edit
-              </button>
-              <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
-                Remove
-              </button>
-            </div>
+            {entry.startTime ? (
+              <>
+                <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
+                <div className="calendar-timeline-entry-actions">
+                  <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
+                    Edit
+                  </button>
+                  <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
+                    Remove
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="calendar-timeline-entry-footer">
+                <input className="calendar-timeline-checkbox" type="checkbox" checked={entry.completed} onChange={() => toggleCalendarEntry(entry.id)} title="Mark scheduled unit done" />
+                <div className="calendar-timeline-entry-actions">
+                  <button type="button" className="ghost-button small-button" onClick={() => startCalendarEntryEdit(entry)}>
+                    Edit
+                  </button>
+                  <button type="button" className="ghost-button small-button" disabled={entry.completed} onClick={() => removeCalendarEntry(entry.id)}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
             {entry.startTime ? (
               <div className="calendar-resize-handle" onMouseDown={(event) => startCalendarEntryResize(event, entry)} title="Drag to change duration" />
             ) : null}
@@ -7845,6 +7894,18 @@ function App() {
                 </label>
                 <label className="tab-toggle-row">
                   <span>
+                    <strong>Info button</strong>
+                    <small>{state.settings.showHelpButton === false ? "Hidden" : "Shown"} · the ? help button in the tab bar</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={state.settings.showHelpButton !== false}
+                    onChange={toggleHelpButton}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
+                <label className="tab-toggle-row">
+                  <span>
                     <strong>Anonymous usage telemetry</strong>
                     <small>{state.settings.telemetryEnabled ? "On" : "Off"} · shares only app version, platform, runtime channel, and last-opened time</small>
                   </span>
@@ -8104,6 +8165,11 @@ function App() {
               </svg>
             )}
           </button>
+          {state.settings.showHelpButton !== false ? (
+            <button type="button" className="page-help-button menu-help-button" onClick={openMenuHelp} aria-label="Open menu help" title="Menu help">
+              ?
+            </button>
+          ) : null}
           <div className="topbar-menu-wrap">
             <button
               type="button"
@@ -8231,9 +8297,11 @@ function App() {
             </button>
           ))}
         </div>
-        <button type="button" className="page-help-button tab-help-button" onClick={() => openPageHelp(state.activeTab)} aria-label={`Open ${pageHelp[state.activeTab].title} help`} title={`${pageHelp[state.activeTab].title} help`}>
-          ?
-        </button>
+        {state.settings.showHelpButton !== false ? (
+          <button type="button" className="page-help-button tab-help-button" onClick={() => openPageHelp(state.activeTab)} aria-label={`Open ${pageHelp[state.activeTab].title} help`} title={`${pageHelp[state.activeTab].title} help`}>
+            ?
+          </button>
+        ) : null}
       </nav>
 
       {message ? <div className="message-banner">{message}</div> : null}
@@ -8261,6 +8329,32 @@ function App() {
             <div className="help-modal-actions">
               <button type="button" className="ghost-button" onClick={() => setHelpTab(null)}>Close</button>
               <button type="button" className="help-tutorial-button" onClick={() => startPageTour(helpTab!)}>Start tutorial <span aria-hidden="true">-&gt;</span></button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {menuHelpOpen ? (
+        <div className="help-modal-backdrop" onMouseDown={() => setMenuHelpOpen(false)}>
+          <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Menu help">
+            <div className="help-modal-head">
+              <div>
+                <p className="eyebrow">App menu</p>
+                <h2>What the menu does</h2>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => setMenuHelpOpen(false)} aria-label="Close menu help">X</button>
+            </div>
+            <p className="help-purpose">Use the top-right menu for app-wide settings, backups, appearance, updates, and optional simplification. Page-specific help lives in the tab-bar question mark.</p>
+            <div className="menu-help-list">
+              {menuHelpItems.map((item) => (
+                <article key={item.title} className="menu-help-item">
+                  <strong>{item.title}</strong>
+                  <span>{item.body}</span>
+                </article>
+              ))}
+            </div>
+            <div className="help-modal-actions">
+              <button type="button" className="ghost-button" onClick={() => setMenuHelpOpen(false)}>Close</button>
             </div>
           </section>
         </div>
@@ -9202,10 +9296,11 @@ function App() {
                 <div className="timer-phase-row">
                   <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
-                  <span>{timerTask ? `${timerTask.title} · ${getNextUnitLabel(timerTask)}` : timerCourse?.name ?? "General focus"}</span>
+                  <span className="timer-context-title">{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
                 <strong>{formatClock(state.timer.remainingSeconds)}</strong>
                 <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
+                {timerTask ? <span className="timer-context-unit">{getNextUnitLabel(timerTask).replace("Next: ", "")}</span> : null}
               </div>
 
               <div className="timer-action-row roomy-top" data-tour="timer-actions">
