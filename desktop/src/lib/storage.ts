@@ -1,4 +1,5 @@
-import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, WordlePuzzleState } from "../types";
+import { getWordleAnswerForDate, getWordlePuzzleId, makeWordleSeedSalt } from "./wordle";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
@@ -12,6 +13,21 @@ const defaultVisibleTabs: Record<TabKey, boolean> = {
   friends: true,
   break: true,
 };
+
+function makeDefaultWordlePuzzle(): WordlePuzzleState {
+  const activeDate = todayIso();
+  const seedSalt = makeWordleSeedSalt();
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId: getWordlePuzzleId(activeDate, seedSalt),
+    answer: getWordleAnswerForDate(activeDate, seedSalt),
+    guesses: [],
+    completed: false,
+    won: false,
+    hardMode: false,
+  };
+}
 
 export function makeId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -303,6 +319,7 @@ export const defaultState: AppState = {
     completed: false,
     solvedCount: 0,
   },
+  wordlePuzzle: makeDefaultWordlePuzzle(),
 };
 
 function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerState["activeSegments"] {
@@ -639,6 +656,25 @@ function normalizeVisibleTabs(visibleTabs: unknown): Record<TabKey, boolean> {
   return Object.values(normalized).some(Boolean) ? normalized : defaultVisibleTabs;
 }
 
+function normalizeWordlePuzzle(puzzle: unknown): WordlePuzzleState {
+  if (!puzzle || typeof puzzle !== "object") return makeDefaultWordlePuzzle();
+  const record = puzzle as Partial<WordlePuzzleState> & Record<string, unknown>;
+  const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeWordleSeedSalt();
+  const activeDate = typeof record.activeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.activeDate) ? record.activeDate : todayIso();
+  const answer = typeof record.answer === "string" && /^[a-z]{5}$/.test(record.answer) ? record.answer : getWordleAnswerForDate(activeDate, seedSalt);
+  const guesses = Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string" && /^[a-z]{5}$/.test(guess)).slice(0, 6) : [];
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId: typeof record.puzzleId === "string" && record.puzzleId ? record.puzzleId : getWordlePuzzleId(activeDate, seedSalt),
+    answer,
+    guesses,
+    completed: Boolean(record.completed),
+    won: Boolean(record.won),
+    hardMode: Boolean(record.hardMode),
+  };
+}
+
 function normalizeActiveTab(activeTab: unknown, visibleTabs: Record<TabKey, boolean>): TabKey {
   if (typeof activeTab === "string" && activeTab in defaultVisibleTabs) {
     const tab = activeTab as TabKey;
@@ -684,6 +720,7 @@ export function loadAppState(): AppState {
         telemetryEnabled: Boolean(parsed.settings?.telemetryEnabled),
       },
       social: normalizeSocialState(parsed.social),
+      wordlePuzzle: normalizeWordlePuzzle(parsed.wordlePuzzle),
       timer: timerRecovery.timer,
       sessions: timerRecovery.sessions,
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],

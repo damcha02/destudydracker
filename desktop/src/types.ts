@@ -344,6 +344,17 @@ export interface DurakPuzzleState {
   solvedCount: number;
 }
 
+export interface WordlePuzzleState {
+  seedSalt: string;
+  activeDate: string;
+  puzzleId: string;
+  answer: string;
+  guesses: string[];
+  completed: boolean;
+  won: boolean;
+  hardMode: boolean;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -371,4 +382,5 @@ export interface AppState {
   waterDate: string;
   petRockPats: number;
   durakPuzzle: DurakPuzzleState;
+  wordlePuzzle: WordlePuzzleState;
 }

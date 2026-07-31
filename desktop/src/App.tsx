@@ -42,6 +42,7 @@ import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveA
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -2640,6 +2641,7 @@ function App() {
   const latestStateRef = useRef(state);
   const saveStateTimeoutRef = useRef<number | null>(null);
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
+  const wordleModalRef = useRef<HTMLDivElement | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
@@ -2708,8 +2710,11 @@ function App() {
   const [badgesOpen, setBadgesOpen] = useState(false);
   const canViewR2Usage = state.social.friendCode === R2_OWNER_FRIEND_CODE;
   const [showDurakPuzzle, setShowDurakPuzzle] = useState(false);
+  const [showWordlePuzzle, setShowWordlePuzzle] = useState(false);
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
+  const [wordleDraft, setWordleDraft] = useState("");
+  const [wordleMessage, setWordleMessage] = useState("");
   const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
 
   function getAppMetadata(): AppMetadata {
@@ -3447,6 +3452,14 @@ function App() {
     earned: state.petRockPats >= badge.threshold,
     how: `Pat the pet rock ${badge.label} times.`,
   }));
+  const wordleKeyboardState = getWordleKeyboardState(state.wordlePuzzle.guesses, state.wordlePuzzle.answer);
+  const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => {
+    const guess = state.wordlePuzzle.guesses[rowIndex];
+    if (guess) return scoreWordleGuess(guess, state.wordlePuzzle.answer);
+    const draft = rowIndex === state.wordlePuzzle.guesses.length ? wordleDraft : "";
+    return Array.from({ length: WORDLE_WORD_LENGTH }, (_, colIndex) => ({ letter: draft[colIndex] ?? "", state: null }));
+  });
+  const wordleHardModeLocked = state.wordlePuzzle.guesses.length > 0 && !state.wordlePuzzle.completed;
 
   useEffect(() => {
     const dailyHits = [
@@ -5265,6 +5278,37 @@ function App() {
     }
   }, [showDurakPuzzle]);
 
+  const initWordlePuzzle = useEffectEvent(() => {
+    const activeDate = localIsoDate();
+    const seedSalt = state.wordlePuzzle.seedSalt || makeWordleSeedSalt();
+    const puzzleId = getWordlePuzzleId(activeDate, seedSalt);
+    if (state.wordlePuzzle.activeDate === activeDate && state.wordlePuzzle.puzzleId === puzzleId && state.wordlePuzzle.answer) return;
+    setState((current) => ({
+      ...current,
+      wordlePuzzle: {
+        seedSalt,
+        activeDate,
+        puzzleId,
+        answer: getWordleAnswerForDate(activeDate, seedSalt),
+        guesses: [],
+        completed: false,
+        won: false,
+        hardMode: current.wordlePuzzle.hardMode,
+      },
+    }));
+    setWordleDraft("");
+    setWordleMessage("");
+  });
+
+  useEffect(() => {
+    if (showWordlePuzzle) initWordlePuzzle();
+  }, [showWordlePuzzle]);
+
+  useEffect(() => {
+    if (!showWordlePuzzle) return;
+    window.setTimeout(() => wordleModalRef.current?.focus(), 0);
+  }, [showWordlePuzzle]);
+
   async function installPendingUpdate() {
     if (!isTauriApp()) {
       openExternalLink(RELEASES_PAGE_URL);
@@ -5903,6 +5947,92 @@ function App() {
     if (!canSlide) return;
     handleDurakFinished(processCpuTurn(executeSlide(durakGameState, card)));
     setDurakSelected([]);
+  }
+
+  function submitWordleGuess() {
+    if (state.wordlePuzzle.completed) return;
+    const guess = normalizeWordleGuess(wordleDraft);
+    if (guess.length !== WORDLE_WORD_LENGTH) {
+      setWordleMessage("Enter 5 letters.");
+      return;
+    }
+    if (!isAcceptedWordleGuess(guess)) {
+      setWordleMessage("Not in the word list.");
+      return;
+    }
+    if (state.wordlePuzzle.hardMode) {
+      const violation = getWordleHardModeViolation(guess, state.wordlePuzzle.guesses, state.wordlePuzzle.answer);
+      if (violation) {
+        setWordleMessage(violation);
+        return;
+      }
+    }
+
+    setState((current) => {
+      if (current.wordlePuzzle.completed || current.wordlePuzzle.guesses.includes(guess)) return current;
+      const guesses = [...current.wordlePuzzle.guesses, guess];
+      const won = guess === current.wordlePuzzle.answer;
+      const completed = won || guesses.length >= WORDLE_MAX_GUESSES;
+      return {
+        ...current,
+        wordlePuzzle: {
+          ...current.wordlePuzzle,
+          guesses,
+          won,
+          completed,
+        },
+      };
+    });
+
+    if (guess === state.wordlePuzzle.answer) {
+      setWordleMessage(`Solved in ${state.wordlePuzzle.guesses.length + 1}.`);
+    } else if (state.wordlePuzzle.guesses.length + 1 >= WORDLE_MAX_GUESSES) {
+      setWordleMessage(`Answer: ${state.wordlePuzzle.answer.toUpperCase()}`);
+    } else {
+      setWordleMessage("");
+    }
+    setWordleDraft("");
+  }
+
+  function addWordleLetter(letter: string) {
+    if (state.wordlePuzzle.completed) return;
+    setWordleDraft((current) => normalizeWordleGuess(`${current}${letter}`).slice(0, WORDLE_WORD_LENGTH));
+    setWordleMessage("");
+  }
+
+  function handleWordleBackspace() {
+    if (state.wordlePuzzle.completed) return;
+    setWordleDraft((current) => current.slice(0, -1));
+    setWordleMessage("");
+  }
+
+  function handleWordleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      submitWordleGuess();
+      return;
+    }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      handleWordleBackspace();
+      return;
+    }
+    if (/^[a-z]$/i.test(event.key)) {
+      event.preventDefault();
+      addWordleLetter(event.key.toLowerCase());
+    }
+  }
+
+  function toggleWordleHardMode() {
+    if (wordleHardModeLocked) return;
+    setState((current) => ({
+      ...current,
+      wordlePuzzle: {
+        ...current.wordlePuzzle,
+        hardMode: !current.wordlePuzzle.hardMode,
+      },
+    }));
+    setWordleMessage("");
   }
 
   function addWater() {
@@ -10986,6 +11116,13 @@ function App() {
                               Play
                             </button>
                           </div>
+                        ) : game.name === "Wordle" ? (
+                          <div className="break-game-durak">
+                            {state.wordlePuzzle.completed ? <span className="break-durak-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : null}
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
                         ) : (
                           <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>
                             Play
@@ -11044,6 +11181,60 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {showWordlePuzzle ? (
+        <div className="wordle-overlay" onClick={() => setShowWordlePuzzle(false)} role="presentation">
+          <div ref={wordleModalRef} className="wordle-modal" onClick={(event) => event.stopPropagation()} onKeyDown={handleWordleKeyDown} role="dialog" aria-label="Daily Wordle puzzle" tabIndex={-1}>
+            <div className="wordle-head">
+              <div>
+                <p className="wordle-kicker">Daily Wordle</p>
+                <h2>Find the 5-letter word</h2>
+                <span>{WORDLE_ANSWER_COUNT.toLocaleString()} answers · {WORDLE_ACCEPTED_GUESS_COUNT.toLocaleString()} accepted guesses</span>
+              </div>
+              <div className="wordle-head-actions">
+                <button type="button" className={`wordle-hard-toggle ${state.wordlePuzzle.hardMode ? "active" : ""}`} onClick={toggleWordleHardMode} disabled={wordleHardModeLocked} aria-pressed={state.wordlePuzzle.hardMode}>
+                  <span>Hard mode</span>
+                  <strong>{state.wordlePuzzle.hardMode ? "On" : "Off"}</strong>
+                </button>
+                {wordleHardModeLocked ? <small className="wordle-hard-lock">Locked during puzzle</small> : null}
+                <button type="button" className="wordle-close-btn" onClick={() => setShowWordlePuzzle(false)} aria-label="Close Wordle puzzle">✕</button>
+              </div>
+            </div>
+
+            <div className="wordle-board" aria-label="Wordle guesses">
+              {wordleRows.map((row, rowIndex) => (
+                <div key={rowIndex} className="wordle-row">
+                  {row.map((cell, colIndex) => (
+                    <span key={`${rowIndex}-${colIndex}`} className={`wordle-tile ${cell.letter ? "filled" : ""} ${cell.state ? `wordle-tile--${cell.state}` : ""}`}>
+                      {cell.letter.toUpperCase()}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <div className="wordle-status">
+              {state.wordlePuzzle.completed ? (
+                state.wordlePuzzle.won ? `Solved in ${state.wordlePuzzle.guesses.length}.` : `The word was ${state.wordlePuzzle.answer.toUpperCase()}.`
+              ) : wordleMessage || "Type a guess, then press Enter."}
+            </div>
+
+            <div className="wordle-keyboard" aria-label="Wordle keyboard">
+              {["qwertyuiop", "asdfghjkl", "zxcvbnm"].map((row, rowIndex) => (
+                <div key={row} className="wordle-keyboard-row">
+                  {rowIndex === 2 ? <button type="button" className="wordle-key wide" onClick={submitWordleGuess}>Enter</button> : null}
+                  {row.split("").map((letter) => (
+                    <button key={letter} type="button" className={`wordle-key ${wordleKeyboardState[letter] ? `wordle-key--${wordleKeyboardState[letter]}` : ""}`} onClick={() => addWordleLetter(letter)} disabled={state.wordlePuzzle.completed}>
+                      {letter.toUpperCase()}
+                    </button>
+                  ))}
+                  {rowIndex === 2 ? <button type="button" className="wordle-key wide" onClick={handleWordleBackspace} disabled={state.wordlePuzzle.completed}>⌫</button> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {showDurakPuzzle ? (
