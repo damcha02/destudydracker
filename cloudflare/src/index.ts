@@ -2113,7 +2113,8 @@ async function handleAdminUsage(request: Request, env: Env) {
     `).first(),
     env.DB.prepare(`
       SELECT display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt,
-        device_label AS deviceLabel, app_version AS appVersion, app_platform AS appPlatform,
+        device_label AS deviceLabel, device_fingerprint_hash AS deviceFingerprintHash,
+        app_version AS appVersion, app_platform AS appPlatform,
         app_runtime_channel AS appRuntimeChannel, app_seen_at AS appSeenAt
       FROM users
       ORDER BY last_seen_at DESC

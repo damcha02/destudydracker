@@ -93,6 +93,8 @@ export function getWordleHardModeViolation(guess: string, previousGuesses: strin
   const normalizedGuess = normalizeWordleGuess(guess);
   const requiredPositions = new Map<number, string>();
   const requiredCounts = new Map<string, number>();
+  const eliminatedLetters = new Set<string>();
+  const revealedLetters = new Set<string>();
 
   previousGuesses.forEach((previousGuess) => {
     const scored = scoreWordleGuess(previousGuess, answer);
@@ -101,7 +103,10 @@ export function getWordleHardModeViolation(guess: string, previousGuesses: strin
     scored.forEach(({ letter, state }, index) => {
       if (state === "correct") requiredPositions.set(index, letter);
       if (state === "correct" || state === "present") {
+        revealedLetters.add(letter);
         revealedCounts.set(letter, (revealedCounts.get(letter) ?? 0) + 1);
+      } else {
+        eliminatedLetters.add(letter);
       }
     });
 
@@ -117,6 +122,10 @@ export function getWordleHardModeViolation(guess: string, previousGuesses: strin
   for (const [letter, count] of requiredCounts) {
     const actual = normalizedGuess.split("").filter((item) => item === letter).length;
     if (actual < count) return count === 1 ? `Guess must contain ${letter.toUpperCase()}.` : `Guess must contain ${count} ${letter.toUpperCase()}s.`;
+  }
+
+  for (const letter of eliminatedLetters) {
+    if (!revealedLetters.has(letter) && normalizedGuess.includes(letter)) return `${letter.toUpperCase()} has been eliminated.`;
   }
 
   return null;

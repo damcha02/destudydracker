@@ -2651,6 +2651,7 @@ function App() {
   const [updateNoticeSending, setUpdateNoticeSending] = useState(false);
   const [adminUsage, setAdminUsage] = useState<AdminUsageResponse | null>(null);
   const [adminUsageLoading, setAdminUsageLoading] = useState(false);
+  const [adminUsageOpen, setAdminUsageOpen] = useState(false);
   const [feedCommentNotice, setFeedCommentNotice] = useState<FeedCommentNotice | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
@@ -4913,12 +4914,29 @@ function App() {
     setAdminUsageLoading(true);
     try {
       setAdminUsage(await getAdminUsage(state.social));
+      setAdminUsageOpen(true);
     } catch (error: unknown) {
       console.warn("Could not load usage data.", error);
       setMessage(getErrorMessage(error, "Could not load usage data."));
     } finally {
       setAdminUsageLoading(false);
     }
+  }
+
+  function shortAdminId(value?: string | null) {
+    return value ? value.slice(0, 8) : "unknown";
+  }
+
+  function formatAdminTimestamp(value?: string | null) {
+    if (!value) return "Never";
+    const parsed = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return `${formatDate(parsed.toISOString())} ${parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  }
+
+  function formatLatestDevice(user: AdminUsageResponse["users"][number]) {
+    const label = user.deviceLabel || user.appPlatform || "unknown device";
+    return `${label} · device ${shortAdminId(user.deviceFingerprintHash)}`;
   }
 
   function savePersonalSettings(event: FormEvent<HTMLFormElement>) {
@@ -8035,18 +8053,6 @@ function App() {
                   />
                   <span className="ios-switch" aria-hidden="true" />
                 </label>
-                <label className="tab-toggle-row">
-                  <span>
-                    <strong>Anonymous usage telemetry</strong>
-                    <small>{state.settings.telemetryEnabled ? "On" : "Off"} · shares only app version, platform, runtime channel, and last-opened time</small>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={state.settings.telemetryEnabled}
-                    onChange={toggleTelemetry}
-                  />
-                  <span className="ios-switch" aria-hidden="true" />
-                </label>
               </div>
               <button
                 type="button"
@@ -8091,6 +8097,20 @@ function App() {
 
           {activeMenuPanel === "settings" ? (
             <div className="settings-panel-body settings-danger-zone">
+              <div className="tab-toggle-list">
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Anonymous usage telemetry</strong>
+                    <small>{state.settings.telemetryEnabled ? "On" : "Off"} · shares only app version, platform, runtime channel, and last-opened time</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={state.settings.telemetryEnabled}
+                    onChange={toggleTelemetry}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
+              </div>
               <div className={`settings-update-card ${updateInfo.status}`}>
                 <div>
                   <strong>Updates</strong>
@@ -8135,20 +8155,6 @@ function App() {
                       {adminUsageLoading ? "Loading..." : "Load usage data"}
                     </button>
                   </div>
-                  {adminUsage ? (
-                    <textarea
-                      className="linux-update-command"
-                      readOnly
-                      rows={10}
-                      value={[
-                        "Synced users:",
-                        ...adminUsage.users.map((user) => `${user.displayName} (${user.friendCode}) | seen ${user.lastSeenAt} | ${user.appVersion ?? "unknown version"} | ${user.deviceLabel ?? user.appPlatform ?? "unknown device"} | ${user.appRuntimeChannel ?? "unknown channel"}`),
-                        "",
-                        "Opt-in telemetry installs:",
-                        ...adminUsage.telemetry.map((install) => `${install.installId.slice(0, 8)}... | seen ${install.lastSeenAt} | ${install.appVersion || "unknown version"} | ${install.appPlatform || "unknown platform"} | ${install.appRuntimeChannel || "unknown channel"}`),
-                      ].join("\n")}
-                    />
-                  ) : null}
                 </div>
               ) : null}
               {linuxUpdateDownload ? (
@@ -8486,6 +8492,110 @@ function App() {
             </div>
             <div className="help-modal-actions">
               <button type="button" className="ghost-button" onClick={() => setMenuHelpOpen(false)}>Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {adminUsageOpen && adminUsage ? (
+        <div className="help-modal-backdrop" onMouseDown={() => setAdminUsageOpen(false)}>
+          <section className="help-modal admin-usage-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Usage and versions report">
+            <div className="help-modal-head">
+              <div>
+                <p className="eyebrow">Owner report</p>
+                <h2>Usage and versions</h2>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => setAdminUsageOpen(false)} aria-label="Close usage report">X</button>
+            </div>
+            <p className="help-purpose">Synced users, latest devices, app versions, and anonymous opt-in telemetry installs.</p>
+            <div className="admin-usage-summary-grid">
+              <article className="admin-usage-stat">
+                <span>Synced users</span>
+                <strong>{Number(adminUsage.summary?.userCount ?? 0)}</strong>
+              </article>
+              <article className="admin-usage-stat">
+                <span>Active 24h</span>
+                <strong>{Number(adminUsage.summary?.active24h ?? 0)}</strong>
+              </article>
+              <article className="admin-usage-stat">
+                <span>Active 7d</span>
+                <strong>{Number(adminUsage.summary?.active7d ?? 0)}</strong>
+              </article>
+              <article className="admin-usage-stat">
+                <span>Opt-in installs</span>
+                <strong>{adminUsage.telemetry.length}</strong>
+              </article>
+            </div>
+            <div className="admin-usage-section">
+              <div className="admin-usage-section-head">
+                <h3>Synced Users</h3>
+                <span>{adminUsage.users.length} latest rows</span>
+              </div>
+              <div className="admin-usage-table-wrap">
+                <table className="admin-usage-table">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Last Seen</th>
+                      <th>Version</th>
+                      <th>Latest Device</th>
+                      <th>Channel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminUsage.users.map((user) => (
+                      <tr key={user.friendCode}>
+                        <td data-label="User">
+                          <strong>{user.displayName || "Unknown"}</strong>
+                          <span>{user.friendCode}</span>
+                        </td>
+                        <td data-label="Last Seen">{formatAdminTimestamp(user.lastSeenAt)}</td>
+                        <td data-label="Version">{user.appVersion || "unknown"}</td>
+                        <td data-label="Latest Device">
+                          <span className="admin-usage-device-pill">{formatLatestDevice(user)}</span>
+                        </td>
+                        <td data-label="Channel">{user.appRuntimeChannel || "unknown"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="admin-usage-section">
+              <div className="admin-usage-section-head">
+                <h3>Opt-In Telemetry Installs</h3>
+                <span>{adminUsage.telemetry.length} latest rows</span>
+              </div>
+              <div className="admin-usage-table-wrap">
+                <table className="admin-usage-table">
+                  <thead>
+                    <tr>
+                      <th>Install</th>
+                      <th>Last Seen</th>
+                      <th>First Seen</th>
+                      <th>Version</th>
+                      <th>Platform</th>
+                      <th>Channel</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminUsage.telemetry.map((install) => (
+                      <tr key={install.installId}>
+                        <td data-label="Install"><span className="admin-usage-device-pill">{shortAdminId(install.installId)}</span></td>
+                        <td data-label="Last Seen">{formatAdminTimestamp(install.lastSeenAt)}</td>
+                        <td data-label="First Seen">{formatAdminTimestamp(install.createdAt)}</td>
+                        <td data-label="Version">{install.appVersion || "unknown"}</td>
+                        <td data-label="Platform">{install.appPlatform || "unknown"}</td>
+                        <td data-label="Channel">{install.appRuntimeChannel || "unknown"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="help-modal-actions">
+              <button type="button" className="ghost-button" onClick={() => void loadAdminUsage()} disabled={adminUsageLoading}>{adminUsageLoading ? "Refreshing..." : "Refresh"}</button>
+              <button type="button" onClick={() => setAdminUsageOpen(false)}>Close</button>
             </div>
           </section>
         </div>
@@ -11280,31 +11390,28 @@ function App() {
               ) : (
                 <div className="durak-table-grid">
                   {durakGameState.table.map((entry, i) => {
-                    const cpuCard = entry.attackBy === "cpu" ? entry.attack : (entry.defenseBy === "cpu" ? entry.defense : null);
-                    const playerCard = entry.attackBy === "player" ? entry.attack : (entry.defenseBy === "player" ? entry.defense : null);
                     const isActive = !entry.defense;
+                    const attacksOnTop = durakGameState.phase === "player_defense" ? true : durakGameState.phase === "cpu_defense" ? false : entry.attackBy === "cpu";
+                    const attackCard = (
+                      <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[entry.attack.suit] }}>
+                        <span className="durak-rank">{entry.attack.rank}</span>
+                        <span className="durak-suit">{SUIT_SYMBOL[entry.attack.suit]}</span>
+                      </div>
+                    );
+                    const defenseSlot = entry.defense ? (
+                      <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[entry.defense.suit] }}>
+                        <span className="durak-rank">{entry.defense.rank}</span>
+                        <span className="durak-suit">{SUIT_SYMBOL[entry.defense.suit]}</span>
+                      </div>
+                    ) : (
+                      <div className="durak-card durak-card--undefended">
+                        <span className="durak-card-empty">?</span>
+                      </div>
+                    );
                     return (
                       <div key={i} className={`durak-col ${isActive ? "durak-col--active" : ""}`}>
-                        {cpuCard ? (
-                          <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[cpuCard.suit] }}>
-                            <span className="durak-rank">{cpuCard.rank}</span>
-                            <span className="durak-suit">{SUIT_SYMBOL[cpuCard.suit]}</span>
-                          </div>
-                        ) : (
-                          <div className="durak-card durak-card--undefended">
-                            <span className="durak-card-empty">?</span>
-                          </div>
-                        )}
-                        {playerCard ? (
-                          <div className="durak-card durak-card--table" style={{ color: SUIT_COLOR[playerCard.suit] }}>
-                            <span className="durak-rank">{playerCard.rank}</span>
-                            <span className="durak-suit">{SUIT_SYMBOL[playerCard.suit]}</span>
-                          </div>
-                        ) : (
-                          <div className="durak-card durak-card--undefended">
-                            <span className="durak-card-empty">?</span>
-                          </div>
-                        )}
+                        {attacksOnTop ? attackCard : defenseSlot}
+                        {attacksOnTop ? defenseSlot : attackCard}
                       </div>
                     );
                   })}

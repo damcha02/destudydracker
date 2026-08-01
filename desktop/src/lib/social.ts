@@ -86,6 +86,7 @@ export interface AdminUsageResponse {
     friendCode: string;
     lastSeenAt: string;
     deviceLabel: string | null;
+    deviceFingerprintHash: string | null;
     appVersion: string | null;
     appPlatform: string | null;
     appRuntimeChannel: string | null;
