@@ -643,6 +643,7 @@ function normalizeCalendarEntries(entries: unknown): CalendarEntry[] {
       taskId: record.taskId,
       date: record.date,
       unitAmount,
+      unitStart: typeof record.unitStart === "number" && Number.isFinite(record.unitStart) ? record.unitStart : undefined,
       completed: Boolean(record.completed),
       completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),

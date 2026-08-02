@@ -1545,6 +1545,14 @@ function getCompletedCalendarWholeUnits(entries: CalendarEntry[], taskId: string
   return Math.floor(amount + 0.0001);
 }
 
+function compareCalendarEntriesForUnits(a: CalendarEntry, b: CalendarEntry) {
+  const dateCompare = a.date.localeCompare(b.date);
+  if (dateCompare) return dateCompare;
+  const timeCompare = (a.startTime ?? "").localeCompare(b.startTime ?? "");
+  if (timeCompare) return timeCompare;
+  return a.createdAt.localeCompare(b.createdAt);
+}
+
 function formatUnitAmount(amount: number) {
   if (amount === 1) return "1 unit";
   if (amount === 0.5) return "1/2 unit";
@@ -6200,6 +6208,17 @@ function App() {
         taskId: task.id,
         date: selectedCalendarDate,
         unitAmount: calendarAddDraft.unitAmount,
+        unitStart: Math.min(
+          task.totalUnits,
+          Math.max(
+            1,
+            Math.floor(
+              task.completedUnits
+              + (scheduledIncompleteByTask.get(task.id) ?? 0)
+              + (completedCalendarRemainderByTask.get(task.id) ?? 0),
+            ) + 1,
+          ),
+        ),
         completed: false,
         completedAt: null,
         createdAt: new Date().toISOString(),
@@ -6900,10 +6919,30 @@ function App() {
 
   const getCalendarEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
   const getCalendarEntryTitle = (entry: CalendarEntry) => getCalendarEntryTask(entry)?.title ?? entry.adHocTitle ?? "Calendar task";
+  const getCalendarEntryUnitStart = (entry: CalendarEntry, task: Task) => {
+    if (typeof entry.unitStart === "number" && Number.isFinite(entry.unitStart)) {
+      return clamp(Math.floor(entry.unitStart), 1, task.totalUnits);
+    }
+
+    const taskEntries = state.calendarEntries
+      .filter((item) => item.taskId === task.id)
+      .sort(compareCalendarEntriesForUnits);
+    const sequenceBase = clamp(task.completedUnits - getCompletedCalendarWholeUnits(state.calendarEntries, task.id), 0, task.totalUnits);
+    let amountBefore = 0;
+
+    for (const item of taskEntries) {
+      if (item.id === entry.id) break;
+      amountBefore += getCalendarEntryAmount(item);
+    }
+
+    return clamp(Math.floor(sequenceBase + amountBefore) + 1, 1, task.totalUnits);
+  };
   const getCalendarEntryUnitLabel = (entry: CalendarEntry) => {
     const task = getCalendarEntryTask(entry);
     if (!task) return formatUnitAmount(getCalendarEntryAmount(entry));
-    return entry.unitAmount === 1 ? getNextUnitLabel(task).replace("Next: ", "") : `${formatUnitAmount(entry.unitAmount)} ${formatUnitLabel(task.unitLabel, 2)}`;
+    return entry.unitAmount === 1
+      ? `${cleanUnitLabel(task.unitLabel, task.title)} ${getCalendarEntryUnitStart(entry, task)} of ${task.totalUnits}`
+      : `${formatUnitAmount(entry.unitAmount)} ${formatUnitLabel(task.unitLabel, 2)}`;
   };
   const getCalendarEntryCourse = (entry: CalendarEntry) => {
     const task = getCalendarEntryTask(entry);
@@ -7710,7 +7749,7 @@ function App() {
                         <em className={`priority-chip ${entry.completed ? "low" : task?.priority ?? "medium"}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
                       </span>
                       <span className="design-task-meta">
-                        <span>{task ? getNextUnitLabel(task) : formatUnitAmount(getCalendarEntryAmount(entry))}</span>
+                        <span>{getCalendarEntryUnitLabel(entry)}</span>
                         <span>{course?.name ?? "General"}</span>
                         <span>{semester?.name ?? "No semester"}</span>
                         <span>{task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</span>

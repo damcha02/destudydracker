@@ -59,6 +59,7 @@ export interface CalendarEntry {
   taskId: string;
   date: string;
   unitAmount: 1 | 0.5 | 0.25;
+  unitStart?: number;
   completed: boolean;
   completedAt: string | null;
   createdAt: string;
