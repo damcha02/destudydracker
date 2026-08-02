@@ -685,6 +685,7 @@ async function scoreSquadDate(env: Env, date: string) {
   const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name,
       COUNT(DISTINCT h.user_id) AS memberCount,
+      COUNT(DISTINCT CASE WHEN ds.minutes > 0 THEN h.user_id END) AS activeMemberCount,
       COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
       COALESCE(SUM(ds.sessions), 0) AS totalSessions
     FROM squads s
@@ -692,15 +693,16 @@ async function scoreSquadDate(env: Env, date: string) {
     LEFT JOIN daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
     GROUP BY s.id, s.name
     HAVING memberCount >= 2
-  `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; totalMinutes: number; totalSessions: number }>();
+  `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; activeMemberCount: number; totalMinutes: number; totalSessions: number }>();
 
   const ranked = rows.results
     .map((row) => ({
       ...row,
       memberCount: Number(row.memberCount),
+      activeMemberCount: Number(row.activeMemberCount),
       totalMinutes: Number(row.totalMinutes),
       totalSessions: Number(row.totalSessions),
-      averageMinutes: Number(row.memberCount) ? Number(row.totalMinutes) / Number(row.memberCount) : 0,
+      averageMinutes: Number(row.activeMemberCount) ? Number(row.totalMinutes) / Number(row.activeMemberCount) : 0,
     }))
     .sort((a, b) => b.averageMinutes - a.averageMinutes || b.totalMinutes - a.totalMinutes || a.name.localeCompare(b.name));
 
@@ -721,7 +723,7 @@ async function scoreSquadDate(env: Env, date: string) {
         rank = excluded.rank,
         points = excluded.points,
         scored_at = CURRENT_TIMESTAMP
-    `).bind(row.squadId, date, row.averageMinutes, row.totalMinutes, row.memberCount, rank, points);
+    `).bind(row.squadId, date, row.averageMinutes, row.totalMinutes, row.activeMemberCount, rank, points);
   })];
   await env.DB.batch(statements);
 }
@@ -754,6 +756,7 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
     const rows = await env.DB.prepare(`
       SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
         COUNT(DISTINCT sm.user_id) AS memberCount,
+        COUNT(DISTINCT CASE WHEN ds.minutes > 0 THEN sm.user_id END) AS activeMemberCount,
         COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
         COALESCE(SUM(ds.sessions), 0) AS totalSessions
       FROM squads s
@@ -761,15 +764,16 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
       LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
       GROUP BY s.id, s.name, s.is_private
       HAVING memberCount >= 2
-      ORDER BY CAST(totalMinutes AS REAL) / memberCount DESC, totalMinutes DESC, s.name ASC
+      ORDER BY CASE WHEN activeMemberCount > 0 THEN CAST(totalMinutes AS REAL) / activeMemberCount ELSE 0 END DESC, totalMinutes DESC, s.name ASC
       LIMIT 50
-    `).bind(date).all<{ squadId: string; squadName: string; isPrivate: number; memberCount: number; totalMinutes: number; totalSessions: number }>();
+    `).bind(date).all<{ squadId: string; squadName: string; isPrivate: number; memberCount: number; activeMemberCount: number; totalMinutes: number; totalSessions: number }>();
     let previousAverage: number | null = null;
     let previousRank = 0;
     return rows.results.map((row, index) => {
       const memberCount = Number(row.memberCount);
+      const activeMemberCount = Number(row.activeMemberCount);
       const totalMinutes = Number(row.totalMinutes);
-      const averageMinutes = memberCount ? totalMinutes / memberCount : 0;
+      const averageMinutes = activeMemberCount ? totalMinutes / activeMemberCount : 0;
       const rank = previousAverage !== null && averageMinutes === previousAverage ? previousRank : index + 1;
       previousAverage = averageMinutes;
       previousRank = rank;
@@ -863,11 +867,12 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
   const previousDayStats = await env.DB.prepare(`
     SELECT COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
       COALESCE(SUM(ds.sessions), 0) AS totalSessions,
-      COUNT(DISTINCT sm.user_id) AS memberCount
+      COUNT(DISTINCT sm.user_id) AS memberCount,
+      COUNT(DISTINCT CASE WHEN ds.minutes > 0 THEN sm.user_id END) AS activeMemberCount
     FROM squad_members sm
     LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
     WHERE sm.squad_id = ?
-  `).bind(yesterday, squadId).first<{ totalMinutes: number; totalSessions: number; memberCount: number }>();
+  `).bind(yesterday, squadId).first<{ totalMinutes: number; totalSessions: number; memberCount: number; activeMemberCount: number }>();
 
   const members = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
@@ -894,6 +899,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
 
   const memberCount = Number(squad.memberCount);
   const previousDayMemberCount = Number(previousDayStats?.memberCount ?? 0);
+  const previousDayActiveMemberCount = Number(previousDayStats?.activeMemberCount ?? 0);
   const previousDayTotalMinutes = Number(previousDayStats?.totalMinutes ?? 0);
   const action = userMembership
     ? userMembership.squadId === squadId ? "current" : "unavailable"
@@ -917,7 +923,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
     previousDayTotalMinutes,
     previousDayTotalSessions: Number(previousDayStats?.totalSessions ?? 0),
     previousDayMemberCount,
-    previousDayAverageMinutes: previousDayMemberCount ? previousDayTotalMinutes / previousDayMemberCount : 0,
+    previousDayAverageMinutes: previousDayActiveMemberCount ? previousDayTotalMinutes / previousDayActiveMemberCount : 0,
     action,
     members: members.results.map((member) => ({
       ...member,

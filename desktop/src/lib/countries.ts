@@ -1886,6 +1886,17 @@ export const COUNTRIES = [
     "government": "Republic"
   },
   {
+    "code": "TWN",
+    "name": "Taiwan",
+    "continent": "Asia",
+    "region": "Eastern Asia",
+    "population": 23570000,
+    "landlocked": false,
+    "areaKm2": 36193,
+    "religion": "Mixed",
+    "government": "Republic"
+  },
+  {
     "code": "TZA",
     "name": "Tanzania",
     "continent": "Africa",
