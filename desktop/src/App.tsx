@@ -42,6 +42,7 @@ import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveA
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { filterCountries, findCountryByName, GEODLE_COUNTRY_COUNT, GEODLE_MAX_GUESSES, getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt, scoreGeodleGuess } from "./lib/geodle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 
 type PdfJsModule = typeof import("pdfjs-dist");
@@ -326,7 +327,7 @@ const studyBreakGames = [
   { name: "Travle", url: "https://travle.earth", desc: "Travel from one country to another" },
   { name: "Flaggle", url: "https://flaggle.net", desc: "Identify the flag one clue at a time" },
   { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
-  { name: "Geodle", url: "https://geodle.me", desc: "Guess the location from a photo" },
+  { name: "Geodle", url: "", desc: "Guess the country from geography clues" },
 ];
 const STUDY_BREAK_GAME_COUNT = studyBreakGames.length;
 
@@ -2712,10 +2713,14 @@ function App() {
   const canViewR2Usage = state.social.friendCode === R2_OWNER_FRIEND_CODE;
   const [showDurakPuzzle, setShowDurakPuzzle] = useState(false);
   const [showWordlePuzzle, setShowWordlePuzzle] = useState(false);
+  const [showGeodlePuzzle, setShowGeodlePuzzle] = useState(false);
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
   const [wordleDraft, setWordleDraft] = useState("");
   const [wordleMessage, setWordleMessage] = useState("");
+  const [geodleDraft, setGeodleDraft] = useState("");
+  const [geodleDropdownOpen, setGeodleDropdownOpen] = useState(false);
+  const [geodleMessage, setGeodleMessage] = useState("");
   const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
 
   function getAppMetadata(): AppMetadata {
@@ -3461,6 +3466,11 @@ function App() {
     return Array.from({ length: WORDLE_WORD_LENGTH }, (_, colIndex) => ({ letter: draft[colIndex] ?? "", state: null }));
   });
   const wordleHardModeLocked = state.wordlePuzzle.guesses.length > 0 && !state.wordlePuzzle.completed;
+  const geodleOptions = filterCountries(geodleDraft).slice(0, 80);
+  const geodleRows = state.geodlePuzzle.guesses.map((guess) => ({ guess, clues: scoreGeodleGuess(guess, state.geodlePuzzle.answer) }));
+  const geodleGuessesLeft = Math.max(0, GEODLE_MAX_GUESSES - state.geodlePuzzle.guesses.length);
+  const wordlePuzzleIsToday = Boolean(state.wordlePuzzle.seedSalt && state.wordlePuzzle.activeDate === todayStr && state.wordlePuzzle.puzzleId === getWordlePuzzleId(todayStr, state.wordlePuzzle.seedSalt));
+  const geodlePuzzleIsToday = Boolean(state.geodlePuzzle.seedSalt && state.geodlePuzzle.activeDate === todayStr && state.geodlePuzzle.puzzleId === getGeodlePuzzleId(todayStr, state.geodlePuzzle.seedSalt));
 
   useEffect(() => {
     const dailyHits = [
@@ -5327,6 +5337,32 @@ function App() {
     window.setTimeout(() => wordleModalRef.current?.focus(), 0);
   }, [showWordlePuzzle]);
 
+  const initGeodlePuzzle = useEffectEvent(() => {
+    const activeDate = localIsoDate();
+    const seedSalt = state.geodlePuzzle.seedSalt || makeGeodleSeedSalt();
+    const puzzleId = getGeodlePuzzleId(activeDate, seedSalt);
+    if (state.geodlePuzzle.activeDate === activeDate && state.geodlePuzzle.puzzleId === puzzleId && state.geodlePuzzle.answer) return;
+    setState((current) => ({
+      ...current,
+      geodlePuzzle: {
+        seedSalt,
+        activeDate,
+        puzzleId,
+        answer: getGeodleAnswerForDate(activeDate, seedSalt),
+        guesses: [],
+        completed: false,
+        won: false,
+      },
+    }));
+    setGeodleDraft("");
+    setGeodleMessage("");
+    setGeodleDropdownOpen(false);
+  });
+
+  useEffect(() => {
+    if (showGeodlePuzzle) initGeodlePuzzle();
+  }, [showGeodlePuzzle]);
+
   async function installPendingUpdate() {
     if (!isTauriApp()) {
       openExternalLink(RELEASES_PAGE_URL);
@@ -6051,6 +6087,52 @@ function App() {
       },
     }));
     setWordleMessage("");
+  }
+
+  function selectGeodleCountry(name: string) {
+    setGeodleDraft(name);
+    setGeodleDropdownOpen(false);
+    setGeodleMessage("");
+  }
+
+  function submitGeodleGuess() {
+    if (state.geodlePuzzle.completed) return;
+    const country = findCountryByName(geodleDraft);
+    if (!country) {
+      setGeodleMessage("Select a country from the list.");
+      setGeodleDropdownOpen(true);
+      return;
+    }
+    if (state.geodlePuzzle.guesses.includes(country.name)) {
+      setGeodleMessage("You already guessed that country.");
+      return;
+    }
+
+    setState((current) => {
+      if (current.geodlePuzzle.completed || current.geodlePuzzle.guesses.includes(country.name)) return current;
+      const guesses = [...current.geodlePuzzle.guesses, country.name];
+      const won = country.name === current.geodlePuzzle.answer;
+      const completed = won || guesses.length >= GEODLE_MAX_GUESSES;
+      return {
+        ...current,
+        geodlePuzzle: {
+          ...current.geodlePuzzle,
+          guesses,
+          won,
+          completed,
+        },
+      };
+    });
+
+    if (country.name === state.geodlePuzzle.answer) {
+      setGeodleMessage(`Solved in ${state.geodlePuzzle.guesses.length + 1}.`);
+    } else if (state.geodlePuzzle.guesses.length + 1 >= GEODLE_MAX_GUESSES) {
+      setGeodleMessage(`Answer: ${state.geodlePuzzle.answer}.`);
+    } else {
+      setGeodleMessage("");
+    }
+    setGeodleDraft("");
+    setGeodleDropdownOpen(false);
   }
 
   function addWater() {
@@ -11228,8 +11310,15 @@ function App() {
                           </div>
                         ) : game.name === "Wordle" ? (
                           <div className="break-game-durak">
-                            {state.wordlePuzzle.completed ? <span className="break-durak-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : null}
+                            {wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="break-durak-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
                             <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
+                        ) : game.name === "Geodle" ? (
+                          <div className="break-game-durak">
+                            {geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="break-durak-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>
                               Play
                             </button>
                           </div>
@@ -11291,6 +11380,84 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {showGeodlePuzzle ? (
+        <div className="geodle-overlay" onClick={() => setShowGeodlePuzzle(false)} role="presentation">
+          <div className="geodle-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Daily Geodle puzzle">
+            <div className="geodle-head">
+              <div>
+                <p className="geodle-kicker">Daily Geodle</p>
+                <h2>Guess the country</h2>
+                <span>{GEODLE_COUNTRY_COUNT} countries · {geodleGuessesLeft} guess{geodleGuessesLeft === 1 ? "" : "es"} left</span>
+              </div>
+              <button type="button" className="geodle-close-btn" onClick={() => setShowGeodlePuzzle(false)} aria-label="Close Geodle puzzle">✕</button>
+            </div>
+
+            <div className="geodle-input-row">
+              <div className="geodle-combo">
+                <input
+                  value={geodleDraft}
+                  onChange={(event) => { setGeodleDraft(event.target.value); setGeodleDropdownOpen(true); setGeodleMessage(""); }}
+                  onFocus={() => setGeodleDropdownOpen(true)}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitGeodleGuess(); } }}
+                  placeholder="Country"
+                  disabled={state.geodlePuzzle.completed}
+                />
+                {geodleDraft ? <button type="button" className="geodle-input-icon" onClick={() => { setGeodleDraft(""); setGeodleDropdownOpen(true); }} aria-label="Clear country">×</button> : null}
+                <button type="button" className="geodle-input-icon geodle-input-icon--dropdown" onClick={() => setGeodleDropdownOpen((open) => !open)} aria-label="Show countries">▾</button>
+                {geodleDropdownOpen && !state.geodlePuzzle.completed ? (
+                  <div className="geodle-dropdown">
+                    {geodleOptions.length ? geodleOptions.map((country) => (
+                      <button key={country.code} type="button" onClick={() => selectGeodleCountry(country.name)}>
+                        <strong>{country.name}</strong>
+                        <span>{country.continent}</span>
+                      </button>
+                    )) : <p>No countries found.</p>}
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" className="geodle-submit" onClick={submitGeodleGuess} disabled={state.geodlePuzzle.completed}>Submit</button>
+            </div>
+
+            <div className="geodle-status">
+              {state.geodlePuzzle.completed ? (
+                state.geodlePuzzle.won ? `Solved in ${state.geodlePuzzle.guesses.length}.` : `The country was ${state.geodlePuzzle.answer}.`
+              ) : geodleMessage || "Use the clues after each guess to narrow it down."}
+            </div>
+
+            <div className="geodle-table-wrap">
+              <table className="geodle-table">
+                <thead>
+                  <tr>
+                    <th>Country</th>
+                    {scoreGeodleGuess(state.geodlePuzzle.answer, state.geodlePuzzle.answer).map((clue) => <th key={clue.label}>{clue.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {geodleRows.map((row) => (
+                    <tr key={row.guess}>
+                      <td className="geodle-country-cell">{row.guess}</td>
+                      {row.clues.map((clue) => (
+                        <td key={clue.label}>
+                          <span className={`geodle-clue geodle-clue--${clue.state}`} data-hint={clue.hint} tabIndex={0} aria-label={clue.hint}>
+                            {clue.state === "higher" ? "▲" : clue.state === "lower" ? "▼" : clue.state === "match" ? "✓" : clue.state === "close" ? "≈" : "×"}
+                            <small>{clue.value}</small>
+                          </span>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                  {!geodleRows.length ? (
+                    <tr>
+                      <td className="geodle-empty-row" colSpan={7}>No guesses yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {showWordlePuzzle ? (

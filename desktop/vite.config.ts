@@ -8,6 +8,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          if (id.endsWith('/src/lib/wordleWords.ts')) return 'game-wordle-words'
+          if (id.endsWith('/src/lib/countries.ts')) return 'game-countries'
+          if (id.endsWith('/src/lib/wordle.ts')) return 'game-wordle'
+          if (id.endsWith('/src/lib/geodle.ts')) return 'game-geodle'
           if (!id.includes('/node_modules/')) return undefined
           if (id.includes('/react/') || id.includes('/react-dom/')) return 'vendor-react'
           if (id.includes('/@tauri-apps/')) return 'vendor-tauri'

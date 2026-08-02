@@ -355,6 +355,16 @@ export interface WordlePuzzleState {
   hardMode: boolean;
 }
 
+export interface GeodlePuzzleState {
+  seedSalt: string;
+  activeDate: string;
+  puzzleId: string;
+  answer: string;
+  guesses: string[];
+  completed: boolean;
+  won: boolean;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -383,4 +393,5 @@ export interface AppState {
   petRockPats: number;
   durakPuzzle: DurakPuzzleState;
   wordlePuzzle: WordlePuzzleState;
+  geodlePuzzle: GeodlePuzzleState;
 }
