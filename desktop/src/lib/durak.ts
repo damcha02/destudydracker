@@ -537,11 +537,11 @@ export function solver(state: DurakGameState): WinResult {
       }
       case "cpu_defense": {
         const slideOpts = getLegalSlideCards(next, "cpu");
-        for (const sc of slideOpts) {
-          const ns = executeSlide(next, sc);
-          seq.push(`cpu slide ${cardToString(sc)}`);
+        if (slideOpts.length > 0) {
+          const ns = executeSlide(next, slideOpts[0]);
+          seq.push(`cpu slide ${cardToString(slideOpts[0])}`);
           if (dfs(ns, depth + 1)) return true;
-          seq.pop();
+          return false;
         }
         const n = cpuDefend(next);
         if (dfs(n, depth + 1)) return true;
@@ -606,26 +606,15 @@ export function solver(state: DurakGameState): WinResult {
         return false;
       }
       case "cpu_throw": {
-        const maxTotal = Math.min(6, next.table.length + next.playerHand.length);
-        const throws = getValidThrows(next.cpuHand, next.table, maxTotal);
-        if (throws.length === 0 || depth > 3) {
-          const n = clearTable(next);
-          n.phase = "player_attack";
+        const beforeLen = next.table.length;
+        const n = cpuThrowCards(next);
+        if (n.table.length > beforeLen) {
+          const thrown = n.table.slice(beforeLen);
+          seq.push(`cpu throws ${thrown.map(t => cardToString(t.attack)).join(",")}`);
+        } else {
           seq.push(`cpu passes throw`);
-          if (dfs(n, depth + 1)) return true;
-          seq.pop();
         }
-        for (const thr of throws) {
-          const n = copyState(next);
-          for (const card of thr) {
-            n.table.push({ attack: { ...card }, attackBy: "cpu" });
-            n.cpuHand = removeCard(n.cpuHand, card);
-          }
-          n.phase = "player_defense";
-          seq.push(`cpu throws ${thr.map(cardToString).join(",")}`);
-          if (dfs(n, depth + 1)) return true;
-          seq.pop();
-        }
+        if (dfs(n, depth + 1)) return true;
         return false;
       }
       case "finished":
