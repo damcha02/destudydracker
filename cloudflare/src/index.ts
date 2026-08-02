@@ -222,12 +222,12 @@ function yesterdayIso() {
   return addIsoDays(todayIso(), -1);
 }
 
-function weekStartIso() {
-  const date = new Date();
-  date.setUTCHours(0, 0, 0, 0);
-  const mondayOffset = (date.getUTCDay() + 6) % 7;
-  date.setUTCDate(date.getUTCDate() - mondayOffset);
-  return date.toISOString().slice(0, 10);
+function weekStartIso(date = new Date()) {
+  const today = serverDateIso(date);
+  const [year, month, day] = today.split("-").map(Number);
+  const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const mondayOffset = (dayOfWeek + 6) % 7;
+  return addIsoDays(today, -mondayOffset);
 }
 
 function friendPair(a: string, b: string) {

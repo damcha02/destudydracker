@@ -1,4 +1,5 @@
-import type { AppState, CalendarEntry, Course, Exam, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, WordlePuzzleState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, WordlePuzzleState } from "../types";
+import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getWordleAnswerForDate, getWordlePuzzleId, makeWordleSeedSalt } from "./wordle";
 
@@ -38,6 +39,20 @@ function makeDefaultGeodlePuzzle(): GeodlePuzzleState {
     activeDate,
     puzzleId: getGeodlePuzzleId(activeDate, seedSalt),
     answer: getGeodleAnswerForDate(activeDate, seedSalt),
+    guesses: [],
+    completed: false,
+    won: false,
+  };
+}
+
+function makeDefaultFlagglePuzzle(): FlagglePuzzleState {
+  const activeDate = todayIso();
+  const seedSalt = makeFlaggleSeedSalt();
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId: getFlagglePuzzleId(activeDate, seedSalt),
+    answer: getFlaggleAnswerForDate(activeDate, seedSalt),
     guesses: [],
     completed: false,
     won: false,
@@ -336,6 +351,7 @@ export const defaultState: AppState = {
   },
   wordlePuzzle: makeDefaultWordlePuzzle(),
   geodlePuzzle: makeDefaultGeodlePuzzle(),
+  flagglePuzzle: makeDefaultFlagglePuzzle(),
 };
 
 function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerState["activeSegments"] {
@@ -710,6 +726,29 @@ function normalizeGeodlePuzzle(puzzle: unknown): GeodlePuzzleState {
   };
 }
 
+function normalizeFlagglePuzzle(puzzle: unknown): FlagglePuzzleState {
+  if (!puzzle || typeof puzzle !== "object") return makeDefaultFlagglePuzzle();
+  const record = puzzle as Partial<FlagglePuzzleState> & Record<string, unknown>;
+  const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeFlaggleSeedSalt();
+  const activeDate = typeof record.activeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.activeDate) ? record.activeDate : todayIso();
+  const answer = typeof record.answer === "string" && record.answer ? record.answer : getFlaggleAnswerForDate(activeDate, seedSalt);
+  const guesses = Array.isArray(record.guesses) ? record.guesses.flatMap((guess): FlaggleGuess[] => {
+    if (!guess || typeof guess !== "object") return [];
+    const item = guess as Partial<FlaggleGuess>;
+    if (typeof item.country !== "string" || typeof item.maskedFlagDataUrl !== "string" || typeof item.similarity !== "number") return [];
+    return [{ country: item.country, similarity: item.similarity, maskedFlagDataUrl: item.maskedFlagDataUrl }];
+  }).slice(0, 7) : [];
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId: typeof record.puzzleId === "string" && record.puzzleId ? record.puzzleId : getFlagglePuzzleId(activeDate, seedSalt),
+    answer,
+    guesses,
+    completed: Boolean(record.completed),
+    won: Boolean(record.won),
+  };
+}
+
 function normalizeActiveTab(activeTab: unknown, visibleTabs: Record<TabKey, boolean>): TabKey {
   if (typeof activeTab === "string" && activeTab in defaultVisibleTabs) {
     const tab = activeTab as TabKey;
@@ -757,6 +796,7 @@ export function loadAppState(): AppState {
       social: normalizeSocialState(parsed.social),
       wordlePuzzle: normalizeWordlePuzzle(parsed.wordlePuzzle),
       geodlePuzzle: normalizeGeodlePuzzle(parsed.geodlePuzzle),
+      flagglePuzzle: normalizeFlagglePuzzle(parsed.flagglePuzzle),
       timer: timerRecovery.timer,
       sessions: timerRecovery.sessions,
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],

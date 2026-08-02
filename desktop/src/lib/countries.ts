@@ -3,6 +3,7 @@ export type CountryGovernment = "Republic" | "Federal republic" | "Constitutiona
 
 export interface CountryFact {
   code: string;
+  iso2: string;
   name: string;
   continent: string;
   region: string;
@@ -17,6 +18,7 @@ export interface CountryFact {
 export const COUNTRIES = [
   {
     "code": "AFG",
+    "iso2": "AF",
     "name": "Afghanistan",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -28,6 +30,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ALB",
+    "iso2": "AL",
     "name": "Albania",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -39,6 +42,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DZA",
+    "iso2": "DZ",
     "name": "Algeria",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -50,6 +54,7 @@ export const COUNTRIES = [
   },
   {
     "code": "AND",
+    "iso2": "AD",
     "name": "Andorra",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -61,6 +66,7 @@ export const COUNTRIES = [
   },
   {
     "code": "AGO",
+    "iso2": "AO",
     "name": "Angola",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -72,6 +78,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ATG",
+    "iso2": "AG",
     "name": "Antigua and Barbuda",
     "continent": "Americas",
     "region": "Caribbean",
@@ -83,6 +90,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ARG",
+    "iso2": "AR",
     "name": "Argentina",
     "continent": "Americas",
     "region": "South America",
@@ -94,6 +102,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ARM",
+    "iso2": "AM",
     "name": "Armenia",
     "continent": "Asia",
     "region": "Western Asia",
@@ -105,6 +114,7 @@ export const COUNTRIES = [
   },
   {
     "code": "AUS",
+    "iso2": "AU",
     "name": "Australia",
     "continent": "Oceania",
     "region": "Australia and New Zealand",
@@ -116,6 +126,7 @@ export const COUNTRIES = [
   },
   {
     "code": "AUT",
+    "iso2": "AT",
     "name": "Austria",
     "continent": "Europe",
     "region": "Central Europe",
@@ -127,6 +138,7 @@ export const COUNTRIES = [
   },
   {
     "code": "AZE",
+    "iso2": "AZ",
     "name": "Azerbaijan",
     "continent": "Asia",
     "region": "Western Asia",
@@ -138,6 +150,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BHS",
+    "iso2": "BS",
     "name": "Bahamas",
     "continent": "Americas",
     "region": "Caribbean",
@@ -149,6 +162,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BHR",
+    "iso2": "BH",
     "name": "Bahrain",
     "continent": "Asia",
     "region": "Western Asia",
@@ -160,6 +174,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BGD",
+    "iso2": "BD",
     "name": "Bangladesh",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -171,6 +186,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BRB",
+    "iso2": "BB",
     "name": "Barbados",
     "continent": "Americas",
     "region": "Caribbean",
@@ -182,6 +198,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BLR",
+    "iso2": "BY",
     "name": "Belarus",
     "continent": "Europe",
     "region": "Eastern Europe",
@@ -193,6 +210,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BEL",
+    "iso2": "BE",
     "name": "Belgium",
     "continent": "Europe",
     "region": "Western Europe",
@@ -204,6 +222,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BLZ",
+    "iso2": "BZ",
     "name": "Belize",
     "continent": "Americas",
     "region": "Central America",
@@ -215,6 +234,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BEN",
+    "iso2": "BJ",
     "name": "Benin",
     "continent": "Africa",
     "region": "Western Africa",
@@ -226,6 +246,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BTN",
+    "iso2": "BT",
     "name": "Bhutan",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -237,6 +258,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BOL",
+    "iso2": "BO",
     "name": "Bolivia",
     "continent": "Americas",
     "region": "South America",
@@ -248,6 +270,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BIH",
+    "iso2": "BA",
     "name": "Bosnia and Herzegovina",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -259,6 +282,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BWA",
+    "iso2": "BW",
     "name": "Botswana",
     "continent": "Africa",
     "region": "Southern Africa",
@@ -270,6 +294,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BRA",
+    "iso2": "BR",
     "name": "Brazil",
     "continent": "Americas",
     "region": "South America",
@@ -281,6 +306,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BRN",
+    "iso2": "BN",
     "name": "Brunei",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -292,6 +318,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BGR",
+    "iso2": "BG",
     "name": "Bulgaria",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -303,6 +330,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BFA",
+    "iso2": "BF",
     "name": "Burkina Faso",
     "continent": "Africa",
     "region": "Western Africa",
@@ -314,6 +342,7 @@ export const COUNTRIES = [
   },
   {
     "code": "BDI",
+    "iso2": "BI",
     "name": "Burundi",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -325,6 +354,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KHM",
+    "iso2": "KH",
     "name": "Cambodia",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -336,6 +366,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CMR",
+    "iso2": "CM",
     "name": "Cameroon",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -347,6 +378,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CAN",
+    "iso2": "CA",
     "name": "Canada",
     "continent": "Americas",
     "region": "North America",
@@ -358,6 +390,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CPV",
+    "iso2": "CV",
     "name": "Cape Verde",
     "continent": "Africa",
     "region": "Western Africa",
@@ -369,6 +402,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CAF",
+    "iso2": "CF",
     "name": "Central African Republic",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -380,6 +414,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TCD",
+    "iso2": "TD",
     "name": "Chad",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -391,6 +426,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CHL",
+    "iso2": "CL",
     "name": "Chile",
     "continent": "Americas",
     "region": "South America",
@@ -402,6 +438,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CHN",
+    "iso2": "CN",
     "name": "China",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -413,6 +450,7 @@ export const COUNTRIES = [
   },
   {
     "code": "COL",
+    "iso2": "CO",
     "name": "Colombia",
     "continent": "Americas",
     "region": "South America",
@@ -424,6 +462,7 @@ export const COUNTRIES = [
   },
   {
     "code": "COM",
+    "iso2": "KM",
     "name": "Comoros",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -435,6 +474,7 @@ export const COUNTRIES = [
   },
   {
     "code": "COG",
+    "iso2": "CG",
     "name": "Congo",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -446,6 +486,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CRI",
+    "iso2": "CR",
     "name": "Costa Rica",
     "continent": "Americas",
     "region": "Central America",
@@ -457,6 +498,7 @@ export const COUNTRIES = [
   },
   {
     "code": "HRV",
+    "iso2": "HR",
     "name": "Croatia",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -468,6 +510,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CUB",
+    "iso2": "CU",
     "name": "Cuba",
     "continent": "Americas",
     "region": "Caribbean",
@@ -479,6 +522,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CYP",
+    "iso2": "CY",
     "name": "Cyprus",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -490,6 +534,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CZE",
+    "iso2": "CZ",
     "name": "Czechia",
     "continent": "Europe",
     "region": "Central Europe",
@@ -501,6 +546,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DNK",
+    "iso2": "DK",
     "name": "Denmark",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -512,6 +558,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DJI",
+    "iso2": "DJ",
     "name": "Djibouti",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -523,6 +570,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DMA",
+    "iso2": "DM",
     "name": "Dominica",
     "continent": "Americas",
     "region": "Caribbean",
@@ -534,6 +582,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DOM",
+    "iso2": "DO",
     "name": "Dominican Republic",
     "continent": "Americas",
     "region": "Caribbean",
@@ -545,6 +594,7 @@ export const COUNTRIES = [
   },
   {
     "code": "COD",
+    "iso2": "CD",
     "name": "DR Congo",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -556,6 +606,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ECU",
+    "iso2": "EC",
     "name": "Ecuador",
     "continent": "Americas",
     "region": "South America",
@@ -567,6 +618,7 @@ export const COUNTRIES = [
   },
   {
     "code": "EGY",
+    "iso2": "EG",
     "name": "Egypt",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -578,6 +630,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SLV",
+    "iso2": "SV",
     "name": "El Salvador",
     "continent": "Americas",
     "region": "Central America",
@@ -589,6 +642,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GNQ",
+    "iso2": "GQ",
     "name": "Equatorial Guinea",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -600,6 +654,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ERI",
+    "iso2": "ER",
     "name": "Eritrea",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -611,6 +666,7 @@ export const COUNTRIES = [
   },
   {
     "code": "EST",
+    "iso2": "EE",
     "name": "Estonia",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -622,6 +678,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SWZ",
+    "iso2": "SZ",
     "name": "Eswatini",
     "continent": "Africa",
     "region": "Southern Africa",
@@ -633,6 +690,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ETH",
+    "iso2": "ET",
     "name": "Ethiopia",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -644,6 +702,7 @@ export const COUNTRIES = [
   },
   {
     "code": "FJI",
+    "iso2": "FJ",
     "name": "Fiji",
     "continent": "Oceania",
     "region": "Melanesia",
@@ -655,6 +714,7 @@ export const COUNTRIES = [
   },
   {
     "code": "FIN",
+    "iso2": "FI",
     "name": "Finland",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -666,6 +726,7 @@ export const COUNTRIES = [
   },
   {
     "code": "FRA",
+    "iso2": "FR",
     "name": "France",
     "continent": "Europe",
     "region": "Western Europe",
@@ -677,6 +738,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GAB",
+    "iso2": "GA",
     "name": "Gabon",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -688,6 +750,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GMB",
+    "iso2": "GM",
     "name": "Gambia",
     "continent": "Africa",
     "region": "Western Africa",
@@ -699,6 +762,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GEO",
+    "iso2": "GE",
     "name": "Georgia",
     "continent": "Asia",
     "region": "Western Asia",
@@ -710,6 +774,7 @@ export const COUNTRIES = [
   },
   {
     "code": "DEU",
+    "iso2": "DE",
     "name": "Germany",
     "continent": "Europe",
     "region": "Western Europe",
@@ -721,6 +786,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GHA",
+    "iso2": "GH",
     "name": "Ghana",
     "continent": "Africa",
     "region": "Western Africa",
@@ -732,6 +798,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GRC",
+    "iso2": "GR",
     "name": "Greece",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -743,6 +810,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GRD",
+    "iso2": "GD",
     "name": "Grenada",
     "continent": "Americas",
     "region": "Caribbean",
@@ -754,6 +822,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GTM",
+    "iso2": "GT",
     "name": "Guatemala",
     "continent": "Americas",
     "region": "Central America",
@@ -765,6 +834,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GIN",
+    "iso2": "GN",
     "name": "Guinea",
     "continent": "Africa",
     "region": "Western Africa",
@@ -776,6 +846,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GNB",
+    "iso2": "GW",
     "name": "Guinea-Bissau",
     "continent": "Africa",
     "region": "Western Africa",
@@ -787,6 +858,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GUY",
+    "iso2": "GY",
     "name": "Guyana",
     "continent": "Americas",
     "region": "South America",
@@ -798,6 +870,7 @@ export const COUNTRIES = [
   },
   {
     "code": "HTI",
+    "iso2": "HT",
     "name": "Haiti",
     "continent": "Americas",
     "region": "Caribbean",
@@ -809,6 +882,7 @@ export const COUNTRIES = [
   },
   {
     "code": "HND",
+    "iso2": "HN",
     "name": "Honduras",
     "continent": "Americas",
     "region": "Central America",
@@ -820,6 +894,7 @@ export const COUNTRIES = [
   },
   {
     "code": "HUN",
+    "iso2": "HU",
     "name": "Hungary",
     "continent": "Europe",
     "region": "Central Europe",
@@ -831,6 +906,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ISL",
+    "iso2": "IS",
     "name": "Iceland",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -842,6 +918,7 @@ export const COUNTRIES = [
   },
   {
     "code": "IND",
+    "iso2": "IN",
     "name": "India",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -853,6 +930,7 @@ export const COUNTRIES = [
   },
   {
     "code": "IDN",
+    "iso2": "ID",
     "name": "Indonesia",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -864,6 +942,7 @@ export const COUNTRIES = [
   },
   {
     "code": "IRN",
+    "iso2": "IR",
     "name": "Iran",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -875,6 +954,7 @@ export const COUNTRIES = [
   },
   {
     "code": "IRQ",
+    "iso2": "IQ",
     "name": "Iraq",
     "continent": "Asia",
     "region": "Western Asia",
@@ -886,6 +966,7 @@ export const COUNTRIES = [
   },
   {
     "code": "IRL",
+    "iso2": "IE",
     "name": "Ireland",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -897,6 +978,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ISR",
+    "iso2": "IL",
     "name": "Israel",
     "continent": "Asia",
     "region": "Western Asia",
@@ -908,6 +990,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ITA",
+    "iso2": "IT",
     "name": "Italy",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -919,6 +1002,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CIV",
+    "iso2": "CI",
     "name": "Ivory Coast",
     "continent": "Africa",
     "region": "Western Africa",
@@ -930,6 +1014,7 @@ export const COUNTRIES = [
   },
   {
     "code": "JAM",
+    "iso2": "JM",
     "name": "Jamaica",
     "continent": "Americas",
     "region": "Caribbean",
@@ -941,6 +1026,7 @@ export const COUNTRIES = [
   },
   {
     "code": "JPN",
+    "iso2": "JP",
     "name": "Japan",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -952,6 +1038,7 @@ export const COUNTRIES = [
   },
   {
     "code": "JOR",
+    "iso2": "JO",
     "name": "Jordan",
     "continent": "Asia",
     "region": "Western Asia",
@@ -963,6 +1050,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KAZ",
+    "iso2": "KZ",
     "name": "Kazakhstan",
     "continent": "Asia",
     "region": "Central Asia",
@@ -974,6 +1062,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KEN",
+    "iso2": "KE",
     "name": "Kenya",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -985,6 +1074,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KIR",
+    "iso2": "KI",
     "name": "Kiribati",
     "continent": "Oceania",
     "region": "Micronesia",
@@ -996,6 +1086,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KWT",
+    "iso2": "KW",
     "name": "Kuwait",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1007,6 +1098,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KGZ",
+    "iso2": "KG",
     "name": "Kyrgyzstan",
     "continent": "Asia",
     "region": "Central Asia",
@@ -1018,6 +1110,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LAO",
+    "iso2": "LA",
     "name": "Laos",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1029,6 +1122,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LVA",
+    "iso2": "LV",
     "name": "Latvia",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -1040,6 +1134,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LBN",
+    "iso2": "LB",
     "name": "Lebanon",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1051,6 +1146,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LSO",
+    "iso2": "LS",
     "name": "Lesotho",
     "continent": "Africa",
     "region": "Southern Africa",
@@ -1062,6 +1158,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LBR",
+    "iso2": "LR",
     "name": "Liberia",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1073,6 +1170,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LBY",
+    "iso2": "LY",
     "name": "Libya",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -1084,6 +1182,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LIE",
+    "iso2": "LI",
     "name": "Liechtenstein",
     "continent": "Europe",
     "region": "Western Europe",
@@ -1095,6 +1194,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LTU",
+    "iso2": "LT",
     "name": "Lithuania",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -1106,6 +1206,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LUX",
+    "iso2": "LU",
     "name": "Luxembourg",
     "continent": "Europe",
     "region": "Western Europe",
@@ -1117,6 +1218,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MDG",
+    "iso2": "MG",
     "name": "Madagascar",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1128,6 +1230,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MWI",
+    "iso2": "MW",
     "name": "Malawi",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1139,6 +1242,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MYS",
+    "iso2": "MY",
     "name": "Malaysia",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1150,6 +1254,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MDV",
+    "iso2": "MV",
     "name": "Maldives",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -1161,6 +1266,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MLI",
+    "iso2": "ML",
     "name": "Mali",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1172,6 +1278,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MLT",
+    "iso2": "MT",
     "name": "Malta",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -1183,6 +1290,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MHL",
+    "iso2": "MH",
     "name": "Marshall Islands",
     "continent": "Oceania",
     "region": "Micronesia",
@@ -1194,6 +1302,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MRT",
+    "iso2": "MR",
     "name": "Mauritania",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1205,6 +1314,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MUS",
+    "iso2": "MU",
     "name": "Mauritius",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1216,6 +1326,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MEX",
+    "iso2": "MX",
     "name": "Mexico",
     "continent": "Americas",
     "region": "North America",
@@ -1227,6 +1338,7 @@ export const COUNTRIES = [
   },
   {
     "code": "FSM",
+    "iso2": "FM",
     "name": "Micronesia",
     "continent": "Oceania",
     "region": "Micronesia",
@@ -1238,6 +1350,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MDA",
+    "iso2": "MD",
     "name": "Moldova",
     "continent": "Europe",
     "region": "Eastern Europe",
@@ -1249,6 +1362,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MCO",
+    "iso2": "MC",
     "name": "Monaco",
     "continent": "Europe",
     "region": "Western Europe",
@@ -1260,6 +1374,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MNG",
+    "iso2": "MN",
     "name": "Mongolia",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -1271,6 +1386,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MNE",
+    "iso2": "ME",
     "name": "Montenegro",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -1282,6 +1398,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MAR",
+    "iso2": "MA",
     "name": "Morocco",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -1293,6 +1410,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MOZ",
+    "iso2": "MZ",
     "name": "Mozambique",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1304,6 +1422,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MMR",
+    "iso2": "MM",
     "name": "Myanmar",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1315,6 +1434,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NAM",
+    "iso2": "NA",
     "name": "Namibia",
     "continent": "Africa",
     "region": "Southern Africa",
@@ -1326,6 +1446,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NRU",
+    "iso2": "NR",
     "name": "Nauru",
     "continent": "Oceania",
     "region": "Micronesia",
@@ -1337,6 +1458,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NPL",
+    "iso2": "NP",
     "name": "Nepal",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -1348,6 +1470,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NLD",
+    "iso2": "NL",
     "name": "Netherlands",
     "continent": "Europe",
     "region": "Western Europe",
@@ -1359,6 +1482,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NZL",
+    "iso2": "NZ",
     "name": "New Zealand",
     "continent": "Oceania",
     "region": "Australia and New Zealand",
@@ -1370,6 +1494,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NIC",
+    "iso2": "NI",
     "name": "Nicaragua",
     "continent": "Americas",
     "region": "Central America",
@@ -1381,6 +1506,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NER",
+    "iso2": "NE",
     "name": "Niger",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1392,6 +1518,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NGA",
+    "iso2": "NG",
     "name": "Nigeria",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1403,6 +1530,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PRK",
+    "iso2": "KP",
     "name": "North Korea",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -1414,6 +1542,7 @@ export const COUNTRIES = [
   },
   {
     "code": "MKD",
+    "iso2": "MK",
     "name": "North Macedonia",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -1425,6 +1554,7 @@ export const COUNTRIES = [
   },
   {
     "code": "NOR",
+    "iso2": "NO",
     "name": "Norway",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -1436,6 +1566,7 @@ export const COUNTRIES = [
   },
   {
     "code": "OMN",
+    "iso2": "OM",
     "name": "Oman",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1447,6 +1578,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PAK",
+    "iso2": "PK",
     "name": "Pakistan",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -1458,6 +1590,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PLW",
+    "iso2": "PW",
     "name": "Palau",
     "continent": "Oceania",
     "region": "Micronesia",
@@ -1469,6 +1602,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PAN",
+    "iso2": "PA",
     "name": "Panama",
     "continent": "Americas",
     "region": "Central America",
@@ -1480,6 +1614,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PNG",
+    "iso2": "PG",
     "name": "Papua New Guinea",
     "continent": "Oceania",
     "region": "Melanesia",
@@ -1491,6 +1626,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PRY",
+    "iso2": "PY",
     "name": "Paraguay",
     "continent": "Americas",
     "region": "South America",
@@ -1502,6 +1638,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PER",
+    "iso2": "PE",
     "name": "Peru",
     "continent": "Americas",
     "region": "South America",
@@ -1513,6 +1650,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PHL",
+    "iso2": "PH",
     "name": "Philippines",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1524,6 +1662,7 @@ export const COUNTRIES = [
   },
   {
     "code": "POL",
+    "iso2": "PL",
     "name": "Poland",
     "continent": "Europe",
     "region": "Central Europe",
@@ -1535,6 +1674,7 @@ export const COUNTRIES = [
   },
   {
     "code": "PRT",
+    "iso2": "PT",
     "name": "Portugal",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -1546,6 +1686,7 @@ export const COUNTRIES = [
   },
   {
     "code": "QAT",
+    "iso2": "QA",
     "name": "Qatar",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1557,6 +1698,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ROU",
+    "iso2": "RO",
     "name": "Romania",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -1568,6 +1710,7 @@ export const COUNTRIES = [
   },
   {
     "code": "RUS",
+    "iso2": "RU",
     "name": "Russia",
     "continent": "Europe",
     "region": "Eastern Europe",
@@ -1579,6 +1722,7 @@ export const COUNTRIES = [
   },
   {
     "code": "RWA",
+    "iso2": "RW",
     "name": "Rwanda",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1590,6 +1734,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KNA",
+    "iso2": "KN",
     "name": "Saint Kitts and Nevis",
     "continent": "Americas",
     "region": "Caribbean",
@@ -1601,6 +1746,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LCA",
+    "iso2": "LC",
     "name": "Saint Lucia",
     "continent": "Americas",
     "region": "Caribbean",
@@ -1612,6 +1758,7 @@ export const COUNTRIES = [
   },
   {
     "code": "VCT",
+    "iso2": "VC",
     "name": "Saint Vincent and the Grenadines",
     "continent": "Americas",
     "region": "Caribbean",
@@ -1623,6 +1770,7 @@ export const COUNTRIES = [
   },
   {
     "code": "WSM",
+    "iso2": "WS",
     "name": "Samoa",
     "continent": "Oceania",
     "region": "Polynesia",
@@ -1634,6 +1782,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SMR",
+    "iso2": "SM",
     "name": "San Marino",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -1645,6 +1794,7 @@ export const COUNTRIES = [
   },
   {
     "code": "STP",
+    "iso2": "ST",
     "name": "São Tomé and Príncipe",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -1656,6 +1806,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SAU",
+    "iso2": "SA",
     "name": "Saudi Arabia",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1667,6 +1818,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SEN",
+    "iso2": "SN",
     "name": "Senegal",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1678,6 +1830,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SRB",
+    "iso2": "RS",
     "name": "Serbia",
     "continent": "Europe",
     "region": "Southeast Europe",
@@ -1689,6 +1842,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SYC",
+    "iso2": "SC",
     "name": "Seychelles",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1700,6 +1854,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SLE",
+    "iso2": "SL",
     "name": "Sierra Leone",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1711,6 +1866,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SGP",
+    "iso2": "SG",
     "name": "Singapore",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1722,6 +1878,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SVK",
+    "iso2": "SK",
     "name": "Slovakia",
     "continent": "Europe",
     "region": "Central Europe",
@@ -1733,6 +1890,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SVN",
+    "iso2": "SI",
     "name": "Slovenia",
     "continent": "Europe",
     "region": "Central Europe",
@@ -1744,6 +1902,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SLB",
+    "iso2": "SB",
     "name": "Solomon Islands",
     "continent": "Oceania",
     "region": "Melanesia",
@@ -1755,6 +1914,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SOM",
+    "iso2": "SO",
     "name": "Somalia",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1766,6 +1926,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ZAF",
+    "iso2": "ZA",
     "name": "South Africa",
     "continent": "Africa",
     "region": "Southern Africa",
@@ -1777,6 +1938,7 @@ export const COUNTRIES = [
   },
   {
     "code": "KOR",
+    "iso2": "KR",
     "name": "South Korea",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -1788,6 +1950,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SSD",
+    "iso2": "SS",
     "name": "South Sudan",
     "continent": "Africa",
     "region": "Middle Africa",
@@ -1799,6 +1962,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ESP",
+    "iso2": "ES",
     "name": "Spain",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -1810,6 +1974,7 @@ export const COUNTRIES = [
   },
   {
     "code": "LKA",
+    "iso2": "LK",
     "name": "Sri Lanka",
     "continent": "Asia",
     "region": "Southern Asia",
@@ -1821,6 +1986,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SDN",
+    "iso2": "SD",
     "name": "Sudan",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -1832,6 +1998,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SUR",
+    "iso2": "SR",
     "name": "Suriname",
     "continent": "Americas",
     "region": "South America",
@@ -1843,6 +2010,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SWE",
+    "iso2": "SE",
     "name": "Sweden",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -1854,6 +2022,7 @@ export const COUNTRIES = [
   },
   {
     "code": "CHE",
+    "iso2": "CH",
     "name": "Switzerland",
     "continent": "Europe",
     "region": "Western Europe",
@@ -1865,6 +2034,7 @@ export const COUNTRIES = [
   },
   {
     "code": "SYR",
+    "iso2": "SY",
     "name": "Syria",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1875,18 +2045,8 @@ export const COUNTRIES = [
     "government": "Republic"
   },
   {
-    "code": "TJK",
-    "name": "Tajikistan",
-    "continent": "Asia",
-    "region": "Central Asia",
-    "population": 9100837,
-    "landlocked": true,
-    "areaKm2": 143100,
-    "religion": "Islam",
-    "government": "Republic"
-  },
-  {
     "code": "TWN",
+    "iso2": "TW",
     "name": "Taiwan",
     "continent": "Asia",
     "region": "Eastern Asia",
@@ -1897,7 +2057,20 @@ export const COUNTRIES = [
     "government": "Republic"
   },
   {
+    "code": "TJK",
+    "iso2": "TJ",
+    "name": "Tajikistan",
+    "continent": "Asia",
+    "region": "Central Asia",
+    "population": 9100837,
+    "landlocked": true,
+    "areaKm2": 143100,
+    "religion": "Islam",
+    "government": "Republic"
+  },
+  {
     "code": "TZA",
+    "iso2": "TZ",
     "name": "Tanzania",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -1909,6 +2082,7 @@ export const COUNTRIES = [
   },
   {
     "code": "THA",
+    "iso2": "TH",
     "name": "Thailand",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1920,6 +2094,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TLS",
+    "iso2": "TL",
     "name": "Timor-Leste",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -1931,6 +2106,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TGO",
+    "iso2": "TG",
     "name": "Togo",
     "continent": "Africa",
     "region": "Western Africa",
@@ -1942,6 +2118,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TON",
+    "iso2": "TO",
     "name": "Tonga",
     "continent": "Oceania",
     "region": "Polynesia",
@@ -1953,6 +2130,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TTO",
+    "iso2": "TT",
     "name": "Trinidad and Tobago",
     "continent": "Americas",
     "region": "Caribbean",
@@ -1964,6 +2142,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TUN",
+    "iso2": "TN",
     "name": "Tunisia",
     "continent": "Africa",
     "region": "Northern Africa",
@@ -1975,6 +2154,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TUR",
+    "iso2": "TR",
     "name": "Türkiye",
     "continent": "Asia",
     "region": "Western Asia",
@@ -1986,6 +2166,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TKM",
+    "iso2": "TM",
     "name": "Turkmenistan",
     "continent": "Asia",
     "region": "Central Asia",
@@ -1997,6 +2178,7 @@ export const COUNTRIES = [
   },
   {
     "code": "TUV",
+    "iso2": "TV",
     "name": "Tuvalu",
     "continent": "Oceania",
     "region": "Polynesia",
@@ -2008,6 +2190,7 @@ export const COUNTRIES = [
   },
   {
     "code": "UGA",
+    "iso2": "UG",
     "name": "Uganda",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -2019,6 +2202,7 @@ export const COUNTRIES = [
   },
   {
     "code": "UKR",
+    "iso2": "UA",
     "name": "Ukraine",
     "continent": "Europe",
     "region": "Eastern Europe",
@@ -2030,6 +2214,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ARE",
+    "iso2": "AE",
     "name": "United Arab Emirates",
     "continent": "Asia",
     "region": "Western Asia",
@@ -2041,6 +2226,7 @@ export const COUNTRIES = [
   },
   {
     "code": "GBR",
+    "iso2": "GB",
     "name": "United Kingdom",
     "continent": "Europe",
     "region": "Northern Europe",
@@ -2052,6 +2238,7 @@ export const COUNTRIES = [
   },
   {
     "code": "USA",
+    "iso2": "US",
     "name": "United States",
     "continent": "Americas",
     "region": "North America",
@@ -2063,6 +2250,7 @@ export const COUNTRIES = [
   },
   {
     "code": "URY",
+    "iso2": "UY",
     "name": "Uruguay",
     "continent": "Americas",
     "region": "South America",
@@ -2074,6 +2262,7 @@ export const COUNTRIES = [
   },
   {
     "code": "UZB",
+    "iso2": "UZ",
     "name": "Uzbekistan",
     "continent": "Asia",
     "region": "Central Asia",
@@ -2085,6 +2274,7 @@ export const COUNTRIES = [
   },
   {
     "code": "VUT",
+    "iso2": "VU",
     "name": "Vanuatu",
     "continent": "Oceania",
     "region": "Melanesia",
@@ -2096,6 +2286,7 @@ export const COUNTRIES = [
   },
   {
     "code": "VAT",
+    "iso2": "VA",
     "name": "Vatican City",
     "continent": "Europe",
     "region": "Southern Europe",
@@ -2107,6 +2298,7 @@ export const COUNTRIES = [
   },
   {
     "code": "VEN",
+    "iso2": "VE",
     "name": "Venezuela",
     "continent": "Americas",
     "region": "South America",
@@ -2118,6 +2310,7 @@ export const COUNTRIES = [
   },
   {
     "code": "VNM",
+    "iso2": "VN",
     "name": "Vietnam",
     "continent": "Asia",
     "region": "South-Eastern Asia",
@@ -2129,6 +2322,7 @@ export const COUNTRIES = [
   },
   {
     "code": "YEM",
+    "iso2": "YE",
     "name": "Yemen",
     "continent": "Asia",
     "region": "Western Asia",
@@ -2140,6 +2334,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ZMB",
+    "iso2": "ZM",
     "name": "Zambia",
     "continent": "Africa",
     "region": "Eastern Africa",
@@ -2151,6 +2346,7 @@ export const COUNTRIES = [
   },
   {
     "code": "ZWE",
+    "iso2": "ZW",
     "name": "Zimbabwe",
     "continent": "Africa",
     "region": "Eastern Africa",

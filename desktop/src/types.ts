@@ -366,6 +366,22 @@ export interface GeodlePuzzleState {
   won: boolean;
 }
 
+export interface FlaggleGuess {
+  country: string;
+  similarity: number;
+  maskedFlagDataUrl: string;
+}
+
+export interface FlagglePuzzleState {
+  seedSalt: string;
+  activeDate: string;
+  puzzleId: string;
+  answer: string;
+  guesses: FlaggleGuess[];
+  completed: boolean;
+  won: boolean;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -395,4 +411,5 @@ export interface AppState {
   durakPuzzle: DurakPuzzleState;
   wordlePuzzle: WordlePuzzleState;
   geodlePuzzle: GeodlePuzzleState;
+  flagglePuzzle: FlagglePuzzleState;
 }

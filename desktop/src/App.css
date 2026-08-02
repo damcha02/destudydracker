@@ -1297,6 +1297,15 @@
   gap: 10px;
 }
 
+.arena-sync-status {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 .arena-title-icon {
   display: grid;
   width: 36px;
@@ -11352,6 +11361,277 @@ input[type="color"] {
   justify-content: center;
   padding: 16px;
   background: rgba(0,0,0,0.58);
+}
+
+.flaggle-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0,0,0,0.58);
+}
+
+.flaggle-modal {
+  width: min(920px, 100%);
+  max-height: 92vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: color-mix(in oklch, var(--surface) 94%, #8fb4ff);
+  box-shadow: 0 12px 48px rgba(0,0,0,0.42);
+}
+
+.flaggle-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.flaggle-head h2 {
+  margin: 0 0 4px;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: clamp(1.8rem, 5vw, 3rem);
+  letter-spacing: -0.04em;
+}
+
+.flaggle-head span,
+.flaggle-kicker {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.flaggle-kicker {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 900;
+}
+
+.flaggle-close-btn {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 10px;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.flaggle-close-btn:hover {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+.flaggle-preview-card {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: #111;
+  overflow: hidden;
+}
+
+.flaggle-preview-card img {
+  display: block;
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+}
+
+.flaggle-preview-empty {
+  color: var(--muted);
+  font-weight: 850;
+  text-align: center;
+  padding: 24px;
+}
+
+.flaggle-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.flaggle-combo {
+  position: relative;
+}
+
+.flaggle-combo input {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 82px 0 16px;
+  border: 2px solid color-mix(in oklch, var(--border) 80%, var(--text));
+  border-radius: 16px;
+  background: #fff;
+  color: #1f2933;
+  font: inherit;
+  font-weight: 800;
+}
+
+.flaggle-input-icon {
+  position: absolute;
+  top: 9px;
+  right: 45px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #495057;
+  font: inherit;
+  font-size: 1.35rem;
+  cursor: pointer;
+}
+
+.flaggle-input-icon--dropdown {
+  right: 8px;
+  font-size: 1rem;
+}
+
+.flaggle-input-icon:hover {
+  background: #edf2ff;
+}
+
+.flaggle-submit {
+  min-height: 52px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #8fb4ff, #b7ccff);
+  color: #10203f;
+  font: inherit;
+  font-weight: 950;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.flaggle-submit:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.flaggle-dropdown {
+  position: absolute;
+  z-index: 3;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 310px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 16px 36px rgba(0,0,0,0.32);
+}
+
+.flaggle-dropdown button {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flaggle-dropdown button:hover {
+  background: color-mix(in oklch, var(--accent) 16%, transparent);
+}
+
+.flaggle-dropdown img,
+.flaggle-guess-row img {
+  width: 72px;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #111;
+}
+
+.flaggle-dropdown p {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.flaggle-status {
+  min-height: 24px;
+  text-align: center;
+  color: var(--text);
+  font-weight: 850;
+}
+
+.flaggle-history {
+  display: grid;
+  gap: 10px;
+}
+
+.flaggle-guess-row,
+.flaggle-empty-history {
+  display: grid;
+  grid-template-columns: 1fr auto 90px;
+  align-items: center;
+  gap: 18px;
+  min-height: 78px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--surface-inset) 72%, transparent);
+}
+
+.flaggle-guess-row strong {
+  color: var(--text);
+  font-size: 1.08rem;
+}
+
+.flaggle-guess-row span {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 950;
+}
+
+.flaggle-empty-history {
+  grid-template-columns: 1fr;
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .flaggle-input-row {
+    grid-template-columns: 1fr;
+  }
+
+  .flaggle-submit {
+    width: 100%;
+  }
+
+  .flaggle-guess-row {
+    grid-template-columns: 1fr auto;
+  }
+
+  .flaggle-guess-row img {
+    grid-column: 1 / -1;
+  }
 }
 
 .geodle-modal {

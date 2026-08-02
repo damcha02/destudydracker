@@ -42,6 +42,7 @@ import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveA
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
+import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors } from "./lib/flaggle";
 import { filterCountries, findCountryByName, GEODLE_COUNTRY_COUNT, GEODLE_MAX_GUESSES, getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt, scoreGeodleGuess } from "./lib/geodle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 
@@ -325,7 +326,7 @@ const studyBreakGames = [
   { name: "Daily Durak", url: "", desc: "Solve today's Durak endgame puzzle" },
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
   { name: "Travle", url: "https://travle.earth", desc: "Travel from one country to another" },
-  { name: "Flaggle", url: "https://flaggle.net", desc: "Identify the flag one clue at a time" },
+  { name: "Flaggle", url: "", desc: "Guess the flag from shared colors" },
   { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
   { name: "Geodle", url: "", desc: "Guess the country from geography clues" },
 ];
@@ -2722,6 +2723,7 @@ function App() {
   const [showDurakPuzzle, setShowDurakPuzzle] = useState(false);
   const [showWordlePuzzle, setShowWordlePuzzle] = useState(false);
   const [showGeodlePuzzle, setShowGeodlePuzzle] = useState(false);
+  const [showFlagglePuzzle, setShowFlagglePuzzle] = useState(false);
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
   const [wordleDraft, setWordleDraft] = useState("");
@@ -2729,6 +2731,10 @@ function App() {
   const [geodleDraft, setGeodleDraft] = useState("");
   const [geodleDropdownOpen, setGeodleDropdownOpen] = useState(false);
   const [geodleMessage, setGeodleMessage] = useState("");
+  const [flaggleDraft, setFlaggleDraft] = useState("");
+  const [flaggleDropdownOpen, setFlaggleDropdownOpen] = useState(false);
+  const [flaggleMessage, setFlaggleMessage] = useState("");
+  const [flaggleProcessing, setFlaggleProcessing] = useState(false);
   const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
 
   function getAppMetadata(): AppMetadata {
@@ -3467,18 +3473,20 @@ function App() {
     how: `Pat the pet rock ${badge.label} times.`,
   }));
   const wordleKeyboardState = getWordleKeyboardState(state.wordlePuzzle.guesses, state.wordlePuzzle.answer);
-  const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => {
-    const guess = state.wordlePuzzle.guesses[rowIndex];
-    if (guess) return scoreWordleGuess(guess, state.wordlePuzzle.answer);
-    const draft = rowIndex === state.wordlePuzzle.guesses.length ? wordleDraft : "";
-    return Array.from({ length: WORDLE_WORD_LENGTH }, (_, colIndex) => ({ letter: draft[colIndex] ?? "", state: null }));
-  });
+  const scoredWordleRows = state.wordlePuzzle.guesses.toReversed().map((guess) => scoreWordleGuess(guess, state.wordlePuzzle.answer));
+  const draftWordleRows = !state.wordlePuzzle.completed ? [Array.from({ length: WORDLE_WORD_LENGTH }, (_, colIndex) => ({ letter: wordleDraft[colIndex] ?? "", state: null }))] : [];
+  const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => [...draftWordleRows, ...scoredWordleRows][rowIndex] ?? Array.from({ length: WORDLE_WORD_LENGTH }, () => ({ letter: "", state: null })));
   const wordleHardModeLocked = state.wordlePuzzle.guesses.length > 0 && !state.wordlePuzzle.completed;
   const geodleOptions = filterCountries(geodleDraft).slice(0, 80);
   const geodleRows = state.geodlePuzzle.guesses.map((guess) => ({ guess, clues: scoreGeodleGuess(guess, state.geodlePuzzle.answer) }));
   const geodleGuessesLeft = Math.max(0, GEODLE_MAX_GUESSES - state.geodlePuzzle.guesses.length);
+  const flaggleOptions = filterFlaggleCountries(flaggleDraft).slice(0, 80);
+  const flaggleRows = state.flagglePuzzle.guesses.toReversed();
+  const latestFlaggleGuess = flaggleRows[0] ?? null;
+  const flaggleGuessesLeft = Math.max(0, FLAGGLE_MAX_GUESSES - state.flagglePuzzle.guesses.length);
   const wordlePuzzleIsToday = Boolean(state.wordlePuzzle.seedSalt && state.wordlePuzzle.activeDate === todayStr && state.wordlePuzzle.puzzleId === getWordlePuzzleId(todayStr, state.wordlePuzzle.seedSalt));
   const geodlePuzzleIsToday = Boolean(state.geodlePuzzle.seedSalt && state.geodlePuzzle.activeDate === todayStr && state.geodlePuzzle.puzzleId === getGeodlePuzzleId(todayStr, state.geodlePuzzle.seedSalt));
+  const flagglePuzzleIsToday = Boolean(state.flagglePuzzle.seedSalt && state.flagglePuzzle.activeDate === todayStr && state.flagglePuzzle.puzzleId === getFlagglePuzzleId(todayStr, state.flagglePuzzle.seedSalt));
 
   useEffect(() => {
     const dailyHits = [
@@ -5272,7 +5280,11 @@ function App() {
   useEffect(() => {
     if (state.activeTab === "friends" && (socialSubtab === "leaderboard" || socialSubtab === "feed" || socialSubtab === "profile" || socialSubtab === "squad")) {
       presencePingEffect();
-      void refreshFriendStatus();
+      if (socialSubtab === "leaderboard" && socialConfigured) {
+        void runSocialSync({ silent: true });
+      } else {
+        void refreshFriendStatus();
+      }
     }
   }, [state.activeTab, socialSubtab]);
 
@@ -5370,6 +5382,32 @@ function App() {
   useEffect(() => {
     if (showGeodlePuzzle) initGeodlePuzzle();
   }, [showGeodlePuzzle]);
+
+  const initFlagglePuzzle = useEffectEvent(() => {
+    const activeDate = localIsoDate();
+    const seedSalt = state.flagglePuzzle.seedSalt || makeFlaggleSeedSalt();
+    const puzzleId = getFlagglePuzzleId(activeDate, seedSalt);
+    if (state.flagglePuzzle.activeDate === activeDate && state.flagglePuzzle.puzzleId === puzzleId && state.flagglePuzzle.answer) return;
+    setState((current) => ({
+      ...current,
+      flagglePuzzle: {
+        seedSalt,
+        activeDate,
+        puzzleId,
+        answer: getFlaggleAnswerForDate(activeDate, seedSalt),
+        guesses: [],
+        completed: false,
+        won: false,
+      },
+    }));
+    setFlaggleDraft("");
+    setFlaggleMessage("");
+    setFlaggleDropdownOpen(false);
+  });
+
+  useEffect(() => {
+    if (showFlagglePuzzle) initFlagglePuzzle();
+  }, [showFlagglePuzzle]);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -6141,6 +6179,61 @@ function App() {
     }
     setGeodleDraft("");
     setGeodleDropdownOpen(false);
+  }
+
+  function selectFlaggleCountry(name: string) {
+    setFlaggleDraft(name);
+    setFlaggleDropdownOpen(false);
+    setFlaggleMessage("");
+  }
+
+  async function submitFlaggleGuess() {
+    if (state.flagglePuzzle.completed || flaggleProcessing) return;
+    const country = findFlaggleCountry(flaggleDraft);
+    if (!country) {
+      setFlaggleMessage("Select a country from the list.");
+      setFlaggleDropdownOpen(true);
+      return;
+    }
+    if (state.flagglePuzzle.guesses.some((guess) => guess.country === country.name)) {
+      setFlaggleMessage("You already guessed that country.");
+      return;
+    }
+
+    setFlaggleProcessing(true);
+    try {
+      const result = await maskFlagByTargetColors(country.name, state.flagglePuzzle.answer);
+      setState((current) => {
+        if (current.flagglePuzzle.completed || current.flagglePuzzle.guesses.some((guess) => guess.country === country.name)) return current;
+        const guesses = [...current.flagglePuzzle.guesses, { country: country.name, similarity: result.similarity, maskedFlagDataUrl: result.maskedFlagDataUrl }];
+        const won = country.name === current.flagglePuzzle.answer;
+        const completed = won || guesses.length >= FLAGGLE_MAX_GUESSES;
+        return {
+          ...current,
+          flagglePuzzle: {
+            ...current.flagglePuzzle,
+            guesses,
+            won,
+            completed,
+          },
+        };
+      });
+
+      if (country.name === state.flagglePuzzle.answer) {
+        setFlaggleMessage(`Solved in ${state.flagglePuzzle.guesses.length + 1}.`);
+      } else if (state.flagglePuzzle.guesses.length + 1 >= FLAGGLE_MAX_GUESSES) {
+        setFlaggleMessage(`Answer: ${state.flagglePuzzle.answer}.`);
+      } else {
+        setFlaggleMessage("");
+      }
+      setFlaggleDraft("");
+      setFlaggleDropdownOpen(false);
+    } catch (error) {
+      console.warn("Could not process Flaggle guess.", error);
+      setFlaggleMessage("Could not render that flag. Try another guess.");
+    } finally {
+      setFlaggleProcessing(false);
+    }
   }
 
   function addWater() {
@@ -10998,9 +11091,12 @@ function App() {
                     <p>{socialArenaSubtitle}</p>
                   </div>
                 </div>
-                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
-                  {socialSyncing ? "Syncing..." : "Refresh"}
-                </button>
+                <div className="arena-sync-status">
+                  <span>Last synced: {lastSocialSyncLabel}</span>
+                  <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                    {socialSyncing ? "Syncing..." : "Refresh"}
+                  </button>
+                </div>
               </div>
 
               <div className="arena-scope-toggle" aria-label="Leaderboard scope">
@@ -11361,6 +11457,13 @@ function App() {
                               Play
                             </button>
                           </div>
+                        ) : game.name === "Flaggle" ? (
+                          <div className="break-game-durak">
+                            {flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="break-durak-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
                         ) : (
                           <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>
                             Play
@@ -11419,6 +11522,71 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {showFlagglePuzzle ? (
+        <div className="flaggle-overlay" onClick={() => setShowFlagglePuzzle(false)} role="presentation">
+          <div className="flaggle-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Daily Flaggle puzzle">
+            <div className="flaggle-head">
+              <div>
+                <p className="flaggle-kicker">Daily Flaggle</p>
+                <h2>Guess the flag</h2>
+                <span>{FLAGGLE_COUNTRY_COUNT} countries · {flaggleGuessesLeft} guess{flaggleGuessesLeft === 1 ? "" : "es"} left</span>
+              </div>
+              <button type="button" className="flaggle-close-btn" onClick={() => setShowFlagglePuzzle(false)} aria-label="Close Flaggle puzzle">✕</button>
+            </div>
+
+            <div className="flaggle-preview-card">
+              {latestFlaggleGuess ? (
+                <img src={latestFlaggleGuess.maskedFlagDataUrl} alt={`Masked ${latestFlaggleGuess.country} flag clue`} />
+              ) : (
+                <div className="flaggle-preview-empty">Guess a country to reveal matching flag colors.</div>
+              )}
+            </div>
+
+            <div className="flaggle-input-row">
+              <div className="flaggle-combo">
+                <input
+                  value={flaggleDraft}
+                  onChange={(event) => { setFlaggleDraft(event.target.value); setFlaggleDropdownOpen(true); setFlaggleMessage(""); }}
+                  onFocus={() => setFlaggleDropdownOpen(true)}
+                  onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void submitFlaggleGuess(); } }}
+                  placeholder="Choose a country"
+                  disabled={state.flagglePuzzle.completed || flaggleProcessing}
+                />
+                {flaggleDraft ? <button type="button" className="flaggle-input-icon" onClick={() => { setFlaggleDraft(""); setFlaggleDropdownOpen(true); }} aria-label="Clear country">×</button> : null}
+                <button type="button" className="flaggle-input-icon flaggle-input-icon--dropdown" onClick={() => setFlaggleDropdownOpen((open) => !open)} aria-label="Show countries">▾</button>
+                {flaggleDropdownOpen && !state.flagglePuzzle.completed ? (
+                  <div className="flaggle-dropdown">
+                    {flaggleOptions.length ? flaggleOptions.map((country) => (
+                      <button key={country.code} type="button" onClick={() => selectFlaggleCountry(country.name)}>
+                        <img src={getFlagImageSrc(country.name)} alt={`${country.name} flag`} />
+                        <strong>{country.name}</strong>
+                      </button>
+                    )) : <p>No countries found.</p>}
+                  </div>
+                ) : null}
+              </div>
+              <button type="button" className="flaggle-submit" onClick={() => void submitFlaggleGuess()} disabled={state.flagglePuzzle.completed || flaggleProcessing}>{flaggleProcessing ? "Working..." : "Guess"}</button>
+            </div>
+
+            <div className="flaggle-status">
+              {state.flagglePuzzle.completed ? (
+                state.flagglePuzzle.won ? `Solved in ${state.flagglePuzzle.guesses.length}.` : `The flag was ${state.flagglePuzzle.answer}.`
+              ) : flaggleMessage || "Only colors shared with the target flag stay visible."}
+            </div>
+
+            <div className="flaggle-history">
+              {flaggleRows.length ? flaggleRows.map((guess) => (
+                <div key={guess.country} className="flaggle-guess-row">
+                  <strong>{guess.country}</strong>
+                  <span>{guess.similarity.toFixed(1)}%</span>
+                  <img src={getFlagImageSrc(guess.country)} alt={`${guess.country} flag`} />
+                </div>
+              )) : <div className="flaggle-empty-history">No guesses yet.</div>}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {showGeodlePuzzle ? (
