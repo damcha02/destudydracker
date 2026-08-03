@@ -1,6 +1,7 @@
-import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, WordlePuzzleState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, TravlePuzzleState, WordlePuzzleState } from "../types";
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
+import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
 import { getWordleAnswerForDate, getWordlePuzzleId, makeWordleSeedSalt } from "./wordle";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
@@ -53,6 +54,22 @@ function makeDefaultFlagglePuzzle(): FlagglePuzzleState {
     activeDate,
     puzzleId: getFlagglePuzzleId(activeDate, seedSalt),
     answer: getFlaggleAnswerForDate(activeDate, seedSalt),
+    guesses: [],
+    completed: false,
+    won: false,
+  };
+}
+
+function makeDefaultTravlePuzzle(): TravlePuzzleState {
+  const activeDate = todayIso();
+  const seedSalt = makeTravleSeedSalt();
+  const puzzle = getTravlePuzzleForDate(activeDate, seedSalt);
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId: getTravlePuzzleId(activeDate, seedSalt),
+    start: puzzle.start,
+    target: puzzle.target,
     guesses: [],
     completed: false,
     won: false,
@@ -354,6 +371,7 @@ export const defaultState: AppState = {
   wordlePuzzle: makeDefaultWordlePuzzle(),
   geodlePuzzle: makeDefaultGeodlePuzzle(),
   flagglePuzzle: makeDefaultFlagglePuzzle(),
+  travlePuzzle: makeDefaultTravlePuzzle(),
 };
 
 function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerState["activeSegments"] {
@@ -757,6 +775,29 @@ function normalizeFlagglePuzzle(puzzle: unknown): FlagglePuzzleState {
   };
 }
 
+function normalizeTravlePuzzle(puzzle: unknown): TravlePuzzleState {
+  if (!puzzle || typeof puzzle !== "object") return makeDefaultTravlePuzzle();
+  const record = puzzle as Partial<TravlePuzzleState> & Record<string, unknown>;
+  const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeTravleSeedSalt();
+  const activeDate = todayIso();
+  const puzzleId = getTravlePuzzleId(activeDate, seedSalt);
+  const dailyPuzzle = getTravlePuzzleForDate(activeDate, seedSalt);
+  const isCurrentDailyPuzzle = record.activeDate === activeDate && record.puzzleId === puzzleId;
+  const start = isCurrentDailyPuzzle && typeof record.start === "string" && record.start ? record.start : dailyPuzzle.start;
+  const target = isCurrentDailyPuzzle && typeof record.target === "string" && record.target ? record.target : dailyPuzzle.target;
+  const guesses = isCurrentDailyPuzzle && Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string").slice(0, 7) : [];
+  return {
+    seedSalt,
+    activeDate,
+    puzzleId,
+    start,
+    target,
+    guesses,
+    completed: isCurrentDailyPuzzle && Boolean(record.completed),
+    won: isCurrentDailyPuzzle && Boolean(record.won),
+  };
+}
+
 function normalizeActiveTab(activeTab: unknown, visibleTabs: Record<TabKey, boolean>): TabKey {
   if (typeof activeTab === "string" && activeTab in defaultVisibleTabs) {
     const tab = activeTab as TabKey;
@@ -848,6 +889,7 @@ export function loadAppState(): AppState {
       wordlePuzzle: normalizeWordlePuzzle(parsed.wordlePuzzle),
       geodlePuzzle: normalizeGeodlePuzzle(parsed.geodlePuzzle),
       flagglePuzzle: normalizeFlagglePuzzle(parsed.flagglePuzzle),
+      travlePuzzle: normalizeTravlePuzzle(parsed.travlePuzzle),
       timer: timerRecovery.timer,
       sessions: timerRecovery.sessions,
       lifetimeStudyMinutes: lifetimeTotals.minutes,

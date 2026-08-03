@@ -382,6 +382,17 @@ export interface FlagglePuzzleState {
   won: boolean;
 }
 
+export interface TravlePuzzleState {
+  seedSalt: string;
+  activeDate: string;
+  puzzleId: string;
+  start: string;
+  target: string;
+  guesses: string[];
+  completed: boolean;
+  won: boolean;
+}
+
 export interface AppState {
   semesters: Semester[];
   courses: Course[];
@@ -414,4 +425,5 @@ export interface AppState {
   wordlePuzzle: WordlePuzzleState;
   geodlePuzzle: GeodlePuzzleState;
   flagglePuzzle: FlagglePuzzleState;
+  travlePuzzle: TravlePuzzleState;
 }

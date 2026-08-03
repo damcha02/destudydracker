@@ -44,6 +44,8 @@ import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
 import { filterCountries, findCountryByName, GEODLE_COUNTRY_COUNT, GEODLE_MAX_GUESSES, getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt, scoreGeodleGuess } from "./lib/geodle";
+import { TRAVLE_MAP_COUNTRIES } from "./lib/travleMapData";
+import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTravleGuessStates, getTravlePuzzleForDate, getTravlePuzzleId, getTravleShortestPath, getTravleSolvedPath, isTravleRouteSolved, makeTravleSeedSalt, TRAVLE_COUNTRY_COUNT, TRAVLE_MAX_GUESSES } from "./lib/travle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 
 type PdfJsModule = typeof import("pdfjs-dist");
@@ -325,7 +327,7 @@ function formatCountdown(milliseconds: number) {
 const studyBreakGames = [
   { name: "Daily Durak", url: "", desc: "Solve today's Durak endgame puzzle" },
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
-  { name: "Travle", url: "https://travle.earth", desc: "Travel from one country to another" },
+  { name: "Travle", url: "", desc: "Build a border route between countries" },
   { name: "Flaggle", url: "", desc: "Guess the flag from shared colors" },
   { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
   { name: "Geodle", url: "", desc: "Guess the country from geography clues" },
@@ -2196,9 +2198,10 @@ async function minimizeWindow() {
   await getCurrentWindow().minimize();
 }
 
-async function toggleMaximizeWindow() {
+async function toggleFullscreenWindow() {
   if (!isTauriApp()) return;
-  await getCurrentWindow().toggleMaximize();
+  const window = getCurrentWindow();
+  await window.setFullscreen(!(await window.isFullscreen()));
 }
 
 async function closeWindow() {
@@ -2736,6 +2739,7 @@ function App() {
   const [showWordlePuzzle, setShowWordlePuzzle] = useState(false);
   const [showGeodlePuzzle, setShowGeodlePuzzle] = useState(false);
   const [showFlagglePuzzle, setShowFlagglePuzzle] = useState(false);
+  const [showTravlePuzzle, setShowTravlePuzzle] = useState(false);
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
   const [wordleDraft, setWordleDraft] = useState("");
@@ -2748,6 +2752,10 @@ function App() {
   const [flaggleMessage, setFlaggleMessage] = useState("");
   const [flaggleProcessing, setFlaggleProcessing] = useState(false);
   const [flagglePreviewDataUrl, setFlagglePreviewDataUrl] = useState("");
+  const [travleDraft, setTravleDraft] = useState("");
+  const [travleDropdownOpen, setTravleDropdownOpen] = useState(false);
+  const [travleMessage, setTravleMessage] = useState("");
+  const [travleMapZoom, setTravleMapZoom] = useState(1);
   const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
 
   function getAppMetadata(): AppMetadata {
@@ -3491,14 +3499,69 @@ function App() {
   const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => [...draftWordleRows, ...scoredWordleRows][rowIndex] ?? Array.from({ length: WORDLE_WORD_LENGTH }, () => ({ letter: "", state: null })));
   const wordleHardModeLocked = state.wordlePuzzle.guesses.length > 0 && !state.wordlePuzzle.completed;
   const geodleOptions = filterCountries(geodleDraft).slice(0, 80);
-  const geodleRows = state.geodlePuzzle.guesses.map((guess) => ({ guess, clues: scoreGeodleGuess(guess, state.geodlePuzzle.answer) }));
+  const geodleRows = state.geodlePuzzle.guesses.toReversed().map((guess) => ({ guess, clues: scoreGeodleGuess(guess, state.geodlePuzzle.answer) }));
   const geodleGuessesLeft = Math.max(0, GEODLE_MAX_GUESSES - state.geodlePuzzle.guesses.length);
   const flaggleOptions = filterFlaggleCountries(flaggleDraft).slice(0, 80);
   const flaggleRows = state.flagglePuzzle.guesses.toReversed();
   const flaggleGuessesLeft = Math.max(0, FLAGGLE_MAX_GUESSES - state.flagglePuzzle.guesses.length);
+  const travleOptions = filterTravleCountries(travleDraft).slice(0, 80);
+  const travleRoute = [state.travlePuzzle.start, ...state.travlePuzzle.guesses];
+  const travleCurrent = state.travlePuzzle.guesses.at(-1) ?? state.travlePuzzle.start;
+  const travleGuessesLeft = Math.max(0, TRAVLE_MAX_GUESSES - state.travlePuzzle.guesses.length);
+  const travleShortestPath = getTravleShortestPath(state.travlePuzzle.start, state.travlePuzzle.target);
+  const travleSolvedPath = getTravleSolvedPath(state.travlePuzzle.start, state.travlePuzzle.target, state.travlePuzzle.guesses);
+  const travleDisplayPath = getTravleDisplayPath(state.travlePuzzle.start, state.travlePuzzle.target, state.travlePuzzle.guesses);
+  const travleGuessStates = getTravleGuessStates(state.travlePuzzle.start, state.travlePuzzle.target, state.travlePuzzle.guesses);
+  const travleMapCountryByCode = useMemo(() => new Map(TRAVLE_MAP_COUNTRIES.map((country) => [country.code, country])), []);
+  const travleCountryNameByCode = useMemo(() => new Map(filterTravleCountries("").map((country) => [country.code, country.name])), []);
+  const travleRouteCodes = travleRoute.flatMap((countryName) => {
+    const country = findTravleCountry(countryName);
+    return country ? [country.code] : [];
+  });
+  const travleTargetCode = findTravleCountry(state.travlePuzzle.target)?.code ?? "";
+  const travleCurrentCode = findTravleCountry(travleCurrent)?.code ?? "";
+  const travleRouteCodeSet = new Set(travleRouteCodes);
+  const travleSolvedCodeSet = new Set(travleSolvedPath.flatMap((countryName) => {
+    const country = findTravleCountry(countryName);
+    return country ? [country.code] : [];
+  }));
+  const travleDisplayPathCodes = travleDisplayPath.flatMap((countryName) => {
+    const country = findTravleCountry(countryName);
+    return country ? [country.code] : [];
+  });
+  const travleMapRoutePoints = travleDisplayPathCodes.flatMap((code) => {
+    const country = travleMapCountryByCode.get(code);
+    if (!country) return [];
+    const point = country.point ?? [(country.bounds[0] + country.bounds[2]) / 2, (country.bounds[1] + country.bounds[3]) / 2];
+    return [`${point[0]},${point[1]}`];
+  }).join(" ");
+  const travleMapViewBox = useMemo(() => {
+    const focusCodes = new Set<string>([...travleRouteCodes, travleTargetCode].filter(Boolean));
+    const focusCountries = [...focusCodes].flatMap((code) => {
+      const country = travleMapCountryByCode.get(code);
+      return country ? [country] : [];
+    });
+    if (!focusCountries.length) return "0 0 1000 500";
+    const bounds = focusCountries.reduce((box, country) => ({
+      minX: Math.min(box.minX, country.bounds[0]),
+      minY: Math.min(box.minY, country.bounds[1]),
+      maxX: Math.max(box.maxX, country.bounds[2]),
+      maxY: Math.max(box.maxY, country.bounds[3]),
+    }), { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity });
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    const fitWidth = Math.max(120, bounds.maxX - bounds.minX + 80);
+    const fitHeight = Math.max(90, bounds.maxY - bounds.minY + 70);
+    const width = Math.min(1000, fitWidth / travleMapZoom);
+    const height = Math.min(500, fitHeight / travleMapZoom);
+    const x = Math.max(0, Math.min(1000 - width, centerX - width / 2));
+    const y = Math.max(0, Math.min(500 - height, centerY - height / 2));
+    return `${x} ${y} ${width} ${height}`;
+  }, [travleMapCountryByCode, travleMapZoom, travleRouteCodes, travleTargetCode]);
   const wordlePuzzleIsToday = Boolean(state.wordlePuzzle.seedSalt && state.wordlePuzzle.activeDate === todayStr && state.wordlePuzzle.puzzleId === getWordlePuzzleId(todayStr, state.wordlePuzzle.seedSalt));
   const geodlePuzzleIsToday = Boolean(state.geodlePuzzle.seedSalt && state.geodlePuzzle.activeDate === todayStr && state.geodlePuzzle.puzzleId === getGeodlePuzzleId(todayStr, state.geodlePuzzle.seedSalt));
   const flagglePuzzleIsToday = Boolean(state.flagglePuzzle.seedSalt && state.flagglePuzzle.activeDate === todayStr && state.flagglePuzzle.puzzleId === getFlagglePuzzleId(todayStr, state.flagglePuzzle.seedSalt));
+  const travlePuzzleIsToday = Boolean(state.travlePuzzle.seedSalt && state.travlePuzzle.activeDate === todayStr && state.travlePuzzle.puzzleId === getTravlePuzzleId(todayStr, state.travlePuzzle.seedSalt));
 
   useEffect(() => {
     const dailyHits = [
@@ -5437,6 +5500,35 @@ function App() {
     if (showFlagglePuzzle) initFlagglePuzzle();
   }, [showFlagglePuzzle]);
 
+  const initTravlePuzzle = useEffectEvent(() => {
+    const activeDate = localIsoDate();
+    const seedSalt = state.travlePuzzle.seedSalt || makeTravleSeedSalt();
+    const puzzleId = getTravlePuzzleId(activeDate, seedSalt);
+    if (state.travlePuzzle.activeDate === activeDate && state.travlePuzzle.puzzleId === puzzleId && state.travlePuzzle.start && state.travlePuzzle.target) return;
+    const puzzle = getTravlePuzzleForDate(activeDate, seedSalt);
+    setState((current) => ({
+      ...current,
+      travlePuzzle: {
+        seedSalt,
+        activeDate,
+        puzzleId,
+        start: puzzle.start,
+        target: puzzle.target,
+        guesses: [],
+        completed: false,
+        won: false,
+      },
+    }));
+    setTravleDraft("");
+    setTravleMessage("");
+    setTravleDropdownOpen(false);
+    setTravleMapZoom(1);
+  });
+
+  useEffect(() => {
+    if (showTravlePuzzle) initTravlePuzzle();
+  }, [showTravlePuzzle]);
+
   async function refreshFlagglePreview(answer = state.flagglePuzzle.answer, guesses = state.flagglePuzzle.guesses.map((guess) => guess.country), revealFull = state.flagglePuzzle.completed) {
     if (!answer || !guesses.length) {
       setFlagglePreviewDataUrl("");
@@ -6282,6 +6374,64 @@ function App() {
     } finally {
       setFlaggleProcessing(false);
     }
+  }
+
+  function selectTravleCountry(name: string) {
+    setTravleDraft(name);
+    setTravleDropdownOpen(false);
+    setTravleMessage("");
+  }
+
+  function submitTravleGuess() {
+    if (state.travlePuzzle.completed) return;
+    const country = findTravleCountry(travleDraft);
+    if (!country) {
+      setTravleMessage("Select a country from the list.");
+      setTravleDropdownOpen(true);
+      return;
+    }
+
+    if (country.name === state.travlePuzzle.start || state.travlePuzzle.guesses.includes(country.name)) {
+      setTravleMessage("That country is already in your route.");
+      return;
+    }
+
+    const nextGuesses = [...state.travlePuzzle.guesses, country.name];
+    const solved = isTravleRouteSolved(state.travlePuzzle.start, state.travlePuzzle.target, nextGuesses);
+    const guessStates = getTravleGuessStates(state.travlePuzzle.start, state.travlePuzzle.target, nextGuesses);
+    const guessState = guessStates[country.name];
+
+    setState((current) => {
+      if (current.travlePuzzle.completed || current.travlePuzzle.guesses.includes(country.name)) return current;
+      const guesses = [...current.travlePuzzle.guesses, country.name];
+      const won = isTravleRouteSolved(current.travlePuzzle.start, current.travlePuzzle.target, guesses);
+      const completed = won || guesses.length >= TRAVLE_MAX_GUESSES;
+      return {
+        ...current,
+        travlePuzzle: {
+          ...current.travlePuzzle,
+          guesses,
+          won,
+          completed,
+        },
+      };
+    });
+
+    if (solved) {
+      const route = getTravleSolvedPath(state.travlePuzzle.start, state.travlePuzzle.target, nextGuesses).join(" -> ");
+      setTravleMessage(`Route complete: ${route}.`);
+    } else if (nextGuesses.length >= TRAVLE_MAX_GUESSES) {
+      const shortest = getTravleShortestPath(state.travlePuzzle.start, state.travlePuzzle.target).join(" -> ");
+      setTravleMessage(`Route closed. Shortest path: ${shortest}.`);
+    } else if (guessState === "route") {
+      setTravleMessage(`${country.name} is on the route.`);
+    } else if (guessState === "possible") {
+      setTravleMessage(`${country.name} could help connect the route.`);
+    } else {
+      setTravleMessage(`${country.name} is off route.`);
+    }
+    setTravleDraft("");
+    setTravleDropdownOpen(false);
   }
 
   function addWater() {
@@ -8497,7 +8647,7 @@ function App() {
             <button type="button" onClick={() => void minimizeWindow()} aria-label="Minimize window" title="Minimize">
               <span aria-hidden="true">-</span>
             </button>
-            <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label="Maximize or restore window" title="Maximize or restore">
+            <button type="button" onClick={() => void toggleFullscreenWindow()} aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen">
               <span aria-hidden="true">□</span>
             </button>
             <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
@@ -11498,6 +11648,13 @@ function App() {
                               Play
                             </button>
                           </div>
+                        ) : game.name === "Travle" ? (
+                          <div className="break-game-durak">
+                            {travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="break-durak-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
                         ) : game.name === "Geodle" ? (
                           <div className="break-game-durak">
                             {geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="break-durak-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
@@ -11570,6 +11727,153 @@ function App() {
             </div>
           </article>
         </section>
+      ) : null}
+
+      {showTravlePuzzle ? (
+        <div className="travle-overlay" onClick={() => setShowTravlePuzzle(false)} role="presentation">
+          <div className="travle-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Daily Travle puzzle">
+            <div className="travle-head">
+              <div>
+                <p className="travle-kicker">Daily Travle</p>
+                <h2>Build the border route</h2>
+                <span>{TRAVLE_COUNTRY_COUNT} connected countries · {travleGuessesLeft} step{travleGuessesLeft === 1 ? "" : "s"} left</span>
+              </div>
+              <button type="button" className="travle-close-btn" onClick={() => setShowTravlePuzzle(false)} aria-label="Close Travle puzzle">✕</button>
+            </div>
+
+            <div className="travle-target-card">
+              <div>
+                <span>Start</span>
+                <strong>{state.travlePuzzle.start}</strong>
+              </div>
+              <div>
+                <span>Destination</span>
+                <strong>{state.travlePuzzle.target}</strong>
+              </div>
+            </div>
+
+            <div className="travle-map-card">
+              <svg className="travle-map" viewBox={travleMapViewBox} role="img" aria-label={`Map route from ${state.travlePuzzle.start} to ${state.travlePuzzle.target}`}>
+                <rect className="travle-map-water" x="0" y="0" width="1000" height="500" />
+                <g className="travle-map-graticule" aria-hidden="true">
+                  {[125, 250, 375].map((y) => <line key={`lat-${y}`} x1="0" y1={y} x2="1000" y2={y} />)}
+                  {[250, 500, 750].map((x) => <line key={`lon-${x}`} x1={x} y1="0" x2={x} y2="500" />)}
+                </g>
+                <g>
+                  {TRAVLE_MAP_COUNTRIES.map((country) => {
+                    const isStart = country.code === travleRouteCodes[0];
+                    const isTarget = country.code === travleTargetCode;
+                    const isRoute = travleRouteCodeSet.has(country.code);
+                    const countryName = travleCountryNameByCode.get(country.code);
+                    const guessState = countryName ? travleGuessStates[countryName] : undefined;
+                    const isCurrent = country.code === travleCurrentCode;
+                    const isSolvedPath = travleSolvedCodeSet.has(country.code);
+                    const className = [
+                      "travle-map-country",
+                      isRoute && guessState === "possible" ? "possible" : "",
+                      isRoute && guessState === "miss" ? "miss" : "",
+                      (isRoute && guessState === "route") || isSolvedPath ? "route" : "",
+                      isStart ? "start" : "",
+                      isTarget ? "target" : "",
+                      isCurrent ? "current" : "",
+                    ].filter(Boolean).join(" ");
+                    if (country.d) return <path key={country.code} className={className} d={country.d} />;
+                    if (country.point) return <circle key={country.code} className={`${className} marker`} cx={country.point[0]} cy={country.point[1]} r="3.6" />;
+                    return null;
+                  })}
+                </g>
+                {travleMapRoutePoints ? <polyline className="travle-map-route-line" points={travleMapRoutePoints} /> : null}
+              </svg>
+              <div className="travle-map-controls" aria-label="Map zoom controls">
+                <button type="button" onClick={() => setTravleMapZoom((zoom) => Math.min(2.5, Math.round((zoom + 0.35) * 100) / 100))} aria-label="Zoom in">+</button>
+                <button type="button" onClick={() => setTravleMapZoom((zoom) => Math.max(1, Math.round((zoom - 0.35) * 100) / 100))} aria-label="Zoom out">−</button>
+              </div>
+              <span className="travle-map-watermark">travle</span>
+            </div>
+
+            <div className="travle-route" aria-label="Current Travle route">
+              {travleRoute.map((country, index) => (
+                <span key={`${country}-${index}`} className="travle-route-node">{country}</span>
+              ))}
+              {!state.travlePuzzle.won ? <span className="travle-route-target">{state.travlePuzzle.target}</span> : null}
+            </div>
+
+            <div className="travle-current-card">
+              <span>Latest guess</span>
+              <strong>{travleCurrent}</strong>
+              <small>{state.travlePuzzle.guesses.length}/{TRAVLE_MAX_GUESSES} countries guessed</small>
+            </div>
+
+            {state.travlePuzzle.completed ? (
+              <div className={`travle-result-card ${state.travlePuzzle.won ? "won" : "lost"}`}>
+                <p className="travle-result-kicker">{state.travlePuzzle.won ? "Arrived" : "Route missed"}</p>
+                <h3>{state.travlePuzzle.won ? "Route complete" : "Better route found"}</h3>
+                <div className="travle-result-route">
+                  <span>{state.travlePuzzle.won ? "Your route" : "Shortest route"}</span>
+                  <strong>{(state.travlePuzzle.won ? travleSolvedPath : travleShortestPath).join(" -> ")}</strong>
+                </div>
+                <div className="travle-result-stats">
+                  <div>
+                    <span>Guesses used</span>
+                    <strong>{state.travlePuzzle.guesses.length}/{TRAVLE_MAX_GUESSES}</strong>
+                  </div>
+                  <div>
+                    <span>Shortest</span>
+                    <strong>{Math.max(0, travleShortestPath.length - 1)} steps</strong>
+                  </div>
+                  <div>
+                    <span>{state.travlePuzzle.won ? "Solved route" : "Your route"}</span>
+                    <strong>{state.travlePuzzle.won ? `${Math.max(0, travleSolvedPath.length - 1)} steps` : `${state.travlePuzzle.guesses.length} guesses`}</strong>
+                  </div>
+                </div>
+                <div className="travle-result-legend">
+                  <span><i className="route" /> Route</span>
+                  <span><i className="possible" /> Useful</span>
+                  <span><i className="miss" /> Off route</span>
+                </div>
+                <div className="travle-result-actions">
+                  <button type="button" className="travle-result-close" onClick={() => setShowTravlePuzzle(false)}>Close</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="travle-input-row">
+                  <div className="travle-combo">
+                    <input
+                      value={travleDraft}
+                      onChange={(event) => { setTravleDraft(event.target.value); setTravleDropdownOpen(true); setTravleMessage(""); }}
+                      onFocus={() => setTravleDropdownOpen(true)}
+                      onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); submitTravleGuess(); } }}
+                      placeholder="Enter a country"
+                    />
+                    {travleDraft ? <button type="button" className="travle-input-icon" onClick={() => { setTravleDraft(""); setTravleDropdownOpen(true); }} aria-label="Clear country">×</button> : null}
+                    <button type="button" className="travle-input-icon travle-input-icon--dropdown" onClick={() => setTravleDropdownOpen((open) => !open)} aria-label="Show countries">▾</button>
+                    {travleDropdownOpen ? (
+                      <div className="travle-dropdown">
+                        {travleOptions.length ? travleOptions.map((country) => (
+                          <button key={country.code} type="button" onClick={() => selectTravleCountry(country.name)}>
+                            <strong>{country.name}</strong>
+                            <span>{country.region}</span>
+                          </button>
+                        )) : <p>No connected countries found.</p>}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button type="button" className="travle-submit" onClick={submitTravleGuess}>Step</button>
+                </div>
+
+                <div className="travle-status">
+                  {travleMessage || `Enter countries to connect ${state.travlePuzzle.start} to ${state.travlePuzzle.target}.`}
+                </div>
+
+                <div className="travle-shortest">
+                  <span>Shortest route</span>
+                  <strong>{travleShortestPath.length ? `${travleShortestPath.length - 1} steps` : "Hidden"}</strong>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       ) : null}
 
       {showFlagglePuzzle ? (
