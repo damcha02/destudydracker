@@ -303,6 +303,8 @@ export const defaultState: AppState = {
   exams: [],
   calendarEntries: [],
   sessions: [],
+  lifetimeStudyMinutes: 0,
+  lifetimeStudySessions: 0,
   exports: [],
   settings: {
     accent: "#8fb4ff",
@@ -693,17 +695,19 @@ function normalizeWordlePuzzle(puzzle: unknown): WordlePuzzleState {
   if (!puzzle || typeof puzzle !== "object") return makeDefaultWordlePuzzle();
   const record = puzzle as Partial<WordlePuzzleState> & Record<string, unknown>;
   const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeWordleSeedSalt();
-  const activeDate = typeof record.activeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.activeDate) ? record.activeDate : todayIso();
-  const answer = typeof record.answer === "string" && /^[a-z]{5}$/.test(record.answer) ? record.answer : getWordleAnswerForDate(activeDate, seedSalt);
-  const guesses = Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string" && /^[a-z]{5}$/.test(guess)).slice(0, 6) : [];
+  const activeDate = todayIso();
+  const puzzleId = getWordlePuzzleId(activeDate, seedSalt);
+  const isCurrentDailyPuzzle = record.activeDate === activeDate && record.puzzleId === puzzleId;
+  const answer = isCurrentDailyPuzzle && typeof record.answer === "string" && /^[a-z]{5}$/.test(record.answer) ? record.answer : getWordleAnswerForDate(activeDate, seedSalt);
+  const guesses = isCurrentDailyPuzzle && Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string" && /^[a-z]{5}$/.test(guess)).slice(0, 6) : [];
   return {
     seedSalt,
     activeDate,
-    puzzleId: typeof record.puzzleId === "string" && record.puzzleId ? record.puzzleId : getWordlePuzzleId(activeDate, seedSalt),
+    puzzleId,
     answer,
     guesses,
-    completed: Boolean(record.completed),
-    won: Boolean(record.won),
+    completed: isCurrentDailyPuzzle && Boolean(record.completed),
+    won: isCurrentDailyPuzzle && Boolean(record.won),
     hardMode: Boolean(record.hardMode),
   };
 }
@@ -712,17 +716,19 @@ function normalizeGeodlePuzzle(puzzle: unknown): GeodlePuzzleState {
   if (!puzzle || typeof puzzle !== "object") return makeDefaultGeodlePuzzle();
   const record = puzzle as Partial<GeodlePuzzleState> & Record<string, unknown>;
   const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeGeodleSeedSalt();
-  const activeDate = typeof record.activeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.activeDate) ? record.activeDate : todayIso();
-  const answer = typeof record.answer === "string" && record.answer ? record.answer : getGeodleAnswerForDate(activeDate, seedSalt);
-  const guesses = Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string").slice(0, 7) : [];
+  const activeDate = todayIso();
+  const puzzleId = getGeodlePuzzleId(activeDate, seedSalt);
+  const isCurrentDailyPuzzle = record.activeDate === activeDate && record.puzzleId === puzzleId;
+  const answer = isCurrentDailyPuzzle && typeof record.answer === "string" && record.answer ? record.answer : getGeodleAnswerForDate(activeDate, seedSalt);
+  const guesses = isCurrentDailyPuzzle && Array.isArray(record.guesses) ? record.guesses.filter((guess): guess is string => typeof guess === "string").slice(0, 7) : [];
   return {
     seedSalt,
     activeDate,
-    puzzleId: typeof record.puzzleId === "string" && record.puzzleId ? record.puzzleId : getGeodlePuzzleId(activeDate, seedSalt),
+    puzzleId,
     answer,
     guesses,
-    completed: Boolean(record.completed),
-    won: Boolean(record.won),
+    completed: isCurrentDailyPuzzle && Boolean(record.completed),
+    won: isCurrentDailyPuzzle && Boolean(record.won),
   };
 }
 
@@ -730,9 +736,11 @@ function normalizeFlagglePuzzle(puzzle: unknown): FlagglePuzzleState {
   if (!puzzle || typeof puzzle !== "object") return makeDefaultFlagglePuzzle();
   const record = puzzle as Partial<FlagglePuzzleState> & Record<string, unknown>;
   const seedSalt = typeof record.seedSalt === "string" && record.seedSalt ? record.seedSalt : makeFlaggleSeedSalt();
-  const activeDate = typeof record.activeDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(record.activeDate) ? record.activeDate : todayIso();
-  const answer = typeof record.answer === "string" && record.answer ? record.answer : getFlaggleAnswerForDate(activeDate, seedSalt);
-  const guesses = Array.isArray(record.guesses) ? record.guesses.flatMap((guess): FlaggleGuess[] => {
+  const activeDate = todayIso();
+  const puzzleId = getFlagglePuzzleId(activeDate, seedSalt);
+  const isCurrentDailyPuzzle = record.activeDate === activeDate && record.puzzleId === puzzleId;
+  const answer = isCurrentDailyPuzzle && typeof record.answer === "string" && record.answer ? record.answer : getFlaggleAnswerForDate(activeDate, seedSalt);
+  const guesses = isCurrentDailyPuzzle && Array.isArray(record.guesses) ? record.guesses.flatMap((guess): FlaggleGuess[] => {
     if (!guess || typeof guess !== "object") return [];
     const item = guess as Partial<FlaggleGuess>;
     if (typeof item.country !== "string" || typeof item.maskedFlagDataUrl !== "string" || typeof item.similarity !== "number") return [];
@@ -741,11 +749,11 @@ function normalizeFlagglePuzzle(puzzle: unknown): FlagglePuzzleState {
   return {
     seedSalt,
     activeDate,
-    puzzleId: typeof record.puzzleId === "string" && record.puzzleId ? record.puzzleId : getFlagglePuzzleId(activeDate, seedSalt),
+    puzzleId,
     answer,
     guesses,
-    completed: Boolean(record.completed),
-    won: Boolean(record.won),
+    completed: isCurrentDailyPuzzle && Boolean(record.completed),
+    won: isCurrentDailyPuzzle && Boolean(record.won),
   };
 }
 
@@ -756,6 +764,48 @@ function normalizeActiveTab(activeTab: unknown, visibleTabs: Record<TabKey, bool
   }
 
   return (Object.keys(defaultVisibleTabs) as TabKey[]).find((tab) => visibleTabs[tab] !== false) ?? "dashboard";
+}
+
+function getSessionTotals(sessions: StudySession[]) {
+  return sessions
+    .filter((session) => session.kind === "study" || session.kind === "exam")
+    .reduce((totals, session) => ({
+      minutes: totals.minutes + Math.max(0, Math.round(session.minutes)),
+      sessions: totals.sessions + 1,
+    }), { minutes: 0, sessions: 0 });
+}
+
+function getCachedSelfOverallTotals(social: unknown) {
+  if (!social || typeof social !== "object") return { minutes: 0, sessions: 0 };
+  const record = social as Record<string, unknown>;
+  const userId = typeof record.userId === "string" ? record.userId : "";
+  const cachedLeaderboards = record.cachedLeaderboards;
+  if (!userId || !cachedLeaderboards || typeof cachedLeaderboards !== "object") return { minutes: 0, sessions: 0 };
+
+  return ["global", "friends", "squad"].reduce((best, scope) => {
+    const scopeRecord = (cachedLeaderboards as Record<string, unknown>)[scope];
+    const overall = scopeRecord && typeof scopeRecord === "object" ? (scopeRecord as Record<string, unknown>).overall : null;
+    if (!Array.isArray(overall)) return best;
+    const self = overall.find((entry) => {
+      return entry && typeof entry === "object" && (entry as Record<string, unknown>).userId === userId;
+    }) as Record<string, unknown> | undefined;
+    const minutes = typeof self?.minutes === "number" ? Math.max(0, Math.round(self.minutes)) : 0;
+    const sessions = typeof self?.sessions === "number" ? Math.max(0, Math.round(self.sessions)) : 0;
+    return minutes > best.minutes ? { minutes, sessions } : best;
+  }, { minutes: 0, sessions: 0 });
+}
+
+function normalizeLifetimeTotals(parsed: Partial<AppState> & Record<string, unknown>, sessions: StudySession[]) {
+  const sessionTotals = getSessionTotals(sessions);
+  const cachedTotals = getCachedSelfOverallTotals(parsed.social);
+  const storedMinutes = typeof parsed.lifetimeStudyMinutes === "number" ? Math.max(0, Math.round(parsed.lifetimeStudyMinutes)) : 0;
+  const storedSessions = typeof parsed.lifetimeStudySessions === "number" ? Math.max(0, Math.round(parsed.lifetimeStudySessions)) : 0;
+  const candidates = [
+    { minutes: storedMinutes, sessions: storedSessions },
+    sessionTotals,
+    cachedTotals,
+  ];
+  return candidates.reduce((best, candidate) => candidate.minutes > best.minutes ? candidate : best, { minutes: 0, sessions: 0 });
 }
 
 export function loadAppState(): AppState {
@@ -769,6 +819,7 @@ export function loadAppState(): AppState {
     const parsedTimer = parsed.timer && typeof parsed.timer === "object" ? parsed.timer : {};
     const timerRecovery = recoverExpiredTimer({ ...defaultTimer, ...parsedTimer }, sessions);
     const visibleTabs = normalizeVisibleTabs(parsed.settings?.visibleTabs);
+    const lifetimeTotals = normalizeLifetimeTotals(parsed, timerRecovery.sessions);
 
     return {
       ...defaultState,
@@ -799,6 +850,8 @@ export function loadAppState(): AppState {
       flagglePuzzle: normalizeFlagglePuzzle(parsed.flagglePuzzle),
       timer: timerRecovery.timer,
       sessions: timerRecovery.sessions,
+      lifetimeStudyMinutes: lifetimeTotals.minutes,
+      lifetimeStudySessions: lifetimeTotals.sessions,
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],
       badgeCounts: parsed.badgeCounts && typeof parsed.badgeCounts === "object" ? parsed.badgeCounts as Record<string, number> : {},
       badgeCountDates: parsed.badgeCountDates && typeof parsed.badgeCountDates === "object" ? parsed.badgeCountDates as Record<string, string> : {},

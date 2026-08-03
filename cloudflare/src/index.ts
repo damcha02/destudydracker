@@ -21,6 +21,8 @@ interface SyncPayload {
     displayName: string;
     avatar?: unknown;
     isPrivate?: boolean;
+    lifetimeStudyMinutes?: number;
+    lifetimeStudySessions?: number;
     device?: {
       fingerprintHash?: string;
       label?: string;
@@ -250,6 +252,8 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const displayName = cleanName(payload.displayName);
   const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
+  const lifetimeStudyMinutes = Math.min(10_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudyMinutes ?? 0))));
+  const lifetimeStudySessions = Math.min(1_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudySessions ?? 0))));
   const deviceFingerprintHash = cleanText(payload.device?.fingerprintHash, 120);
   const deviceLabel = cleanText(payload.device?.label, 120);
   const app = cleanAppMetadata(payload.app);
@@ -265,6 +269,8 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
     await env.DB.prepare(`
       UPDATE users
       SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?,
+        lifetime_study_minutes = MAX(lifetime_study_minutes, ?),
+        lifetime_study_sessions = MAX(lifetime_study_sessions, ?),
         device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
         device_label = COALESCE(NULLIF(?, ''), device_label),
         device_seen_at = CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE device_seen_at END,
@@ -275,14 +281,14 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
         updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `)
-      .bind(friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
+      .bind(friendCode, displayName, avatar, isPrivate, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
       .run();
   } else {
     await env.DB.prepare(`
-      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
+      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
     `)
-      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
+      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
       .run();
   }
 }
@@ -506,28 +512,54 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
 }
 
 async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]) {
-  const cleanedStats = stats
-    .slice(0, MAX_SYNC_STAT_ROWS)
+  const validStats = stats
     .filter((stat) => /^\d{4}-\d{2}-\d{2}$/.test(stat.date))
     .map((stat) => ({
       date: stat.date,
       minutes: Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(stat.minutes ?? 0)))),
       sessions: Math.min(MAX_DAILY_SESSIONS, Math.max(0, Math.round(Number(stat.sessions ?? 0)))),
     }));
-  if (!cleanedStats.length) return [];
+  const cleanedStats = [...new Map(validStats
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, MAX_SYNC_STAT_ROWS)
+    .map((stat) => [stat.date, stat])).values()];
+
+  if (!cleanedStats.length) {
+    const existingRows = await env.DB.prepare("SELECT date FROM daily_stats WHERE user_id = ?")
+      .bind(userId)
+      .all<{ date: string }>();
+    if (existingRows.results.length) {
+      await env.DB.prepare("DELETE FROM daily_stats WHERE user_id = ?").bind(userId).run();
+    }
+    return existingRows.results.map((row) => row.date);
+  }
 
   const dates = [...new Set(cleanedStats.map((stat) => stat.date))];
+  const minSyncedDate = dates.reduce((min, date) => date < min ? date : min, dates[0]);
+  const deletesCanCoverAllDates = validStats.length <= MAX_SYNC_STAT_ROWS;
   const existingRows = await env.DB.prepare(`
     SELECT date, minutes, sessions
     FROM daily_stats
-    WHERE user_id = ? AND date IN (${dates.map(() => "?").join(",")})
-  `).bind(userId, ...dates).all<{ date: string; minutes: number; sessions: number }>();
+    WHERE user_id = ? ${deletesCanCoverAllDates ? "" : "AND date >= ?"}
+  `).bind(userId, ...(deletesCanCoverAllDates ? [] : [minSyncedDate])).all<{ date: string; minutes: number; sessions: number }>();
   const existing = new Map(existingRows.results.map((row) => [row.date, row]));
   const changedDates = dates.filter((date) => {
     const next = cleanedStats.find((stat) => stat.date === date);
     const current = existing.get(date);
     return Boolean(next && (!current || Number(current.minutes) !== next.minutes || Number(current.sessions) !== next.sessions));
   });
+  const deletedDates = existingRows.results
+    .filter((row) => !dates.includes(row.date))
+    .map((row) => row.date);
+
+  if (deletedDates.length) {
+    const deleteClause = deletesCanCoverAllDates
+      ? `DELETE FROM daily_stats WHERE user_id = ? AND date NOT IN (${dates.map(() => "?").join(",")})`
+      : `DELETE FROM daily_stats WHERE user_id = ? AND date >= ? AND date NOT IN (${dates.map(() => "?").join(",")})`;
+    await env.DB.prepare(deleteClause)
+      .bind(userId, ...(deletesCanCoverAllDates ? [] : [minSyncedDate]), ...dates)
+      .run();
+  }
 
   const statements = cleanedStats.map((stat) => env.DB.prepare(
       "INSERT INTO daily_stats (user_id, date, minutes, sessions, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) ON CONFLICT(user_id, date) DO UPDATE SET minutes = excluded.minutes, sessions = excluded.sessions, updated_at = CURRENT_TIMESTAMP",
@@ -539,7 +571,7 @@ async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]
     ));
 
   await env.DB.batch(statements);
-  return changedDates;
+  return [...changedDates, ...deletedDates];
 }
 
 async function getFriendIds(env: Env, userId: string) {
@@ -645,14 +677,14 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role AS role,
-      COALESCE(SUM(ds.minutes), 0) AS minutes,
-      COALESCE(SUM(ds.sessions), 0) AS sessions,
+      ${period === "overall" ? "u.lifetime_study_minutes" : "COALESCE(SUM(ds.minutes), 0)"} AS minutes,
+      ${period === "overall" ? "u.lifetime_study_sessions" : "COALESCE(SUM(ds.sessions), 0)"} AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     JOIN squad_members sm ON sm.user_id = u.id
     LEFT JOIN daily_stats ds ON ds.user_id = u.id
     WHERE ${clauses.join(" AND ")}
-    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
     LIMIT 50
   `).bind(...params).all<{
@@ -1090,13 +1122,13 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
-      COALESCE(SUM(ds.minutes), 0) AS minutes,
-      COALESCE(SUM(ds.sessions), 0) AS sessions,
+      ${period === "overall" ? "u.lifetime_study_minutes" : "COALESCE(SUM(ds.minutes), 0)"} AS minutes,
+      ${period === "overall" ? "u.lifetime_study_sessions" : "COALESCE(SUM(ds.sessions), 0)"} AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     LEFT JOIN daily_stats ds ON ds.user_id = u.id
     ${whereClause}
-    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json
+    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
     LIMIT 50
   `).bind(...params).all<{
@@ -1754,6 +1786,15 @@ async function handlePlayerStats(request: Request, env: Env) {
   }
 
   async function getStats(period: LeaderboardPeriod) {
+    if (period === "overall") {
+      const row = await env.DB.prepare(`
+        SELECT lifetime_study_minutes AS minutes, lifetime_study_sessions AS sessions,
+          (SELECT MAX(date) FROM daily_stats WHERE user_id = users.id) AS lastActiveDate
+        FROM users
+        WHERE id = ?
+      `).bind(targetUserId).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
+      return row ?? { minutes: 0, sessions: 0, lastActiveDate: null };
+    }
     const periodFilter = leaderboardWhere(period);
     const clauses = [`u.id = ?`];
     const params: string[] = [targetUserId, ...periodFilter.params];

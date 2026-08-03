@@ -42,7 +42,7 @@ import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveA
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
-import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors } from "./lib/flaggle";
+import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
 import { filterCountries, findCountryByName, GEODLE_COUNTRY_COUNT, GEODLE_MAX_GUESSES, getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt, scoreGeodleGuess } from "./lib/geodle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 
@@ -1922,12 +1922,24 @@ function buildSessionsFromTimerRange(timer: TimerState, endedAt: string) {
   return [...buckets.values()].map((bucket) => buildSessionFromTimer(timer, bucket.endedAt, Math.max(1, Math.round(bucket.seconds / 60)), bucket.startedAt));
 }
 
+function getNewLifetimeTotals(state: AppState, sessions: StudySession[]) {
+  return sessions
+    .filter((session) => session.kind === "study" || session.kind === "exam")
+    .reduce((totals, session) => ({
+      minutes: totals.minutes + Math.max(0, Math.round(session.minutes)),
+      sessions: totals.sessions + 1,
+    }), { minutes: state.lifetimeStudyMinutes, sessions: state.lifetimeStudySessions });
+}
+
 function prependSessionsToState(state: AppState, sessions: StudySession[], postSession?: StudySession) {
   const socialState = postSession && state.social.autoPostSessions
     ? queueFeedPost(state, postSession, getSessionCourseName(state, postSession))
     : state;
+  const lifetimeTotals = getNewLifetimeTotals(socialState, sessions);
   return {
     ...socialState,
+    lifetimeStudyMinutes: lifetimeTotals.minutes,
+    lifetimeStudySessions: lifetimeTotals.sessions,
     sessions: pruneSessionHistory([...sessions, ...socialState.sessions]),
   };
 }
@@ -2735,6 +2747,7 @@ function App() {
   const [flaggleDropdownOpen, setFlaggleDropdownOpen] = useState(false);
   const [flaggleMessage, setFlaggleMessage] = useState("");
   const [flaggleProcessing, setFlaggleProcessing] = useState(false);
+  const [flagglePreviewDataUrl, setFlagglePreviewDataUrl] = useState("");
   const canSendUpdateNotice = canViewR2Usage && isValidAppVersion(currentAppVersion);
 
   function getAppMetadata(): AppMetadata {
@@ -3482,7 +3495,6 @@ function App() {
   const geodleGuessesLeft = Math.max(0, GEODLE_MAX_GUESSES - state.geodlePuzzle.guesses.length);
   const flaggleOptions = filterFlaggleCountries(flaggleDraft).slice(0, 80);
   const flaggleRows = state.flagglePuzzle.guesses.toReversed();
-  const latestFlaggleGuess = flaggleRows[0] ?? null;
   const flaggleGuessesLeft = Math.max(0, FLAGGLE_MAX_GUESSES - state.flagglePuzzle.guesses.length);
   const wordlePuzzleIsToday = Boolean(state.wordlePuzzle.seedSalt && state.wordlePuzzle.activeDate === todayStr && state.wordlePuzzle.puzzleId === getWordlePuzzleId(todayStr, state.wordlePuzzle.seedSalt));
   const geodlePuzzleIsToday = Boolean(state.geodlePuzzle.seedSalt && state.geodlePuzzle.activeDate === todayStr && state.geodlePuzzle.puzzleId === getGeodlePuzzleId(todayStr, state.geodlePuzzle.seedSalt));
@@ -3606,7 +3618,7 @@ function App() {
     [calendarToday, state.calendarEntries, taskLookup],
   );
 
-  const totalAllTimeMinutes = state.sessions.reduce((s, se) => s + se.minutes, 0);
+  const totalAllTimeMinutes = state.lifetimeStudyMinutes;
   const sessionDays = new Set(state.sessions.map(s => isoDate(new Date(s.endedAt))));
   const firstSessionDate = state.sessions.length
     ? [...state.sessions].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())[0].startedAt
@@ -5131,6 +5143,22 @@ function App() {
     setViewingFriend(friend);
     setViewingFriendStats(null);
     setViewingFriendLoading(true);
+    if (friend.userId === state.social.userId) {
+      const daily = getLocalLeaderboardEntry(state, "daily");
+      const weekly = getLocalLeaderboardEntry(state, "weekly");
+      const overall = getLocalLeaderboardEntry(state, "overall");
+      setViewingFriendStats({
+        displayName: state.social.displayName,
+        friendCode: state.social.friendCode,
+        avatar: state.social.avatar,
+        lastSeenAt: state.social.lastSyncedAt,
+        daily: { minutes: daily.minutes, sessions: daily.sessions, lastActiveDate: daily.lastActiveDate },
+        weekly: { minutes: weekly.minutes, sessions: weekly.sessions, lastActiveDate: weekly.lastActiveDate },
+        overall: { minutes: overall.minutes, sessions: overall.sessions, lastActiveDate: overall.lastActiveDate },
+      });
+      setViewingFriendLoading(false);
+      return;
+    }
     try {
       const stats = await getPlayerStats(state.social, friend.userId);
       setViewingFriendStats(stats);
@@ -5408,6 +5436,24 @@ function App() {
   useEffect(() => {
     if (showFlagglePuzzle) initFlagglePuzzle();
   }, [showFlagglePuzzle]);
+
+  async function refreshFlagglePreview(answer = state.flagglePuzzle.answer, guesses = state.flagglePuzzle.guesses.map((guess) => guess.country), revealFull = state.flagglePuzzle.completed) {
+    if (!answer || !guesses.length) {
+      setFlagglePreviewDataUrl("");
+      return;
+    }
+    try {
+      setFlagglePreviewDataUrl(await revealTargetFlagByGuesses(answer, guesses, revealFull));
+    } catch (error) {
+      console.warn("Could not render Flaggle preview.", error);
+      setFlagglePreviewDataUrl("");
+    }
+  }
+
+  useEffect(() => {
+    if (!showFlagglePuzzle) return;
+    void refreshFlagglePreview();
+  }, [showFlagglePuzzle, state.flagglePuzzle.answer, state.flagglePuzzle.guesses]);
 
   async function installPendingUpdate() {
     if (!isTauriApp()) {
@@ -6203,6 +6249,7 @@ function App() {
     setFlaggleProcessing(true);
     try {
       const result = await maskFlagByTargetColors(country.name, state.flagglePuzzle.answer);
+      const nextGuessNames = [...state.flagglePuzzle.guesses.map((guess) => guess.country), country.name];
       setState((current) => {
         if (current.flagglePuzzle.completed || current.flagglePuzzle.guesses.some((guess) => guess.country === country.name)) return current;
         const guesses = [...current.flagglePuzzle.guesses, { country: country.name, similarity: result.similarity, maskedFlagDataUrl: result.maskedFlagDataUrl }];
@@ -6226,6 +6273,7 @@ function App() {
       } else {
         setFlaggleMessage("");
       }
+      void refreshFlagglePreview(state.flagglePuzzle.answer, nextGuessNames, country.name === state.flagglePuzzle.answer || state.flagglePuzzle.guesses.length + 1 >= FLAGGLE_MAX_GUESSES);
       setFlaggleDraft("");
       setFlaggleDropdownOpen(false);
     } catch (error) {
@@ -11537,8 +11585,8 @@ function App() {
             </div>
 
             <div className="flaggle-preview-card">
-              {latestFlaggleGuess ? (
-                <img src={latestFlaggleGuess.maskedFlagDataUrl} alt={`Masked ${latestFlaggleGuess.country} flag clue`} />
+              {flagglePreviewDataUrl ? (
+                <img src={flagglePreviewDataUrl} alt="Revealed target flag clue" />
               ) : (
                 <div className="flaggle-preview-empty">Guess a country to reveal matching flag colors.</div>
               )}

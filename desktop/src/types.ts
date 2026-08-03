@@ -389,6 +389,8 @@ export interface AppState {
   exams: Exam[];
   calendarEntries: CalendarEntry[];
   sessions: StudySession[];
+  lifetimeStudyMinutes: number;
+  lifetimeStudySessions: number;
   exports: VaultExport[];
   settings: Settings;
   social: SocialState;

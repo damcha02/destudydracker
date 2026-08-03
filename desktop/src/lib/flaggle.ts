@@ -39,10 +39,6 @@ function colorDistance(a: [number, number, number], b: [number, number, number])
   return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
-function quantize(value: number) {
-  return Math.round(value / 16) * 16;
-}
-
 async function imageFromSrc(src: string): Promise<HTMLImageElement> {
   const image = new Image();
   image.decoding = "async";
@@ -63,22 +59,11 @@ async function flagUrlToImageData(src: string) {
   return { canvas, context, data: context.getImageData(0, 0, FLAG_WIDTH, FLAG_HEIGHT) };
 }
 
-function buildTargetPalette(data: ImageData) {
-  const seen = new Set<string>();
-  const palette: [number, number, number][] = [];
-  for (let i = 0; i < data.data.length; i += 4) {
-    if (data.data[i + 3] < 128) continue;
-    const color: [number, number, number] = [quantize(data.data[i]), quantize(data.data[i + 1]), quantize(data.data[i + 2])];
-    const key = color.join(",");
-    if (seen.has(key)) continue;
-    seen.add(key);
-    palette.push(color);
-  }
-  return palette;
-}
-
-function colorMatchesPalette(color: [number, number, number], palette: [number, number, number][]) {
-  return palette.some((target) => colorDistance(color, target) <= COLOR_TOLERANCE);
+function pixelsMatchAt(target: ImageData, guess: ImageData, index: number) {
+  if (target.data[index + 3] < 128 || guess.data[index + 3] < 128) return false;
+  const targetColor: [number, number, number] = [target.data[index], target.data[index + 1], target.data[index + 2]];
+  const guessColor: [number, number, number] = [guess.data[index], guess.data[index + 1], guess.data[index + 2]];
+  return colorDistance(targetColor, guessColor) <= COLOR_TOLERANCE;
 }
 
 export function makeFlaggleSeedSalt() {
@@ -123,16 +108,14 @@ export async function maskFlagByTargetColors(guessName: string, answerName: stri
   if (!guessUrl || !answerUrl) throw new Error("Flag asset not found.");
 
   const [guessRender, answerRender] = await Promise.all([flagUrlToImageData(guessUrl), flagUrlToImageData(answerUrl)]);
-  const palette = buildTargetPalette(answerRender.data);
-  const output = new ImageData(new Uint8ClampedArray(guessRender.data.data), FLAG_WIDTH, FLAG_HEIGHT);
+  const output = new ImageData(new Uint8ClampedArray(answerRender.data.data), FLAG_WIDTH, FLAG_HEIGHT);
   let visible = 0;
   let matched = 0;
 
   for (let i = 0; i < output.data.length; i += 4) {
-    if (output.data[i + 3] < 128) continue;
+    if (answerRender.data.data[i + 3] < 128) continue;
     visible++;
-    const color: [number, number, number] = [output.data[i], output.data[i + 1], output.data[i + 2]];
-    if (colorMatchesPalette(color, palette)) {
+    if (pixelsMatchAt(answerRender.data, guessRender.data, i)) {
       matched++;
       continue;
     }
@@ -141,11 +124,41 @@ export async function maskFlagByTargetColors(guessName: string, answerName: stri
     output.data[i + 2] = 25;
   }
 
-  guessRender.context.putImageData(output, 0, 0);
+  answerRender.context.putImageData(output, 0, 0);
   return {
-    maskedFlagDataUrl: guessRender.canvas.toDataURL("image/png"),
+    maskedFlagDataUrl: answerRender.canvas.toDataURL("image/png"),
     similarity: visible > 0 ? Math.round((matched / visible) * 1000) / 10 : 0,
   };
+}
+
+export async function revealTargetFlagByGuesses(answerName: string, guessNames: string[], revealFull = false) {
+  const answer = findFlaggleCountry(answerName);
+  if (!answer) throw new Error("Country not found.");
+  const answerUrl = flagUrls[flagPath(answer)];
+  if (!answerUrl) throw new Error("Flag asset not found.");
+  const answerRender = await flagUrlToImageData(answerUrl);
+  if (revealFull || guessNames.includes(answerName)) return answerRender.canvas.toDataURL("image/png");
+
+  const guessUrls = guessNames.flatMap((guessName) => {
+    const country = findFlaggleCountry(guessName);
+    if (!country) return [];
+    const url = flagUrls[flagPath(country)];
+    return url ? [url] : [];
+  });
+  if (!guessUrls.length) return "";
+  const guessImages = await Promise.all(guessUrls.map(flagUrlToImageData));
+  const output = new ImageData(new Uint8ClampedArray(answerRender.data.data), FLAG_WIDTH, FLAG_HEIGHT);
+
+  for (let i = 0; i < output.data.length; i += 4) {
+    if (output.data[i + 3] < 128) continue;
+    if (guessImages.some((guessImage) => pixelsMatchAt(answerRender.data, guessImage.data, i))) continue;
+    output.data[i] = 25;
+    output.data[i + 1] = 25;
+    output.data[i + 2] = 25;
+  }
+
+  answerRender.context.putImageData(output, 0, 0);
+  return answerRender.canvas.toDataURL("image/png");
 }
 
 export const FLAGGLE_MAX_GUESSES = MAX_GUESSES;
