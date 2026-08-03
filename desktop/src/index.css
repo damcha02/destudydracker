@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Courier+Prime:wght@400;700&display=swap");
 
 :root {
   --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
@@ -92,6 +92,135 @@
   --garden-sky: oklch(0.93 0.02 220);
   --garden-soil: oklch(0.80 0.03 60);
   color-scheme: light;
+}
+
+:root[data-app-style="field-notebook"] {
+  --font-serif: "Newsreader", Georgia, serif;
+  --font-sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "Courier Prime", "IBM Plex Mono", ui-monospace, monospace;
+  --r-xs: 0;
+  --r-sm: 2px;
+  --r-md: 2px;
+  --r-lg: 3px;
+  --r-xl: 3px;
+  --r-pill: 2px;
+  --bg: #e6dfd1;
+  --bg-top: #efe8da;
+  --bg-grad-1: #e6dfd1;
+  --bg-grad-2: #e6dfd1;
+  --surface: #fbf8f0;
+  --surface-2: #f4efe3;
+  --surface-raised: #fbf8f0;
+  --surface-inset: #f6f1e5;
+  --hover: #efe8da;
+  --line: #cec3ae;
+  --line-soft: #ded5c3;
+  --line-strong: #23211d;
+  --ink: #23211d;
+  --ink-2: #3d382f;
+  --ink-3: #6d6656;
+  --ink-4: #8b8474;
+  --text: var(--ink);
+  --muted: var(--ink-3);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --accent: #23211d;
+  --accent-strong: #000;
+  --accent-soft: rgb(35 33 29 / 0.07);
+  --accent-line: rgb(35 33 29 / 0.36);
+  --on-accent: #fbf8f0;
+  --warn: #9c5a34;
+  --warn-soft: rgb(156 90 52 / 0.12);
+  --danger: #9c5a34;
+  --danger-soft: rgb(156 90 52 / 0.12);
+  --garden: #4f6b4a;
+  --garden-deep: #3f593b;
+  --garden-soft: rgb(79 107 74 / 0.13);
+  --ok: #4f6b4a;
+  --steady: #4a5f86;
+  --watch: #9c5a34;
+  --critical: #9c5a34;
+  --shadow-sm: 0 1px 0 rgb(35 33 29 / 0.05);
+  --shadow-md: 0 2px 0 rgb(35 33 29 / 0.06);
+  --shadow-lg: 0 2px 0 rgb(35 33 29 / 0.08);
+  --shadow: var(--shadow-md);
+  --ring-track: #e2dac9;
+  --garden-sky: #efe8da;
+  --garden-soil: #d7c5a2;
+  --fn-desk: #e6dfd1;
+  --fn-paper: #fbf8f0;
+  --fn-paper-1: #f4efe3;
+  --fn-paper-2: #e4dccb;
+  --fn-paper-3: #efe8da;
+  --fn-slip: #f0e6c8;
+  --fn-rule-hard: 1px solid #23211d;
+  --fn-rule-soft: 1px solid #ded5c3;
+  --fn-rule-dot: 1px dotted #d5cbb7;
+  --fn-edge: 1px solid #cec3ae;
+  --fn-link: #3c5f7a;
+  --fn-stamp: #9c5a34;
+  --fn-course-blue: #4a5f86;
+  --fn-course-green: #4f6b4a;
+  --fn-course-ochre: #9a7c3a;
+  --fn-course-mulberry: #8a5670;
+  color-scheme: light;
+}
+
+:root[data-app-style="field-notebook"][data-theme="dark"] {
+  --bg: #191814;
+  --bg-top: #22201c;
+  --bg-grad-1: #191814;
+  --bg-grad-2: #191814;
+  --surface: #24221e;
+  --surface-2: #2b2823;
+  --surface-raised: #282520;
+  --surface-inset: #201e1a;
+  --hover: #312d27;
+  --line: #58503f;
+  --line-soft: #3f392e;
+  --line-strong: #eee6d6;
+  --ink: #eee6d6;
+  --ink-2: #d7cdbb;
+  --ink-3: #aaa08d;
+  --ink-4: #817867;
+  --text: var(--ink);
+  --muted: var(--ink-3);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --accent: #eee6d6;
+  --accent-strong: #fff7e8;
+  --accent-soft: rgb(238 230 214 / 0.08);
+  --accent-line: rgb(238 230 214 / 0.32);
+  --on-accent: #191814;
+  --warn: #c47a4d;
+  --danger: #c47a4d;
+  --garden: #73956a;
+  --garden-deep: #5f8057;
+  --ok: #73956a;
+  --steady: #7187b4;
+  --watch: #c47a4d;
+  --critical: #c47a4d;
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.18);
+  --shadow-md: 0 2px 0 rgb(0 0 0 / 0.22);
+  --shadow-lg: 0 2px 0 rgb(0 0 0 / 0.28);
+  --ring-track: #3d382f;
+  --fn-desk: #191814;
+  --fn-paper: #24221e;
+  --fn-paper-1: #2b2823;
+  --fn-paper-2: #363126;
+  --fn-paper-3: #2e2a23;
+  --fn-slip: #3a3020;
+  --fn-rule-hard: 1px solid #eee6d6;
+  --fn-rule-soft: 1px solid #3f392e;
+  --fn-rule-dot: 1px dotted #584f3e;
+  --fn-edge: 1px solid #58503f;
+  --fn-link: #8ea9c5;
+  --fn-stamp: #c47a4d;
+  --fn-course-blue: #7187b4;
+  --fn-course-green: #73956a;
+  --fn-course-ochre: #b69650;
+  --fn-course-mulberry: #a9748f;
+  color-scheme: dark;
 }
 
 /* ---------- PARCHMENT — warm sepia & ink, like a leather-bound notebook ---------- */
@@ -371,7 +500,7 @@ html,
 body {
   margin: 0;
   padding: 0;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 body {
@@ -396,6 +525,12 @@ body {
   background-attachment: scroll;
 }
 
+:root[data-app-style="field-notebook"] body {
+  background: var(--fn-desk);
+  background-attachment: scroll;
+  letter-spacing: 0;
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -414,13 +549,21 @@ body::before {
   display: none;
 }
 
+:root[data-app-style="field-notebook"] body::before {
+  display: none;
+}
+
+:root[data-app-style="field-notebook"] #fx-canvas {
+  display: none !important;
+}
+
 :root[data-background-effect="off"] #fx-canvas {
   display: none !important;
 }
 
 #root {
   min-height: 100vh;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 ::selection {
@@ -437,6 +580,15 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+:root[data-app-style="field-notebook"] input,
+:root[data-app-style="field-notebook"] select,
+:root[data-app-style="field-notebook"] textarea {
+  border: var(--fn-edge);
+  border-radius: 2px;
+  background: var(--surface);
+  box-shadow: none;
 }
 
 button {
@@ -527,4 +679,108 @@ p {
 
 .fade-up {
   animation: fadeUp 0.4s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* Keep Field Notebook above named palette overrides. */
+:root[data-app-style="field-notebook"] {
+  --bg: #e6dfd1;
+  --bg-top: #efe8da;
+  --bg-grad-1: #e6dfd1;
+  --bg-grad-2: #e6dfd1;
+  --surface: #fbf8f0;
+  --surface-2: #f4efe3;
+  --surface-raised: #fbf8f0;
+  --surface-inset: #f6f1e5;
+  --hover: #efe8da;
+  --line: #cec3ae;
+  --line-soft: #ded5c3;
+  --line-strong: #23211d;
+  --ink: #23211d;
+  --ink-2: #3d382f;
+  --ink-3: #6d6656;
+  --ink-4: #8b8474;
+  --text: var(--ink);
+  --muted: var(--ink-3);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --accent: #23211d;
+  --accent-strong: #000;
+  --accent-soft: rgb(35 33 29 / 0.07);
+  --accent-line: rgb(35 33 29 / 0.36);
+  --on-accent: #fbf8f0;
+  --warn: #9c5a34;
+  --danger: #9c5a34;
+  --garden: #4f6b4a;
+  --ok: #4f6b4a;
+  --steady: #4a5f86;
+  --watch: #9c5a34;
+  --critical: #9c5a34;
+  --shadow-sm: 0 1px 0 rgb(35 33 29 / 0.05);
+  --shadow-md: 0 2px 0 rgb(35 33 29 / 0.06);
+  --shadow-lg: 0 2px 0 rgb(35 33 29 / 0.08);
+  --shadow: var(--shadow-md);
+  --ring-track: #e2dac9;
+  --fn-desk: #e6dfd1;
+  --fn-paper: #fbf8f0;
+  --fn-paper-1: #f4efe3;
+  --fn-paper-2: #e4dccb;
+  --fn-paper-3: #efe8da;
+  --fn-slip: #f0e6c8;
+  --fn-rule-hard: 1px solid #23211d;
+  --fn-rule-soft: 1px solid #ded5c3;
+  --fn-rule-dot: 1px dotted #d5cbb7;
+  --fn-edge: 1px solid #cec3ae;
+  --fn-link: #3c5f7a;
+  --fn-stamp: #9c5a34;
+}
+
+:root[data-app-style="field-notebook"][data-theme="dark"] {
+  --bg: #191814;
+  --bg-top: #22201c;
+  --bg-grad-1: #191814;
+  --bg-grad-2: #191814;
+  --surface: #24221e;
+  --surface-2: #2b2823;
+  --surface-raised: #282520;
+  --surface-inset: #201e1a;
+  --hover: #312d27;
+  --line: #58503f;
+  --line-soft: #3f392e;
+  --line-strong: #eee6d6;
+  --ink: #eee6d6;
+  --ink-2: #d7cdbb;
+  --ink-3: #aaa08d;
+  --ink-4: #817867;
+  --text: var(--ink);
+  --muted: var(--ink-3);
+  --border: var(--line);
+  --border-strong: var(--line-strong);
+  --accent: #eee6d6;
+  --accent-strong: #fff7e8;
+  --accent-soft: rgb(238 230 214 / 0.08);
+  --accent-line: rgb(238 230 214 / 0.32);
+  --on-accent: #191814;
+  --warn: #c47a4d;
+  --danger: #c47a4d;
+  --garden: #73956a;
+  --ok: #73956a;
+  --steady: #7187b4;
+  --watch: #c47a4d;
+  --critical: #c47a4d;
+  --shadow-sm: 0 1px 0 rgb(0 0 0 / 0.18);
+  --shadow-md: 0 2px 0 rgb(0 0 0 / 0.22);
+  --shadow-lg: 0 2px 0 rgb(0 0 0 / 0.28);
+  --ring-track: #3d382f;
+  --fn-desk: #191814;
+  --fn-paper: #24221e;
+  --fn-paper-1: #2b2823;
+  --fn-paper-2: #363126;
+  --fn-paper-3: #2e2a23;
+  --fn-slip: #3a3020;
+  --fn-rule-hard: 1px solid #eee6d6;
+  --fn-rule-soft: 1px solid #3f392e;
+  --fn-rule-dot: 1px dotted #584f3e;
+  --fn-edge: 1px solid #58503f;
+  --fn-link: #8ea9c5;
+  --fn-stamp: #c47a4d;
 }

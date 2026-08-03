@@ -455,6 +455,8 @@ const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
+const APP_STYLE_STORAGE_KEY = "study-tracker-style";
+const FIELD_DASHBOARD_LAYOUT_KEY = "study-tracker-field-dashboard-layout";
 const DISMISSED_ANNOUNCEMENTS_KEY = "study-tracker-dismissed-announcements";
 const TELEMETRY_INSTALL_ID_KEY = "study-tracker-telemetry-install-id";
 const SESSION_HISTORY_DAYS = 365;
@@ -491,6 +493,9 @@ type ThemePalette =
   | "gpt"
   | "claude"
   | "cute";
+type AppStyle = "modern" | "field-notebook";
+type ThemePanelView = "themes" | "styles";
+type FieldDashboardLayout = "quiet" | "full";
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
 type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
 type DashboardWidgetWidth = "full" | "half" | "third";
@@ -1299,6 +1304,11 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
   { id: "cute", name: "Cute", desc: "Kawaii pastel pinks.", swatch: "#ff6b9d" },
 ];
 
+const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
+  { id: "modern", name: "Modern", desc: "Current rounded study dashboard with palette themes.", swatch: "linear-gradient(135deg, #8fb4ff, #98c379)" },
+  { id: "field-notebook", name: "Field Notebook", desc: "Paper, ink, course tabs, ruled ledgers, and study-circle social styling.", swatch: "linear-gradient(135deg, #fbf8f0 0 45%, #23211d 45% 55%, #9c5a34 55%)" },
+];
+
 function isThemePalette(value: string | null): value is ThemePalette {
   return themePalettes.some((palette) => palette.id === value);
 }
@@ -1310,6 +1320,14 @@ function loadThemePalette(): ThemePalette {
   if (saved === "cosmic") return "retrowave";
   if (saved === "grove") return "forest";
   return "default";
+}
+
+function loadAppStyle(): AppStyle {
+  return localStorage.getItem(APP_STYLE_STORAGE_KEY) === "field-notebook" ? "field-notebook" : "modern";
+}
+
+function loadFieldDashboardLayout(): FieldDashboardLayout {
+  return localStorage.getItem(FIELD_DASHBOARD_LAYOUT_KEY) === "full" ? "full" : "quiet";
 }
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
@@ -2609,6 +2627,9 @@ function App() {
   });
   const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
+  const [appStyle, setAppStyle] = useState<AppStyle>(loadAppStyle);
+  const [themePanelView, setThemePanelView] = useState<ThemePanelView>("themes");
+  const [fieldDashboardLayout, setFieldDashboardLayout] = useState<FieldDashboardLayout>(loadFieldDashboardLayout);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
   const [dashboardEditing, setDashboardEditing] = useState(false);
@@ -2627,6 +2648,7 @@ function App() {
   const [visibleTabsOptionsOpen, setVisibleTabsOptionsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
+  const [selectedQuietDashboardEntryId, setSelectedQuietDashboardEntryId] = useState<string | null>(null);
   const [helpTab, setHelpTab] = useState<TabKey | null>(null);
   const [menuHelpOpen, setMenuHelpOpen] = useState(false);
   const [tourState, setTourState] = useState<{ tab: TabKey; step: number } | null>(null);
@@ -2951,6 +2973,11 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    document.documentElement.dataset.appStyle = appStyle;
+    localStorage.setItem(APP_STYLE_STORAGE_KEY, appStyle);
+  }, [appStyle]);
+
+  useEffect(() => {
     if (palette === "default") {
       delete document.documentElement.dataset.palette;
     } else {
@@ -2962,6 +2989,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(DASHBOARD_LAYOUT_KEY, dashboardLayout);
   }, [dashboardLayout]);
+
+  useEffect(() => {
+    localStorage.setItem(FIELD_DASHBOARD_LAYOUT_KEY, fieldDashboardLayout);
+  }, [fieldDashboardLayout]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_DASHBOARD_LAYOUT_KEY, JSON.stringify(customDashboardLayout));
@@ -8527,6 +8558,227 @@ function App() {
     );
   }
 
+  function getFieldDashboardData() {
+    const todayLabel = new Intl.DateTimeFormat("en", { weekday: "long", day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${calendarToday}T00:00:00`));
+    const yearStart = new Date(new Date().getFullYear(), 0, 1);
+    const weekNumber = Math.ceil((((new Date().getTime() - yearStart.getTime()) / 86400000) + yearStart.getDay() + 1) / 7);
+    const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
+    const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
+    const totalUnitsLeft = state.tasks.reduce((sum, task) => sum + getRemainingUnits(task), 0);
+    const nextEntry = todayCalendarEntries.find((entry) => !entry.completed) ?? todayCalendarEntries[0] ?? null;
+    const nextTask = nextEntry?.taskId ? taskLookup.get(nextEntry.taskId) ?? null : null;
+    const nextCourse = nextTask ? courseLookup.get(nextTask.courseId) ?? null : nextEntry?.adHocCourseId ? courseLookup.get(nextEntry.adHocCourseId) ?? null : null;
+    const nextTitle = nextTask?.title ?? nextEntry?.adHocTitle ?? "Plan the next study block";
+    const nextMeta = nextEntry
+      ? `${getCalendarEntryUnitLabel(nextEntry)} · ${nextCourse?.name ?? "General focus"} · ${nextTask?.dueDate ? `due ${formatDate(nextTask.dueDate)}` : formatTimeRange(nextEntry)}`
+      : "No task pinned for today · open the planner calendar to place one unit.";
+    const queueCount = todayCalendarEntries.filter((entry) => !entry.completed).length;
+    const nearestTaskDeadline = state.tasks
+      .filter((task): task is Task & { dueDate: string } => Boolean(task.dueDate) && getRemainingUnits(task) > 0)
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0]?.dueDate ?? null;
+    const nearestDeadline = nearestTaskDeadline ?? upcomingExams[0]?.examDate ?? null;
+    const earliestExam = upcomingExams[0] ?? null;
+
+    return { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, nextEntry, nextTask, nextCourse, nextTitle, nextMeta, queueCount, nearestDeadline, earliestExam };
+  }
+
+  function renderFieldDashboardSwitch() {
+    return (
+      <div className="fn-view-switch" aria-label="Field Notebook dashboard layout">
+        <span>View</span>
+        {(["quiet", "full"] as FieldDashboardLayout[]).map((layout) => (
+          <button key={layout} type="button" className={fieldDashboardLayout === layout ? "active" : ""} onClick={() => setFieldDashboardLayout(layout)}>
+            {layout === "quiet" ? "Quiet" : "Full"}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderFieldNotebookQuietDashboard() {
+    const { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, queueCount, nearestDeadline } = getFieldDashboardData();
+    const quietTasks = todayCalendarEntries.filter((entry) => !entry.completed).slice(0, 3);
+    const selectedQuietEntry = quietTasks.find((entry) => entry.id === selectedQuietDashboardEntryId) ?? quietTasks[0] ?? null;
+    const selectedQuietTask = selectedQuietEntry ? taskLookup.get(selectedQuietEntry.taskId) ?? null : null;
+    const selectedQuietCourse = selectedQuietTask
+      ? courseLookup.get(selectedQuietTask.courseId) ?? null
+      : selectedQuietEntry?.adHocCourseId
+        ? courseLookup.get(selectedQuietEntry.adHocCourseId) ?? null
+        : null;
+    const selectedQuietTitle = selectedQuietTask?.title ?? selectedQuietEntry?.adHocTitle ?? "Choose a study block";
+    const selectedQuietMeta = selectedQuietEntry
+      ? `${getCalendarEntryUnitLabel(selectedQuietEntry)} · ${selectedQuietCourse?.name ?? "General focus"} · ${selectedQuietTask?.dueDate ? `due ${formatDate(selectedQuietTask.dueDate)}` : formatTimeRange(selectedQuietEntry)}`
+      : "Select a task below, or place one in the planner calendar.";
+    const quietExams = upcomingExams.slice(0, 4);
+
+    return (
+      <section className="fn-dashboard fn-quiet-dashboard fade-up">
+        <header className="fn-quiet-topbar">
+          <div>
+            <p className="fn-stamp-line">{todayLabel} · semester desk · week {weekNumber}</p>
+            <h2>On the desk</h2>
+            <p><strong>{selectedQuietTitle}</strong> · {selectedQuietMeta}</p>
+          </div>
+          {renderFieldDashboardSwitch()}
+        </header>
+
+        <div className="fn-quiet-grid">
+          <main className="fn-quiet-main">
+            <div className="fn-quiet-action-row">
+              {selectedQuietTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedQuietTask)}>Start focus</button> : null}
+              <button type="button" className="ghost-button" onClick={openTodayTodoDrawer}>Something else</button>
+              <span>{formatMinutes(todayMinutes)} of {formatMinutes(dailyGoalMinutes)} done today.</span>
+            </div>
+
+            <div className="fn-quiet-rule" />
+
+            <div className="fn-quiet-list" data-tour="dashboard-urgent">
+              {quietTasks.length ? quietTasks.map((entry) => {
+                const task = taskLookup.get(entry.taskId);
+                const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
+                const active = selectedQuietEntry?.id === entry.id;
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className={`fn-quiet-row ${active ? "active" : ""}`}
+                    style={{ "--fn-course": course?.color ?? "var(--fn-course-blue)" } as CSSProperties}
+                    onClick={() => setSelectedQuietDashboardEntryId(entry.id)}
+                  >
+                    <i />
+                    <span>{task?.title ?? entry.adHocTitle ?? "Calendar task"} <em>{course?.name ?? "General"}</em></span>
+                    <strong>{active ? "selected" : task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</strong>
+                  </button>
+                );
+              }) : (
+                <p className="fn-quiet-empty">No scheduled units today. Place one task in the planner calendar.</p>
+              )}
+            </div>
+
+            <p className="fn-quiet-note">Course ledger, weekly rhythm, vault links, social, and squads all still exist under Full or their tabs. Quiet shows one decision and nothing you can scroll past.</p>
+          </main>
+
+          <aside className="fn-quiet-side">
+            <section>
+              <div className="fn-section-rule"><span>Pace</span></div>
+              <p>{formatUnitAmount(totalUnitsLeft)} left<br />{openTaskCount} open tasks<br /><span>{queueCount} planned today</span></p>
+            </section>
+            <section>
+              <div className="fn-section-rule"><span>Ahead</span></div>
+              {quietExams.length ? quietExams.map((exam) => (
+                <div key={exam.id} className="fn-quiet-exam-row"><span>{exam.title}</span><strong>{formatDate(exam.examDate)}</strong></div>
+              )) : <p className="fn-quiet-empty">No upcoming exams.</p>}
+              {nearestDeadline ? <div className="fn-quiet-exam-row"><span>Nearest deadline</span><strong>{formatDate(nearestDeadline)}</strong></div> : null}
+            </section>
+            <section className="fn-focus-ledger quiet">
+              <span>Focused today</span>
+              <strong>{formatMinutes(todayMinutes)} <em>/ {formatMinutes(dailyGoalMinutes)}</em></strong>
+              <div className="fn-ledger-track"><i style={{ width: `${goalProgress}%` }} /></div>
+              <small>{goalProgress}% · streak {streakDays} d</small>
+            </section>
+          </aside>
+        </div>
+      </section>
+    );
+  }
+
+  function renderFieldNotebookFullDashboard() {
+    const { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, nextTask, nextCourse, nextTitle, nextMeta, queueCount, nearestDeadline, earliestExam } = getFieldDashboardData();
+
+    return (
+      <section className="fn-dashboard fade-up">
+        <header className="fn-dashboard-head">
+          <div>
+            <p className="fn-stamp-line">{todayLabel} · week {weekNumber}</p>
+            <h2>{queueCount ? `${queueCount} things stand between you and Friday.` : "The desk is clear for the next plan."}</h2>
+            <p>Semester work · {openTaskCount} open tasks · {formatUnitAmount(totalUnitsLeft)} left{nearestDeadline ? ` · nearest deadline ${formatDate(nearestDeadline)}` : ""}</p>
+          </div>
+          {renderFieldDashboardSwitch()}
+          <div className="fn-focus-ledger">
+            <span>Focused today</span>
+            <strong>{formatMinutes(todayMinutes)} <em>/ {formatMinutes(dailyGoalMinutes)}</em></strong>
+            <div className="fn-ledger-track"><i style={{ width: `${goalProgress}%` }} /></div>
+            <small>{goalProgress}% of daily goal · streak {streakDays} d</small>
+          </div>
+          <div className="fn-score-stamp"><strong>{healthLabel}</strong><span>Score {overallHealth}</span></div>
+        </header>
+
+        <div className="fn-dashboard-grid">
+          <main className="fn-main-ledger">
+            <section className="fn-next-sheet" data-tour="dashboard-today">
+              <div className="fn-section-rule">
+                <span>Study queue · ordered by pressure</span>
+                <em>{queueCount} open · {todayCalendarEntries.length} planned today</em>
+              </div>
+              <article className="fn-next-task" style={{ "--fn-course": nextCourse?.color ?? "var(--fn-course-blue)" } as CSSProperties}>
+                <div>
+                  <span className="fn-course-code">{nextCourse ? nextCourse.name.slice(0, 4).toUpperCase() : "NEXT"}</span>
+                  <span className="fn-pressure">Do this next</span>
+                  <h3>{nextTitle}</h3>
+                  <p>{nextMeta}</p>
+                </div>
+                <div className="fn-next-actions">
+                  {nextTask ? <button type="button" onClick={() => focusTaskFromDashboard(nextTask)}>Start focus</button> : null}
+                  <button type="button" className="ghost-button" onClick={openTodayTodoDrawer}>Something else</button>
+                </div>
+              </article>
+              {renderUrgentTasks(5)}
+            </section>
+
+            <section className="fn-weekly-sheet" data-tour="dashboard-weekly">
+              <div className="fn-section-rule">
+                <span>Weekly rhythm · hours focused</span>
+                <em>{formatMinutes(weeklyTotalMinutes)} this week</em>
+              </div>
+              {renderWeeklyChart("short-weekly")}
+            </section>
+          </main>
+
+          <aside className="fn-side-ledger">
+            <section>
+              <div className="fn-section-rule"><span>Course ledger</span></div>
+              {renderCourseRadar()}
+            </section>
+            <section className="fn-pace-note">
+              <p className="eyebrow">Pace ledger · total workload</p>
+              <div><strong>{formatUnitAmount(totalUnitsLeft)}</strong><span>left</span></div>
+              <div><strong>{openTaskCount}</strong><span>open tasks</span></div>
+              <p>{weeklyTotalMinutes ? `${formatMinutes(weeklyTotalMinutes)} logged this week.` : "No logged focus yet this week."}</p>
+            </section>
+          </aside>
+
+          <aside className="fn-margin-ledger">
+            <section data-tour="dashboard-exam-runway">
+              <div className="fn-section-rule"><span>Exam runway</span></div>
+              {renderExamRunway()}
+            </section>
+            <section className="fn-margin-note">
+              <span>Margin note</span>
+              <p>{earliestExam ? `${earliestExam.title} is first. Block review time before chasing lower-pressure tasks.` : "Pin one task to today so the dashboard can answer the next-action question."}</p>
+            </section>
+            <section>
+              <div className="fn-section-rule"><span>From the vault</span></div>
+              <div className="fn-vault-links">
+                <button type="button" onClick={() => setState((current) => ({ ...current, activeTab: "vault" }))}>Daily/{calendarToday}.md</button>
+                <span>{state.exports.length} exports · {state.settings.vaultPath ? "vault linked" : "vault not linked"}</span>
+              </div>
+            </section>
+          </aside>
+        </div>
+
+        {state.sessions.length > 0 ? (
+          <p className="fn-footer-note">{formatMinutes(totalAllTimeMinutes)} logged across {sessionDays.size} day{sessionDays.size !== 1 ? "s" : ""} since {formatDate(firstSessionDate!)}</p>
+        ) : (
+          <p className="fn-footer-note dim">Your timeline begins when you complete your first session.</p>
+        )}
+      </section>
+    );
+  }
+
+  function renderFieldNotebookDashboard() {
+    return fieldDashboardLayout === "quiet" ? renderFieldNotebookQuietDashboard() : renderFieldNotebookFullDashboard();
+  }
+
   function renderMenuPanel() {
     if (!activeMenuPanel) return null;
 
@@ -8543,25 +8795,54 @@ function App() {
 
           {activeMenuPanel === "theme" ? (
             <div className="settings-panel-body">
-              <div className="theme-choice-grid">
-                {themePalettes.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
-                    onClick={() => setPalette(p.id)}
-                  >
-                    <div className="theme-choice-main">
-                      <span className="theme-choice-swatch" style={{ background: p.swatch }} />
-                      <div>
-                        <strong>{p.name}</strong>
-                        <span>{p.desc}</span>
-                      </div>
-                    </div>
-                    {palette === p.id ? <span className="design-chip">Active</span> : null}
+              <div className="theme-panel-switch" aria-label="Appearance picker">
+                {(["themes", "styles"] as const).map((view) => (
+                  <button key={view} type="button" className={themePanelView === view ? "active" : ""} onClick={() => setThemePanelView(view)}>
+                    {view === "themes" ? "Themes" : "Styles"}
                   </button>
                 ))}
               </div>
+              {themePanelView === "themes" ? (
+                <div className="theme-choice-grid">
+                  {themePalettes.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
+                      onClick={() => setPalette(p.id)}
+                    >
+                      <div className="theme-choice-main">
+                        <span className="theme-choice-swatch" style={{ background: p.swatch }} />
+                        <div>
+                          <strong>{p.name}</strong>
+                          <span>{p.desc}</span>
+                        </div>
+                      </div>
+                      {palette === p.id ? <span className="design-chip">Active</span> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="theme-choice-grid style-choice-grid">
+                  {appStyles.map((styleOption) => (
+                    <button
+                      key={styleOption.id}
+                      type="button"
+                      className={`theme-choice-card style-choice-card ${appStyle === styleOption.id ? "active" : ""}`}
+                      onClick={() => setAppStyle(styleOption.id)}
+                    >
+                      <div className="theme-choice-main">
+                        <span className="theme-choice-swatch style-choice-swatch" style={{ background: styleOption.swatch }} />
+                        <div>
+                          <strong>{styleOption.name}</strong>
+                          <span>{styleOption.desc}</span>
+                        </div>
+                      </div>
+                      {appStyle === styleOption.id ? <span className="design-chip">Active</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="theme-mode-row" aria-label="Theme mode">
                 {(["light", "dark"] as const).map((mode) => (
                   <button
@@ -9222,7 +9503,9 @@ function App() {
         />
       ) : null}
 
-      {state.activeTab === "dashboard" ? (
+      {state.activeTab === "dashboard" && appStyle === "field-notebook" ? renderFieldNotebookDashboard() : null}
+
+      {state.activeTab === "dashboard" && appStyle !== "field-notebook" ? (
         <section className="dashboard-design fade-up">
           <div className="dashboard-design-head">
             <div>
@@ -9312,7 +9595,41 @@ function App() {
       ) : null}
 
       {state.activeTab === "planner" ? (
-        <section className="planner-stack">
+        <section className={`planner-stack ${appStyle === "field-notebook" ? "fn-planner" : ""}`}>
+          {appStyle === "field-notebook" ? (
+            <aside className="fn-planner-rail" aria-label="Planner folders">
+              <div className="fn-rail-section">
+                <div className="fn-rail-label">Semesters</div>
+                {state.semesters.map((semester) => {
+                  const courses = getSemesterCourses(state, semester.id);
+                  const tasks = getSemesterTasks(state, semester.id);
+                  const active = expandedSemesterIds.includes(semester.id);
+                  return (
+                    <button key={semester.id} type="button" className={`fn-rail-row ${active ? "active" : ""}`} onClick={() => toggleSemester(semester.id)}>
+                      <strong>{semester.name}</strong>
+                      <span>{courses.length} courses · {tasks.length} tasks</span>
+                    </button>
+                  );
+                })}
+                <button type="button" className="fn-rail-link" onClick={() => setShowSemesterForm((current) => !current)}>+ new semester</button>
+              </div>
+              <div className="fn-rail-section">
+                <div className="fn-rail-label">Course folders</div>
+                {state.courses.map((course) => {
+                  const active = expandedCourseIds.includes(course.id);
+                  return (
+                    <button key={course.id} type="button" className={`fn-course-folder ${active ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => {
+                      setExpandedSemesterIds((current) => (current.includes(course.semesterId) ? current : [...current, course.semesterId]));
+                      toggleCourse(course.id);
+                    }}>
+                      <strong>{course.name}</strong>
+                      <span>{getCourseTasks(state, course.id).length}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+          ) : null}
           <article className="panel-card planner-board-panel" data-tour="planner-semesters">
             <div className="section-head planner-header">
               <div>
@@ -9967,7 +10284,7 @@ function App() {
       ) : null}
 
       {state.activeTab === "timer" ? (
-        <section className="timer-grid">
+        <section className={`timer-grid ${appStyle === "field-notebook" ? "fn-timer" : ""}`}>
           <article className="panel-card timer-main-card">
             <div className="section-head">
               <div>
@@ -10432,7 +10749,44 @@ function App() {
       ) : null}
 
       {state.activeTab === "vault" ? (
-        <section className="vault-shell">
+        <section className={`vault-shell ${appStyle === "field-notebook" ? "fn-vault" : ""}`}>
+          {appStyle === "field-notebook" ? (
+            <aside className="fn-vault-rail" aria-label="Vault drawers">
+              <div className="fn-vault-status">
+                <span className={state.settings.vaultPath ? "linked" : ""} />
+                <strong>{state.settings.vaultName || "StudyTrackerVault"}</strong>
+                <em>{state.settings.vaultPath ? "SYNCED" : "NOT LINKED"}</em>
+              </div>
+              <div className="fn-vault-tabs">
+                {vaultSpaces.map((space) => (
+                  <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>{space.label}</button>
+                ))}
+              </div>
+              <div className="fn-rail-section">
+                <div className="fn-rail-label">Recent daily notes</div>
+                <button type="button" className="fn-rail-row active" onClick={() => setVaultNoteDate(calendarToday)}>
+                  <strong>{calendarToday}</strong>
+                  <span>{state.sessions.filter((session) => isoDate(new Date(session.endedAt)) === calendarToday).length} sessions · today</span>
+                </button>
+                {state.exports.slice(0, 5).map((item) => (
+                  <button key={item.id} type="button" className="fn-rail-row" onClick={() => setVaultNoteDate(item.noteDate)}>
+                    <strong>{item.noteDate}</strong>
+                    <span>{item.notePath}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="fn-rail-section">
+                <div className="fn-rail-label">Drawers by course</div>
+                {state.courses.slice(0, 8).map((course) => (
+                  <div key={course.id} className="fn-vault-course" style={{ "--fn-course": course.color } as CSSProperties}>
+                    <span />
+                    <strong>{course.name}</strong>
+                    <em>{getCourseTasks(state, course.id).length} tasks</em>
+                  </div>
+                ))}
+              </div>
+            </aside>
+          ) : null}
           <div className="vault-hero">
             <div>
               <h1>Vault</h1>
@@ -10832,11 +11186,11 @@ function App() {
       ) : null}
 
       {state.activeTab === "friends" ? (
-        <section className="arena-root fade-up">
-          <ArenaBg />
+        <section className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : ""}`}>
+          {appStyle === "field-notebook" ? null : <ArenaBg />}
           <div className="arena-hero-header">
-            <span className="arena-hero-title">Study Arena</span>
-            <span className="arena-hero-sub">Compete. Focus. Rise.</span>
+            <span className="arena-hero-title">{appStyle === "field-notebook" ? "Study Circle" : "Study Arena"}</span>
+            <span className="arena-hero-sub">{appStyle === "field-notebook" ? "Attendance sheet · friends · squads · quiet accountability" : "Compete. Focus. Rise."}</span>
           </div>
 
           <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
@@ -10861,7 +11215,7 @@ function App() {
               <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope" data-tour="social-feed-scope">
                 {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
                   <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
-                    {scope === "global" ? "Global Feed" : "Friends Feed"}
+                    {appStyle === "field-notebook" ? (scope === "global" ? "Global log" : "Friends log") : (scope === "global" ? "Global Feed" : "Friends Feed")}
                   </button>
                 ))}
                 <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" data-tour="social-refresh" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
@@ -10901,11 +11255,11 @@ function App() {
 
               <form className="feed-composer" data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
                 <div>
-                  <span className="arena-kicker">Share latest session</span>
+                  <span className="arena-kicker">{appStyle === "field-notebook" ? "Post your last block" : "Share latest session"}</span>
                   <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
-                  <p>{latestFeedSession ? "Write one sentence, or leave it blank for a chaotic default." : "Finish a study or exam block, then publish it here."}</p>
+                  <p>{latestFeedSession ? (appStyle === "field-notebook" ? "One line for the circle, or leave it blank." : "Write one sentence, or leave it blank for a chaotic default.") : "Finish a study or exam block, then publish it here."}</p>
                 </div>
-                <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder="one sentence for the feed..." disabled={!latestFeedSession || latestFeedSessionPosted} />
+                <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder={appStyle === "field-notebook" ? "one line, or leave it blank..." : "one sentence for the feed..."} disabled={!latestFeedSession || latestFeedSessionPosted} />
                 <div className="feed-composer-actions">
                   <label className="feed-action-icon" data-tour="social-image" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
                     <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
@@ -10948,7 +11302,7 @@ function App() {
                 ) : null}
               </form>
 
-              <div className="section-label" data-tour="social-feed">Activity {feedLoading ? "· Refreshing" : ""}</div>
+              <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : "Activity"} {feedLoading ? "· Refreshing" : ""}</div>
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
                 const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: isOwnPost ? state.social.avatar : item.avatar };
@@ -11846,7 +12200,7 @@ const profileTarget = { userId: entry.userId, displayName: entry.displayName, fr
       ) : null}
 
       {state.activeTab === "break" ? (
-        <section className="break-grid">
+        <section className={`break-grid ${appStyle === "field-notebook" ? "fn-break" : ""}`}>
           <article className="panel-card break-main-card">
             <div className="section-head">
               <div>
