@@ -14379,6 +14379,19 @@ input[type="color"] {
   color: var(--ink);
 }
 
+.fn-quiet-more {
+  width: 100%;
+  border: 0;
+  border-top: var(--fn-rule-dot);
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0 4px;
+  color: var(--fn-link);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-align: left;
+}
+
 .fn-quiet-note {
   max-width: 560px;
   margin-top: 30px;
@@ -14522,10 +14535,39 @@ input[type="color"] {
 
 .fn-dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.62fr) minmax(260px, 1fr) minmax(230px, 0.74fr);
-  gap: 30px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.92fr) minmax(260px, 0.72fr);
+  gap: 24px;
   align-items: start;
-  margin-top: 24px;
+  margin-top: 20px;
+}
+
+.fn-full-dashboard .fn-dashboard-head {
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px) auto;
+  align-items: center;
+  padding-bottom: 17px;
+}
+
+.fn-full-dashboard .fn-dashboard-head .fn-view-switch {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+}
+
+.fn-full-dashboard .fn-dashboard-head .fn-focus-ledger {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  width: min(260px, 100%);
+  text-align: center;
+}
+
+.fn-full-dashboard .fn-dashboard-head h2 {
+  max-width: 820px;
+  font-size: clamp(2rem, 3vw, 3rem);
+}
+
+.fn-full-dashboard .fn-dashboard-head p:not(.fn-stamp-line) {
+  margin-top: 4px;
 }
 
 .fn-main-ledger,
@@ -14534,11 +14576,11 @@ input[type="color"] {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 26px;
+  gap: 20px;
 }
 
 .fn-margin-ledger {
-  padding-left: 24px;
+  padding-left: 22px;
   border-left: var(--fn-rule-soft);
 }
 
@@ -14566,12 +14608,12 @@ input[type="color"] {
 .fn-next-task {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  margin-top: 12px;
+  gap: 14px;
+  margin-top: 10px;
   border: var(--fn-edge);
   border-left: 3px solid var(--fn-course, var(--fn-course-blue));
   background: var(--surface-2);
-  padding: 14px 16px 13px;
+  padding: 12px 14px;
 }
 
 .fn-course-code {
@@ -14590,10 +14632,10 @@ input[type="color"] {
 }
 
 .fn-next-task h3 {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--ink);
   font-family: var(--font-serif);
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 500;
   line-height: 1.2;
 }
@@ -14614,15 +14656,15 @@ input[type="color"] {
 }
 
 .fn-next-actions button {
-  min-height: 34px;
-  padding: 8px 20px;
+  min-height: 32px;
+  padding: 7px 16px;
 }
 
 .fn-dashboard .design-priority-card,
 .fn-dashboard .design-weekly-card,
 .fn-dashboard .design-course-radar,
 .fn-dashboard .design-exam-runway {
-  margin-top: 12px;
+  margin-top: 10px;
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
@@ -14632,9 +14674,12 @@ input[type="color"] {
 .fn-dashboard .design-priority-card > .section-head,
 .fn-dashboard .design-course-radar > .section-head,
 .fn-dashboard .design-exam-runway > .section-head,
-.fn-dashboard .design-weekly-card > .fossil-head,
-.fn-dashboard .design-weekly-card > .fossil-range-toggle {
+.fn-dashboard .design-weekly-card > .fossil-head {
   display: none;
+}
+
+.fn-dashboard .design-weekly-card > .fossil-range-toggle {
+  display: flex;
 }
 
 .fn-dashboard .design-task-list,
@@ -14643,6 +14688,93 @@ input[type="color"] {
   border: var(--fn-edge);
   border-top: 0;
   background: var(--surface);
+}
+
+.fn-full-dashboard .design-task-list {
+  max-height: 452px;
+  overflow: auto;
+}
+
+.fn-full-dashboard .design-task-item {
+  min-height: 0;
+  padding: 11px 12px !important;
+}
+
+.fn-full-dashboard .design-task-item.fn-selected {
+  border-top: var(--fn-rule-hard) !important;
+  border-bottom: var(--fn-rule-hard) !important;
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface)) !important;
+}
+
+.fn-full-dashboard .design-task-item.fn-selected .design-course-stripe {
+  width: 5px;
+}
+
+.fn-full-dashboard .design-task-item.fn-selected .design-task-title-line strong {
+  color: var(--ink);
+}
+
+.fn-full-dashboard .design-task-main {
+  gap: 8px;
+}
+
+.fn-full-dashboard .design-task-title-line strong {
+  font-size: 14px;
+}
+
+.fn-full-dashboard .design-task-meta {
+  font-size: 11px;
+}
+
+.fn-full-dashboard .design-task-side {
+  gap: 8px;
+}
+
+.fn-full-dashboard .design-task-side button {
+  min-height: 30px;
+  padding: 6px 12px;
+  font-size: 10.5px;
+}
+
+.fn-full-dashboard .design-course-list {
+  max-height: 356px;
+  overflow: auto;
+}
+
+.fn-full-dashboard .design-course-row {
+  padding: 11px 10px !important;
+}
+
+.fn-full-dashboard .design-course-row h3 {
+  font-size: 14px;
+}
+
+.fn-full-dashboard .design-course-row p {
+  font-size: 10.5px;
+}
+
+.fn-full-dashboard .design-exam-list {
+  max-height: 444px;
+  overflow: auto;
+}
+
+.fn-full-dashboard .design-exam-item {
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 12px;
+  padding: 13px 10px !important;
+}
+
+.fn-full-dashboard .design-exam-days strong {
+  font-size: 24px;
+}
+
+.fn-full-dashboard .design-exam-item h3 {
+  font-size: 14.5px;
+}
+
+.fn-full-dashboard .design-exam-item p {
+  font-size: 11px;
+  line-height: 1.25;
 }
 
 .fn-dashboard .design-task-item,
@@ -14657,12 +14789,86 @@ input[type="color"] {
   border: 0 !important;
 }
 
+.fn-full-dashboard .fn-weekly-sheet {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .design-weekly-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 156px;
+  gap: 14px 18px;
+  border: var(--fn-edge) !important;
+  background: var(--surface-2) !important;
+  padding: 14px !important;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-range-toggle {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: stretch;
+  flex-direction: column;
+  gap: 0;
+  border: var(--fn-edge);
+  background: var(--surface);
+  padding: 0;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-range-toggle button {
+  flex: 1;
+  min-height: 32px;
+  border: 0;
+  border-bottom: var(--fn-rule-dot);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-range-toggle button:last-child {
+  border-bottom: 0;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-range-toggle button.active {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-strata-shell {
+  grid-column: 1;
+  min-height: 145px;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-legend,
+.fn-full-dashboard .fn-weekly-sheet .fossil-discovered,
+.fn-full-dashboard .fn-weekly-sheet .fossil-stats {
+  grid-column: 1;
+}
+
+.fn-full-dashboard .fn-weekly-sheet .fossil-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: var(--fn-rule-soft);
+  padding-top: 10px;
+}
+
 .fn-pace-note,
 .fn-margin-note,
 .fn-vault-links {
   border: var(--fn-edge);
   background: var(--surface-2);
   padding: 14px 16px;
+}
+
+.fn-full-dashboard .fn-pace-note {
+  padding: 16px 18px;
+}
+
+.fn-full-dashboard .fn-margin-note {
+  transform: rotate(-1.25deg);
+  padding: 20px 22px;
 }
 
 .fn-pace-note {
@@ -14781,9 +14987,10 @@ input[type="color"] {
 
 :root[data-app-style="field-notebook"] .study-circle-root .social-feed-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  gap: 30px;
   align-items: start;
+  max-width: 1180px;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .social-feed-scope,
@@ -14793,11 +15000,186 @@ input[type="color"] {
   grid-column: 2;
 }
 
+:root[data-app-style="field-notebook"] .study-circle-root .social-feed-scope {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  margin: 0 0 18px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .live-bar {
+  display: grid;
+  grid-template-columns: 8px auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  margin: 0 0 22px;
+  border: var(--fn-edge) !important;
+  border-radius: 0;
+  background: var(--surface-2) !important;
+  padding: 13px 16px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .live-bar strong {
+  color: var(--fn-course-green);
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.05;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .live-bar span:not(.live-dot) {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 14px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .live-bar small {
+  grid-column: 3;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 22px;
+  border: 0 !important;
+  border-bottom: var(--fn-rule-hard) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer > div:first-child {
+  min-width: 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer h3 {
+  margin: 4px 0 2px;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.08;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer p {
+  margin: 0;
+  color: var(--ink-4);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer .arena-input {
+  width: 100%;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .feed-composer > .arena-btn {
+  justify-self: start;
+}
+
 :root[data-app-style="field-notebook"] .study-circle-root .section-label,
 :root[data-app-style="field-notebook"] .study-circle-root .feed-card,
 :root[data-app-style="field-notebook"] .study-circle-root .milestone,
 :root[data-app-style="field-notebook"] .study-circle-root .week-compare {
   grid-column: 1;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-leaderboard {
+  min-height: 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-rows {
+  display: grid;
+  gap: 0;
+  padding: 18px 0 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .squad-internal-leaderboard-panel .arena-lb-rows,
+:root[data-app-style="field-notebook"] .study-circle-root .squad-lb-rows {
+  padding-top: 14px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row {
+  display: grid;
+  grid-template-columns: 52px 54px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row--self {
+  background: color-mix(in srgb, var(--ink) 4%, transparent) !important;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row .arena-rank-badge,
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row .arena-avatar {
+  justify-self: start;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-person {
+  min-width: 0;
+  gap: 3px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-person strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-person span {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-score {
+  justify-self: end;
+  min-width: 86px;
+  text-align: right;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-score strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-score span {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .squad-internal-leaderboard-panel .arena-lb-row {
+  grid-template-columns: 48px 50px minmax(0, 1fr) auto;
+  min-height: 66px;
+  padding: 10px 0;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .stories {
@@ -14859,7 +15241,7 @@ input[type="color"] {
 /* Field Notebook: remaining tabs use the Claude placement model, not only a skin. */
 :root[data-app-style="field-notebook"] .fn-planner {
   display: grid;
-  grid-template-columns: 214px minmax(0, 1fr);
+  grid-template-columns: 268px minmax(0, 1fr);
   gap: 0;
   padding: 0;
   background: var(--surface);
@@ -14871,6 +15253,11 @@ input[type="color"] {
   background: var(--fn-paper-3);
   border-right: var(--fn-edge);
   padding: 22px 0 30px;
+}
+
+.fn-planner-rail {
+  min-height: calc(100vh - 132px);
+  overflow: auto;
 }
 
 .fn-rail-section + .fn-rail-section {
@@ -14931,6 +15318,243 @@ input[type="color"] {
   border-left-color: var(--fn-course, var(--fn-course-blue));
 }
 
+.fn-semester-tree + .fn-semester-tree {
+  margin-top: 2px;
+}
+
+.fn-course-tree {
+  padding: 8px 0 12px;
+  border-bottom: var(--fn-rule-soft);
+}
+
+.fn-course-tree-item + .fn-course-tree-item {
+  margin-top: 2px;
+}
+
+.fn-task-tree {
+  padding: 3px 0 10px 22px;
+}
+
+.fn-sidebar-task {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  border: 0;
+  border-left: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 16px 7px 12px;
+  color: var(--ink-3);
+  text-align: left;
+}
+
+.fn-sidebar-task:hover,
+.fn-sidebar-task:focus-visible,
+.fn-sidebar-task.active {
+  background: var(--surface);
+  color: var(--ink);
+  outline: 0;
+}
+
+.fn-sidebar-task span {
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-serif);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fn-sidebar-task em,
+.fn-sidebar-empty {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.fn-sidebar-empty {
+  margin: 6px 16px 8px 12px;
+}
+
+.fn-sidebar-add-task,
+.fn-sidebar-add-course {
+  margin-top: 8px !important;
+  padding-left: 0;
+}
+
+.fn-sidebar-form {
+  display: grid;
+  gap: 7px;
+  margin: 10px 16px 12px;
+  border: var(--fn-edge);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.fn-task-tree .fn-sidebar-form {
+  margin-left: 0;
+}
+
+.fn-sidebar-form input,
+.fn-sidebar-form select {
+  min-width: 0;
+  width: 100%;
+  padding: 7px 8px;
+  font-size: 12px;
+}
+
+.fn-sidebar-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr);
+  gap: 6px;
+}
+
+.fn-sidebar-form-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.fn-sidebar-form-actions button {
+  flex: 1;
+  min-height: 28px;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.fn-sidebar-actions {
+  display: flex;
+  gap: 10px;
+  margin: 8px 16px 0 0;
+  padding-left: 0;
+}
+
+.fn-semester-actions {
+  margin-left: 16px;
+}
+
+.fn-sidebar-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--fn-link);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: left;
+  text-transform: lowercase;
+}
+
+.fn-sidebar-actions button.danger {
+  color: var(--fn-stamp);
+}
+
+.fn-sidebar-workload {
+  margin-top: 26px;
+  border-top: var(--fn-rule-soft);
+  padding-top: 20px;
+}
+
+.fn-sidebar-workload label {
+  display: grid;
+  gap: 6px;
+  padding: 0 16px;
+}
+
+.fn-sidebar-workload label span {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.fn-sidebar-workload select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 13px;
+}
+
+.fn-workload-card {
+  display: grid;
+  gap: 9px;
+  margin: 12px 16px 0;
+  border: var(--fn-edge);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.fn-workload-card strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.fn-workload-card p {
+  margin: 0;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.fn-workload-track {
+  height: 5px;
+  border: var(--fn-rule-soft);
+  background: var(--surface-2);
+}
+
+.fn-workload-track i {
+  display: block;
+  height: 100%;
+  background: var(--fn-course-blue);
+}
+
+.fn-workload-ledger {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: var(--fn-rule-dot);
+}
+
+.fn-workload-ledger span {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  border-bottom: var(--fn-rule-dot);
+  padding: 6px 0;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.fn-workload-ledger span:nth-child(odd) {
+  padding-right: 8px;
+}
+
+.fn-workload-ledger span:nth-child(even) {
+  border-left: var(--fn-rule-dot);
+  padding-left: 8px;
+}
+
+.fn-workload-ledger b {
+  color: var(--ink);
+  font-weight: 400;
+}
+
+.fn-workload-card em {
+  color: var(--fn-stamp);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+}
+
 .fn-rail-link {
   margin: 14px 16px 0;
   border: 0;
@@ -14947,9 +15571,7 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .planner-board-panel {
-  border: 0 !important;
-  border-radius: 0 !important;
-  padding: 24px 30px 30px;
+  display: none;
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .planner-header,
@@ -15011,8 +15633,11 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .planner-calendar-card {
-  border-top: var(--fn-edge) !important;
-  padding: 24px 30px 30px;
+  grid-column: 2;
+  margin: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 34px 42px 42px;
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .calendar-grid,
@@ -15026,6 +15651,35 @@ input[type="color"] {
   background-image: repeating-linear-gradient(transparent 0 25px, color-mix(in srgb, var(--line-soft) 62%, transparent) 25px 26px) !important;
 }
 
+:root[data-app-style="field-notebook"] .fn-planner .calendar-day-card.today {
+  position: relative;
+  border: 2px solid var(--fn-stamp) !important;
+  background-color: color-mix(in srgb, var(--fn-stamp) 7%, var(--surface)) !important;
+  box-shadow:
+    inset 0 0 0 2px var(--surface),
+    0 0 0 1px var(--fn-stamp) !important;
+}
+
+:root[data-app-style="field-notebook"] .fn-planner .calendar-day-card.today::after {
+  content: "TODAY";
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  color: var(--fn-stamp);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+
+:root[data-app-style="field-notebook"] .fn-planner .calendar-grid.week-view .calendar-day-card {
+  min-height: clamp(320px, 52vh, 560px);
+}
+
+:root[data-app-style="field-notebook"] .fn-planner .calendar-grid.week-view .calendar-pill {
+  margin-bottom: 8px;
+  padding-block: 8px;
+}
+
 :root[data-app-style="field-notebook"] .fn-planner .calendar-pill {
   border-radius: 0;
   border-left: 3px solid var(--pill-color, var(--fn-course-blue));
@@ -15033,10 +15687,7 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .planner-support-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.55fr);
-  gap: 0;
-  border-top: var(--fn-edge);
+  display: none;
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .calculator-card,
@@ -15048,13 +15699,249 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .fn-planner .semester-overview-card {
+  display: none;
+}
+
+.fn-task-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: start center;
+  background: rgb(0 0 0 / 0.62);
+  padding: 72px 24px 28px;
+}
+
+.fn-task-modal {
+  width: min(820px, 100%);
+  max-height: calc(100vh - 112px);
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  border: var(--fn-edge);
+  background: var(--surface);
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.28);
+  padding: 24px;
+}
+
+.fn-task-modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: start;
+  padding-bottom: 14px;
+  border-bottom: 2px solid var(--ink);
+  background: var(--surface);
+}
+
+.fn-task-modal-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 30px;
+  font-weight: 500;
+}
+
+.fn-task-modal-ledger {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: var(--fn-rule-soft);
+}
+
+.fn-task-modal-ledger div {
+  display: grid;
+  gap: 4px;
+  border-right: var(--fn-rule-soft);
+  padding: 16px 14px;
+}
+
+.fn-task-modal-ledger div:last-child {
+  border-right: 0;
+}
+
+.fn-task-modal-ledger span,
+.fn-task-modal-ledger em {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.fn-task-modal-ledger strong {
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 23px;
+  font-weight: 500;
+}
+
+.fn-task-modal-progress {
+  padding: 18px 0;
+}
+
+.fn-task-modal-note {
+  margin: 0 0 18px;
+  border-left: 2px solid var(--line-soft);
+  padding-left: 14px;
+  color: var(--ink-3);
+  font-family: var(--font-serif);
+  font-style: italic;
+  line-height: 1.55;
+}
+
+.fn-task-modal-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 14px;
+  border-top: var(--fn-rule-soft);
+}
+
+.fn-task-modal-actions button {
+  min-height: 36px;
+  padding: 8px 18px;
+}
+
+.fn-task-form {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.fn-task-form-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  overflow: auto;
+  padding: 18px 0;
+}
+
+.fn-task-form .field {
+  gap: 7px;
+}
+
+.fn-task-form .field span {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.fn-task-form input,
+.fn-task-form select,
+.fn-task-form textarea {
+  width: 100%;
+  min-width: 0;
+  border: var(--fn-edge);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  box-shadow: none;
+}
+
+.fn-task-form input,
+.fn-task-form select {
+  min-height: 42px;
+  padding: 9px 10px;
+}
+
+.fn-task-form textarea {
+  min-height: 180px;
+  padding: 12px;
+  resize: vertical;
+}
+
+.fn-task-form-title,
+.fn-task-form-notes {
   grid-column: 1 / -1;
-  border-top: var(--fn-rule-soft) !important;
-  border-right: 0 !important;
+}
+
+.fn-task-modal-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: var(--fn-rule-soft);
+  background: var(--surface);
+  padding-top: 14px;
+}
+
+.fn-task-modal-footer button {
+  min-height: 38px;
+  padding: 8px 18px;
+}
+
+.fn-delete-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.54);
+  padding: 24px;
+}
+
+.fn-delete-dialog {
+  width: min(360px, 100%);
+  border: var(--fn-edge);
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.34);
+  padding: 20px;
+}
+
+.fn-delete-dialog h2 {
+  margin: 0;
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 10px;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.fn-delete-dialog p:not(.fn-stamp-line) {
+  margin: 16px 0 0;
+  color: var(--ink-3);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.fn-delete-dialog-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 22px;
+}
+
+.fn-delete-dialog-actions button {
+  min-height: 36px;
+  padding: 8px 18px;
+}
+
+.fn-delete-yes {
+  border: 1px solid var(--danger) !important;
+  background: transparent !important;
+  color: var(--danger) !important;
+}
+
+.fn-delete-yes:hover,
+.fn-delete-yes:focus-visible {
+  background: var(--danger-soft) !important;
 }
 
 :root[data-app-style="field-notebook"] .fn-timer {
-  grid-template-columns: minmax(0, 1fr) 372px;
+  grid-template-columns: minmax(0, 1fr) 268px;
   gap: 0;
   padding: 0;
   background: var(--surface);
@@ -15066,6 +15953,10 @@ input[type="color"] {
   border-radius: 0 !important;
   padding: 30px 34px 36px;
   box-shadow: none !important;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card {
+  padding: 28px 20px 26px !important;
 }
 
 :root[data-app-style="field-notebook"] .fn-timer .timer-main-card {
@@ -15107,6 +15998,38 @@ input[type="color"] {
 
 :root[data-app-style="field-notebook"] .fn-timer .timer-face strong {
   font-size: clamp(5.5rem, 10vw, 7.8rem);
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-face-time,
+:root[data-app-style="field-notebook"] .fn-timer .timer-face-input {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: clamp(5.5rem, 10vw, 7.8rem);
+  font-weight: 700;
+  line-height: 0.95;
+  letter-spacing: -0.08em;
+  text-align: center;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-face-time {
+  padding: 0;
+  cursor: text;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-face-time:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-face-input {
+  width: min(760px, 100%);
+  border-bottom: 2px solid var(--ink);
+  border-radius: 0;
+  outline: 0;
+  caret-color: var(--fn-stamp, var(--accent));
+  box-shadow: none;
 }
 
 :root[data-app-style="field-notebook"] .fn-timer .timer-action-row {
@@ -15161,23 +16084,120 @@ input[type="color"] {
   background: var(--surface-2) !important;
 }
 
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .section-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .section-head h2 {
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .section-head .eyebrow {
+  font-size: 9px;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .design-chip {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink-4);
+  font-size: 10px;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .stack-list {
+  max-height: 620px;
+  padding: 0;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink-4) 45%, transparent) transparent;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .stack-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .stack-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .stack-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink-4) 45%, transparent);
+}
+
 :root[data-app-style="field-notebook"] .fn-timer .session-row {
-  display: flex;
-  gap: 12px;
-  padding: 13px 0;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  gap: 10px;
+  padding: 8px 0 8px 10px;
   border-bottom: var(--fn-rule-dot) !important;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-log-card .session-row::before {
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 1px;
+  opacity: 0.38;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-row strong {
+  color: var(--ink-2);
+  font-family: var(--font-serif);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-row p,
+:root[data-app-style="field-notebook"] .fn-timer .session-row small {
+  margin: 2px 0 0;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-row small {
+  display: none;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-side span {
+  display: none;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .session-side small {
+  display: block;
+  max-width: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  text-align: right;
 }
 
 :root[data-app-style="field-notebook"] .fn-vault {
   display: grid;
   grid-template-columns: 268px minmax(0, 1fr);
+  grid-template-rows: 1fr;
   gap: 0;
+  align-items: start;
   padding: 0;
   background: var(--surface);
 }
 
+:root[data-app-style="field-notebook"] .fn-vault .fn-vault-rail {
+  grid-row: 1 / -1;
+}
+
 :root[data-app-style="field-notebook"] .fn-vault > :not(.fn-vault-rail) {
   grid-column: 2;
+  min-width: 0;
 }
 
 .fn-vault-status {
@@ -15237,6 +16257,55 @@ input[type="color"] {
   color: var(--ink);
 }
 
+.fn-vault-tools {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 14px 18px 18px;
+  border-bottom: var(--fn-rule-dot);
+}
+
+.fn-vault-tools button,
+.fn-summary-file-actions button {
+  border: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: var(--surface);
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fn-vault-tree {
+  margin-top: 18px;
+}
+
+.fn-summary-files-tree {
+  padding-top: 8px;
+  padding-bottom: 12px;
+}
+
+.fn-summary-file-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 16px 8px 12px;
+}
+
+.fn-vault-selection-title {
+  display: grid;
+  gap: 2px;
+}
+
+.fn-vault-selection-title h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 500;
+}
+
 .fn-vault-course {
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr) auto;
@@ -15267,7 +16336,8 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-hero {
-  align-items: flex-end;
+  align-self: start;
+  align-items: center;
   margin: 0;
   padding: 26px 34px 12px;
   border-bottom: 2px solid var(--ink);
@@ -15290,21 +16360,21 @@ input[type="color"] {
   margin: 0;
   border: 0 !important;
   border-radius: 0 !important;
-  padding: 26px 34px 40px;
+  padding: 20px 34px 40px;
 }
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-document-wrap,
 :root[data-app-style="field-notebook"] .fn-vault .summaries-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
 }
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-document,
 :root[data-app-style="field-notebook"] .fn-vault .summary-viewer-card {
-  border: 0 !important;
-  border-right: var(--fn-rule-soft) !important;
-  padding: 0 26px 0 0;
+  border: var(--fn-edge) !important;
+  background: var(--surface) !important;
+  padding: 0;
 }
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-recent-list,
@@ -15321,11 +16391,48 @@ input[type="color"] {
   line-height: 28px;
 }
 
-:root[data-app-style="field-notebook"] .study-circle-root .arena-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
-  gap: 0;
-  background: var(--surface);
+:root[data-app-style="field-notebook"] .fn-vault .vault-document-meta {
+  margin: 0;
+  border-bottom: var(--fn-rule-soft);
+  padding: 14px 18px 12px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .markdown-preview {
+  padding: 22px 26px 28px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h1,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h2,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h3 {
+  margin: 0 0 18px;
+  padding-top: 3px;
+  line-height: 1.18;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h1 + h2,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h2 + ul,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose h2 + p {
+  margin-top: 8px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose p,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose ul,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose ol {
+  margin: 0 0 18px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose ul,
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose ol {
+  padding-left: 28px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-prose li {
+  padding-left: 6px;
+  margin-bottom: 8px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-toolbar {
+  padding-bottom: 18px;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .arena-leaderboard {
@@ -15352,34 +16459,11 @@ input[type="color"] {
   display: none;
 }
 
-:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-rows {
-  padding: 18px 0 0;
-}
-
-:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row {
-  display: grid !important;
-  grid-template-columns: 32px minmax(0, 1fr) 108px;
-  align-items: center;
-  padding: 13px 0;
-}
-
-:root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row--self {
-  background: var(--surface-2) !important;
-  border-bottom: var(--fn-rule-hard) !important;
-}
-
 :root[data-app-style="field-notebook"] .study-circle-root .feed-card,
 :root[data-app-style="field-notebook"] .study-circle-root .milestone {
   padding: 15px 0;
   border: 0 !important;
   border-bottom: var(--fn-rule-dot) !important;
-}
-
-:root[data-app-style="field-notebook"] .study-circle-root .feed-composer {
-  padding: 0 0 22px;
-  border: 0 !important;
-  border-bottom: var(--fn-rule-hard) !important;
-  background: transparent !important;
 }
 
 :root[data-app-style="field-notebook"] .fn-break {

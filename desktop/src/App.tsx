@@ -496,6 +496,8 @@ type ThemePalette =
 type AppStyle = "modern" | "field-notebook";
 type ThemePanelView = "themes" | "styles";
 type FieldDashboardLayout = "quiet" | "full";
+type FieldPlannerTaskMode = "view" | "edit" | "create";
+type FieldPlannerDeleteTarget = { type: "semester" | "course"; id: string; name: string };
 type DashboardLayout = "focus" | "cockpit" | "analyst" | "custom";
 type DashboardWidgetId = "today" | "urgentTasks" | "weeklyFocus" | "courseRadar" | "examRunway" | "garden" | "stats";
 type DashboardWidgetWidth = "full" | "half" | "third";
@@ -747,9 +749,9 @@ const helpExamples: Record<TabKey, HelpExample[]> = {
 };
 
 const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
-  { id: "daily", label: "Daily" },
   { id: "references", label: "References" },
   { id: "summaries", label: "Summaries" },
+  { id: "daily", label: "Daily" },
 ];
 
 const socialSubtabs: Array<{ id: SocialSubtab; label: string; badge?: string }> = [
@@ -2649,6 +2651,10 @@ function App() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(TOTAL_WORKLOAD_ID);
   const [selectedQuietDashboardEntryId, setSelectedQuietDashboardEntryId] = useState<string | null>(null);
+  const [fieldPlannerTaskId, setFieldPlannerTaskId] = useState<string | null>(null);
+  const [fieldPlannerTaskMode, setFieldPlannerTaskMode] = useState<FieldPlannerTaskMode | null>(null);
+  const [fieldPlannerDeleteTarget, setFieldPlannerDeleteTarget] = useState<FieldPlannerDeleteTarget | null>(null);
+  const [fieldPlannerWorkloadId, setFieldPlannerWorkloadId] = useState<string>(TOTAL_WORKLOAD_ID);
   const [helpTab, setHelpTab] = useState<TabKey | null>(null);
   const [menuHelpOpen, setMenuHelpOpen] = useState(false);
   const [tourState, setTourState] = useState<{ tab: TabKey; step: number } | null>(null);
@@ -2707,6 +2713,8 @@ function App() {
   });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
+  const [timerFaceEditing, setTimerFaceEditing] = useState(false);
+  const [timerFaceDraft, setTimerFaceDraft] = useState("");
   const endlessInactivityRemainingMs = endlessInactivityPrompt
     ? Math.max(0, new Date(endlessInactivityPrompt.promptedAt).getTime() + ENDLESS_INACTIVITY_GRACE_MS - countdownNowMs)
     : ENDLESS_INACTIVITY_GRACE_MS;
@@ -2993,6 +3001,12 @@ function App() {
   useEffect(() => {
     localStorage.setItem(FIELD_DASHBOARD_LAYOUT_KEY, fieldDashboardLayout);
   }, [fieldDashboardLayout]);
+
+  useEffect(() => {
+    if (appStyle === "field-notebook" && state.activeTab === "planner") {
+      setCalendarView("month");
+    }
+  }, [appStyle, state.activeTab]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_DASHBOARD_LAYOUT_KEY, JSON.stringify(customDashboardLayout));
@@ -3467,6 +3481,50 @@ function App() {
     };
   }, [state.tasks]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
+  const fieldPlannerWorkload = useMemo(() => {
+    if (fieldPlannerWorkloadId === TOTAL_WORKLOAD_ID) return { ...totalWorkload, label: "Total workload" };
+
+    const course = state.courses.find((item) => item.id === fieldPlannerWorkloadId) ?? null;
+    const courseTasks = course ? state.tasks.filter((task) => task.courseId === course.id) : [];
+    const totalUnits = courseTasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
+    const completedUnits = courseTasks.reduce((sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits), 0);
+    const remainingUnits = Math.max(0, totalUnits - completedUnits);
+    const unfinishedTasks = courseTasks.filter((task) => getRemainingUnits(task) > 0);
+    const datedTasks = unfinishedTasks.filter((task) => task.dueDate);
+    const nearestDueDate = datedTasks.length
+      ? [...datedTasks].sort((a, b) => daysUntil(a.dueDate ?? "") - daysUntil(b.dueDate ?? ""))[0]?.dueDate ?? null
+      : null;
+    let daysLeft: number | null = null;
+    let unitsPerDay = remainingUnits;
+    let message = course ? "Add due dates to this course for a realistic pace." : "Choose a course.";
+
+    if (!course) {
+      unitsPerDay = 0;
+    } else if (remainingUnits <= 0) {
+      unitsPerDay = 0;
+      daysLeft = 0;
+      message = "This course workload is complete.";
+    } else if (nearestDueDate) {
+      const dueIn = daysUntil(nearestDueDate);
+      daysLeft = dueIn;
+      unitsPerDay = dueIn <= 0 ? remainingUnits : remainingUnits / dueIn;
+      message = dueIn <= 0
+        ? `${remainingUnits} units need attention today.`
+        : `${unitsPerDay.toFixed(1)} units/day keeps this course ahead of ${formatDate(nearestDueDate)}.`;
+    }
+
+    return {
+      label: course?.name ?? "Course workload",
+      totalUnits,
+      completedUnits,
+      remainingUnits,
+      progress: totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0,
+      unitsPerDay,
+      daysLeft,
+      nearestDueDate,
+      message,
+    };
+  }, [fieldPlannerWorkloadId, state.courses, state.tasks, totalWorkload]);
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions, new Date(`${calendarToday}T00:00:00`)), [state.sessions, calendarToday]);
   const upcomingExams = useMemo(() => getUpcomingExams({ exams: state.exams } as AppState), [state.exams]);
@@ -6035,6 +6093,10 @@ function App() {
     setExpandedCourseIds((current) => (current.includes(task.courseId) ? current : [...current, task.courseId]));
     setAddingTaskCourseId(null);
     setSelectedTaskId(task.id);
+    if (appStyle === "field-notebook") {
+      setFieldPlannerTaskId(task.id);
+      setFieldPlannerTaskMode("view");
+    }
     setMessage(`${task.title} is now tracked.`);
   }
 
@@ -6168,6 +6230,8 @@ function App() {
       timer: current.timer.taskId === taskId ? { ...current.timer, taskId: null } : current.timer,
     }));
     setEditingTaskId((current) => (current === taskId ? null : current));
+    setFieldPlannerTaskId((current) => (current === taskId ? null : current));
+    setFieldPlannerTaskMode((current) => (fieldPlannerTaskId === taskId ? null : current));
   }
 
   function removeCourse(courseId: string) {
@@ -6952,6 +7016,7 @@ function App() {
   }
 
   function applyPreset(label: string, study: number, breakMinutes: number, mode: "focus" | "exam" | "endless") {
+    setTimerFaceEditing(false);
     setState((current) => ({
       ...current,
       timer: {
@@ -6977,6 +7042,47 @@ function App() {
     }));
   }
 
+  function parseTimerFaceInput(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) return Math.max(1, Number(trimmed) * 60);
+    const match = trimmed.match(/^(\d{1,4}):(\d{1,2})$/);
+    if (!match) return null;
+    const minutes = Number(match[1]);
+    const seconds = Number(match[2]);
+    if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds > 59) return null;
+    return Math.max(1, minutes * 60 + seconds);
+  }
+
+  function applyTimerFaceDraft() {
+    const seconds = parseTimerFaceInput(timerFaceDraft);
+    if (!seconds) {
+      setMessage("Use minutes or MM:SS, for example 90 or 90:00.");
+      setTimerFaceDraft(formatClock(state.timer.remainingSeconds));
+      setTimerFaceEditing(false);
+      return;
+    }
+
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    setState((current) => ({
+      ...current,
+      timer: {
+        ...current.timer,
+        studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : minutes,
+        examMinutes: current.timer.mode === "exam" ? minutes : current.timer.examMinutes,
+        remainingSeconds: seconds,
+        presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
+      },
+    }));
+    setTimerFaceEditing(false);
+  }
+
+  function startTimerFaceEditing() {
+    if (appStyle !== "field-notebook" || state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)) return;
+    setTimerFaceDraft(formatClock(state.timer.remainingSeconds));
+    setTimerFaceEditing(true);
+  }
+
   function clearEndlessInactivityPrompt() {
     endlessInactivityPromptRef.current = null;
     setEndlessInactivityPrompt(null);
@@ -6990,7 +7096,7 @@ function App() {
   function startTimer() {
     const isEndless = state.timer.mode === "endless";
     const isExam = state.timer.mode === "exam";
-    const totalSeconds = (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
+    const totalSeconds = state.timer.phase === "idle" ? Math.max(1, state.timer.remainingSeconds) : (isExam ? state.timer.examMinutes : state.timer.studyMinutes) * 60;
     const startedAt = new Date().toISOString();
     void prepareBellSound().then((result) => {
       if (!result.ok) console.warn("Bell sound could not be prepared.", result);
@@ -7879,7 +7985,11 @@ function App() {
             const deadlines = deadlinesByDate.get(day.iso) ?? [];
             const isSelected = selectedCalendarDate === day.iso;
             const isToday = day.iso === calendarToday;
-            const visibleItemCount = Math.min(entries.length, 3) + Math.min(exams.length, 2) + Math.min(deadlines.length, 2);
+            const fieldNotebookWeek = appStyle === "field-notebook" && calendarView === "week";
+            const visibleEntryLimit = fieldNotebookWeek ? 8 : 3;
+            const visibleExamLimit = fieldNotebookWeek ? 4 : 2;
+            const visibleDeadlineLimit = fieldNotebookWeek ? 4 : 2;
+            const visibleItemCount = Math.min(entries.length, visibleEntryLimit) + Math.min(exams.length, visibleExamLimit) + Math.min(deadlines.length, visibleDeadlineLimit);
             const hiddenItemCount = entries.length + exams.length + deadlines.length - visibleItemCount;
 
             return (
@@ -7902,7 +8012,7 @@ function App() {
                 </div>
 
                 <div className="calendar-day-items">
-                  {entries.slice(0, 3).map((entry) => {
+                  {entries.slice(0, visibleEntryLimit).map((entry) => {
                     const course = getCalendarEntryCourse(entry);
                     return (
                       <div key={entry.id} className={`calendar-pill task-pill ${entry.completed ? "completed" : ""}`} style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}>
@@ -7920,7 +8030,7 @@ function App() {
                       </div>
                     );
                   })}
-                  {exams.slice(0, 2).map((exam) => {
+                  {exams.slice(0, visibleExamLimit).map((exam) => {
                     const course = courseLookup.get(exam.courseId);
                     return (
                       <div key={exam.id} className="calendar-pill exam-pill" style={{ "--pill-color": course?.color ?? "var(--danger)" } as CSSProperties}>
@@ -7928,7 +8038,7 @@ function App() {
                       </div>
                     );
                   })}
-                  {deadlines.slice(0, 2).map((task) => {
+                  {deadlines.slice(0, visibleDeadlineLimit).map((task) => {
                     const course = courseLookup.get(task.courseId);
                     return (
                       <div key={task.id} className="calendar-pill deadline-pill" style={{ "--pill-color": course?.color ?? "var(--warn)" } as CSSProperties}>
@@ -8231,7 +8341,7 @@ function App() {
     );
   }
 
-  function renderUrgentTasks(limit = 5) {
+  function renderUrgentTasks(limit = 5, options?: { selectedEntryId?: string | null; onSelectEntry?: (entry: CalendarEntry) => void }) {
     const entries = todayCalendarEntries.slice(0, limit);
     return (
       <article className="panel-card design-card design-priority-card" data-tour="dashboard-urgent">
@@ -8253,14 +8363,24 @@ function App() {
               const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
               const semester = task ? semesterLookup.get(task.semesterId) : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) : null;
               const title = task?.title ?? entry.adHocTitle ?? "Calendar task";
+              const isSelectedEntry = options?.selectedEntryId === entry.id;
               return (
-                <div key={entry.id} className={`design-task-item ${task && selectedTaskId === task.id ? "selected" : ""}`}>
-                  <button type="button" className="design-task-main" onClick={() => task ? setSelectedTaskId(task.id) : openCalendarDrawer(entry.date)}>
+                <div key={entry.id} className={`design-task-item ${task && selectedTaskId === task.id ? "selected" : ""} ${isSelectedEntry ? "fn-selected" : ""}`}>
+                  <button type="button" className="design-task-main" onClick={() => {
+                    if (options?.onSelectEntry) {
+                      options.onSelectEntry(entry);
+                      if (task) setSelectedTaskId(task.id);
+                    } else if (task) {
+                      setSelectedTaskId(task.id);
+                    } else {
+                      openCalendarDrawer(entry.date);
+                    }
+                  }}>
                     <span className="design-course-stripe" style={{ background: course?.color ?? "var(--accent)" }} />
                     <span className="design-task-copy">
                       <span className="design-task-title-line">
                         <strong>{title}</strong>
-                        <em className={`priority-chip ${entry.completed ? "low" : task?.priority ?? "medium"}`}>{entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
+                        <em className={`priority-chip ${entry.completed ? "low" : task?.priority ?? "medium"}`}>{isSelectedEntry ? "selected" : entry.completed ? "done" : formatUnitAmount(getCalendarEntryAmount(entry))}</em>
                       </span>
                       <span className="design-task-meta">
                         <span>{getCalendarEntryUnitLabel(entry)}</span>
@@ -8597,7 +8717,9 @@ function App() {
 
   function renderFieldNotebookQuietDashboard() {
     const { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, queueCount, nearestDeadline } = getFieldDashboardData();
-    const quietTasks = todayCalendarEntries.filter((entry) => !entry.completed).slice(0, 3);
+    const allQuietTasks = todayCalendarEntries.filter((entry) => !entry.completed);
+    const quietTasks = allQuietTasks.slice(0, 6);
+    const hiddenQuietTaskCount = Math.max(0, allQuietTasks.length - quietTasks.length);
     const selectedQuietEntry = quietTasks.find((entry) => entry.id === selectedQuietDashboardEntryId) ?? quietTasks[0] ?? null;
     const selectedQuietTask = selectedQuietEntry ? taskLookup.get(selectedQuietEntry.taskId) ?? null : null;
     const selectedQuietCourse = selectedQuietTask
@@ -8653,6 +8775,7 @@ function App() {
               }) : (
                 <p className="fn-quiet-empty">No scheduled units today. Place one task in the planner calendar.</p>
               )}
+              {hiddenQuietTaskCount > 0 ? <button type="button" className="fn-quiet-more" onClick={() => setFieldDashboardLayout("full")}>+{hiddenQuietTaskCount} more planned · open Full</button> : null}
             </div>
 
             <p className="fn-quiet-note">Course ledger, weekly rhythm, vault links, social, and squads all still exist under Full or their tabs. Quiet shows one decision and nothing you can scroll past.</p>
@@ -8661,7 +8784,7 @@ function App() {
           <aside className="fn-quiet-side">
             <section>
               <div className="fn-section-rule"><span>Pace</span></div>
-              <p>{formatUnitAmount(totalUnitsLeft)} left<br />{openTaskCount} open tasks<br /><span>{queueCount} planned today</span></p>
+              <p>{formatUnitAmount(totalUnitsLeft)} left<br />{totalWorkload.unitsPerDay.toFixed(1)} units/day<br />{openTaskCount} open tasks<br /><span>{queueCount} planned today</span></p>
             </section>
             <section>
               <div className="fn-section-rule"><span>Ahead</span></div>
@@ -8683,14 +8806,26 @@ function App() {
   }
 
   function renderFieldNotebookFullDashboard() {
-    const { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, nextTask, nextCourse, nextTitle, nextMeta, queueCount, nearestDeadline, earliestExam } = getFieldDashboardData();
+    const { todayLabel, weekNumber, dailyGoalMinutes, goalProgress, totalUnitsLeft, queueCount, nearestDeadline, earliestExam } = getFieldDashboardData();
+    const fullQueueEntries = todayCalendarEntries.slice(0, 5);
+    const selectedFullEntry = fullQueueEntries.find((entry) => entry.id === selectedQuietDashboardEntryId) ?? fullQueueEntries[0] ?? null;
+    const selectedFullTask = selectedFullEntry ? taskLookup.get(selectedFullEntry.taskId) ?? null : null;
+    const selectedFullCourse = selectedFullTask
+      ? courseLookup.get(selectedFullTask.courseId) ?? null
+      : selectedFullEntry?.adHocCourseId
+        ? courseLookup.get(selectedFullEntry.adHocCourseId) ?? null
+        : null;
+    const selectedFullTitle = selectedFullTask?.title ?? selectedFullEntry?.adHocTitle ?? "Choose a study block";
+    const selectedFullMeta = selectedFullEntry
+      ? `${getCalendarEntryUnitLabel(selectedFullEntry)} · ${selectedFullCourse?.name ?? "General focus"} · ${selectedFullTask?.dueDate ? `due ${formatDate(selectedFullTask.dueDate)}` : formatTimeRange(selectedFullEntry)}`
+      : "Select one planned task from the queue.";
 
     return (
-      <section className="fn-dashboard fade-up">
+      <section className="fn-dashboard fn-full-dashboard fade-up">
         <header className="fn-dashboard-head">
           <div>
             <p className="fn-stamp-line">{todayLabel} · week {weekNumber}</p>
-            <h2>{queueCount ? `${queueCount} things stand between you and Friday.` : "The desk is clear for the next plan."}</h2>
+            <h2>Today’s desk</h2>
             <p>Semester work · {openTaskCount} open tasks · {formatUnitAmount(totalUnitsLeft)} left{nearestDeadline ? ` · nearest deadline ${formatDate(nearestDeadline)}` : ""}</p>
           </div>
           {renderFieldDashboardSwitch()}
@@ -8700,7 +8835,6 @@ function App() {
             <div className="fn-ledger-track"><i style={{ width: `${goalProgress}%` }} /></div>
             <small>{goalProgress}% of daily goal · streak {streakDays} d</small>
           </div>
-          <div className="fn-score-stamp"><strong>{healthLabel}</strong><span>Score {overallHealth}</span></div>
         </header>
 
         <div className="fn-dashboard-grid">
@@ -8710,27 +8844,19 @@ function App() {
                 <span>Study queue · ordered by pressure</span>
                 <em>{queueCount} open · {todayCalendarEntries.length} planned today</em>
               </div>
-              <article className="fn-next-task" style={{ "--fn-course": nextCourse?.color ?? "var(--fn-course-blue)" } as CSSProperties}>
+              <article className="fn-next-task" style={{ "--fn-course": selectedFullCourse?.color ?? "var(--fn-course-blue)" } as CSSProperties}>
                 <div>
-                  <span className="fn-course-code">{nextCourse ? nextCourse.name.slice(0, 4).toUpperCase() : "NEXT"}</span>
-                  <span className="fn-pressure">Do this next</span>
-                  <h3>{nextTitle}</h3>
-                  <p>{nextMeta}</p>
+                  <span className="fn-course-code">{selectedFullCourse ? selectedFullCourse.name.slice(0, 4).toUpperCase() : "DESK"}</span>
+                  <span className="fn-pressure">Selected block</span>
+                  <h3>{selectedFullTitle}</h3>
+                  <p>{selectedFullMeta}</p>
                 </div>
                 <div className="fn-next-actions">
-                  {nextTask ? <button type="button" onClick={() => focusTaskFromDashboard(nextTask)}>Start focus</button> : null}
+                  {selectedFullTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedFullTask)}>Start focus</button> : null}
                   <button type="button" className="ghost-button" onClick={openTodayTodoDrawer}>Something else</button>
                 </div>
               </article>
-              {renderUrgentTasks(5)}
-            </section>
-
-            <section className="fn-weekly-sheet" data-tour="dashboard-weekly">
-              <div className="fn-section-rule">
-                <span>Weekly rhythm · hours focused</span>
-                <em>{formatMinutes(weeklyTotalMinutes)} this week</em>
-              </div>
-              {renderWeeklyChart("short-weekly")}
+              {renderUrgentTasks(5, { selectedEntryId: selectedFullEntry?.id ?? null, onSelectEntry: (entry) => setSelectedQuietDashboardEntryId(entry.id) })}
             </section>
           </main>
 
@@ -8743,6 +8869,7 @@ function App() {
               <p className="eyebrow">Pace ledger · total workload</p>
               <div><strong>{formatUnitAmount(totalUnitsLeft)}</strong><span>left</span></div>
               <div><strong>{openTaskCount}</strong><span>open tasks</span></div>
+              <div><strong>{totalWorkload.unitsPerDay.toFixed(1)}</strong><span>units/day</span></div>
               <p>{weeklyTotalMinutes ? `${formatMinutes(weeklyTotalMinutes)} logged this week.` : "No logged focus yet this week."}</p>
             </section>
           </aside>
@@ -8756,14 +8883,15 @@ function App() {
               <span>Margin note</span>
               <p>{earliestExam ? `${earliestExam.title} is first. Block review time before chasing lower-pressure tasks.` : "Pin one task to today so the dashboard can answer the next-action question."}</p>
             </section>
-            <section>
-              <div className="fn-section-rule"><span>From the vault</span></div>
-              <div className="fn-vault-links">
-                <button type="button" onClick={() => setState((current) => ({ ...current, activeTab: "vault" }))}>Daily/{calendarToday}.md</button>
-                <span>{state.exports.length} exports · {state.settings.vaultPath ? "vault linked" : "vault not linked"}</span>
-              </div>
-            </section>
           </aside>
+
+          <section className="fn-weekly-sheet" data-tour="dashboard-weekly">
+            <div className="fn-section-rule">
+              <span>Weekly rhythm · hours focused</span>
+              <em>{formatMinutes(weeklyTotalMinutes)} this week</em>
+            </div>
+            {renderWeeklyChart("short-weekly")}
+          </section>
         </div>
 
         {state.sessions.length > 0 ? (
@@ -8777,6 +8905,148 @@ function App() {
 
   function renderFieldNotebookDashboard() {
     return fieldDashboardLayout === "quiet" ? renderFieldNotebookQuietDashboard() : renderFieldNotebookFullDashboard();
+  }
+
+  function renderFieldPlannerTaskModal() {
+    if (!fieldPlannerTaskMode) return null;
+
+    const task = fieldPlannerTaskId ? taskLookup.get(fieldPlannerTaskId) ?? null : null;
+    const creating = fieldPlannerTaskMode === "create";
+    if (!creating && !task) return null;
+
+    const modalCourse = creating ? courseLookup.get(taskDraft.courseId) ?? null : task ? courseLookup.get(task.courseId) ?? null : null;
+    const modalSemester = creating ? semesterLookup.get(taskDraft.semesterId) ?? null : task ? semesterLookup.get(task.semesterId) ?? null : null;
+    const calc = task ? calculateDailyWork(task) : null;
+    const progress = task ? getTaskProgress(task) : 0;
+    const editing = fieldPlannerTaskMode === "edit" && task;
+    const closeModal = () => {
+      setFieldPlannerTaskMode(null);
+      setFieldPlannerTaskId(null);
+      setEditingTaskId(null);
+    };
+    const renderTaskForm = () => {
+      const draft = creating ? taskDraft : taskEditDraft;
+      const setDraft = creating ? setTaskDraft : setTaskEditDraft;
+      const submit = (event: FormEvent<HTMLFormElement>) => {
+        if (creating) {
+          addTask(event);
+        } else {
+          updateTask(event);
+          setFieldPlannerTaskMode("view");
+        }
+      };
+
+      return (
+        <form className="fn-task-form" onSubmit={submit}>
+          <div className="fn-task-form-grid">
+            <label className="field fn-task-form-title">
+              <span>Task title</span>
+              <input value={draft.title} onChange={(event) => {
+                const title = event.target.value;
+                setDraft((current) => {
+                  const shouldInfer = !current.unitLabel.trim() || current.unitLabel === "Unit" || current.unitLabel === inferUnitLabel(current.title);
+                  return { ...current, title, unitLabel: shouldInfer ? inferUnitLabel(title) : current.unitLabel };
+                });
+              }} placeholder="Lecture, exercise sheet, reading..." autoFocus />
+            </label>
+            <label className="field">
+              <span>Unit label</span>
+              <input value={draft.unitLabel} onChange={(event) => setDraft((current) => ({ ...current, unitLabel: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Total units</span>
+              <input type="number" min="1" value={draft.totalUnits} onChange={(event) => setDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Done</span>
+              <input type="number" min="0" value={draft.completedUnits} onChange={(event) => setDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
+            </label>
+            <label className="field">
+              <span>Priority</span>
+              <select value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Due date</span>
+              <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} onKeyDown={confirmTaskDueDate} />
+            </label>
+            <label className="field fn-task-form-notes">
+              <span>Notes</span>
+              <textarea value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
+            </label>
+          </div>
+          <footer className="fn-task-modal-footer">
+            <button type="submit">{creating ? "Create task" : "Save task"}</button>
+            <button type="button" className="ghost-button" onClick={creating ? closeModal : () => setFieldPlannerTaskMode("view")}>Cancel</button>
+            {draft.dueDate ? <button type="button" className="ghost-button" onClick={() => setDraft((current) => ({ ...current, dueDate: "" }))}>Clear due date</button> : null}
+          </footer>
+        </form>
+      );
+    };
+
+    return (
+      <div className="fn-task-modal-backdrop" onMouseDown={closeModal}>
+        <section className="fn-task-modal" role="dialog" aria-modal="true" aria-labelledby="fn-task-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+          <header className="fn-task-modal-head">
+            <div>
+              <p className="fn-stamp-line">Task file · {modalSemester?.name ?? "No semester"} · {modalCourse?.name ?? "No course"}</p>
+              <h2 id="fn-task-modal-title">{creating ? "Add task" : editing ? "Edit task" : task?.title}</h2>
+            </div>
+            <button type="button" className="ghost-button small-button" onClick={closeModal}>Close</button>
+          </header>
+
+          {creating || editing ? renderTaskForm() : task && calc ? (
+            <>
+              <div className="fn-task-modal-ledger">
+                <div><span>Progress</span><strong>{task.completedUnits}/{task.totalUnits}</strong><em>{formatUnitLabel(task.unitLabel, task.totalUnits)}</em></div>
+                <div><span>Next</span><strong>{getNextUnitLabel(task).replace("Next: ", "")}</strong><em>{task.dueDate ? `due ${formatDate(task.dueDate)}` : "no due date"}</em></div>
+                <div><span>Completion</span><strong>{progress}%</strong><em>{calc.unitsPerDay.toFixed(1)} / day</em></div>
+              </div>
+              <div className="fn-task-modal-progress"><div className="health-track tight wide"><div className="health-fill" style={{ width: `${progress}%`, background: modalCourse?.color ?? "var(--fn-course-blue)" }} /></div></div>
+              {task.notes ? <p className="fn-task-modal-note">{task.notes}</p> : null}
+              <div className="fn-task-modal-actions">
+                <button type="button" onClick={() => adjustTask(task.id, -1)}>-</button>
+                <button type="button" onClick={() => adjustTask(task.id, 1)}>+</button>
+                <button type="button" className="ghost-button" onClick={() => { startEditingTask(task); setFieldPlannerTaskMode("edit"); }}>Edit</button>
+                <button type="button" className="ghost-button" onClick={() => focusTaskFromDashboard(task)}>Focus</button>
+                <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>Remove</button>
+              </div>
+            </>
+          ) : null}
+        </section>
+      </div>
+    );
+  }
+
+  function renderFieldPlannerDeleteDialog() {
+    if (!fieldPlannerDeleteTarget) return null;
+
+    const title = fieldPlannerDeleteTarget.type === "semester" ? "Deleting semester" : "Deleting course";
+    const confirmDelete = () => {
+      if (fieldPlannerDeleteTarget.type === "semester") {
+        removeSemester(fieldPlannerDeleteTarget.id);
+      } else {
+        removeCourse(fieldPlannerDeleteTarget.id);
+      }
+      setFieldPlannerDeleteTarget(null);
+    };
+
+    return (
+      <div className="fn-delete-dialog-backdrop" onMouseDown={() => setFieldPlannerDeleteTarget(null)}>
+        <section className="fn-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="fn-delete-title" onMouseDown={(event) => event.stopPropagation()}>
+          <p className="fn-stamp-line">{fieldPlannerDeleteTarget.name}</p>
+          <h2 id="fn-delete-title">{title}</h2>
+          <p>No recovery possible.<br />Are you sure?</p>
+          <div className="fn-delete-dialog-actions">
+            <button type="button" className="fn-delete-yes" onClick={confirmDelete}>YES</button>
+            <button type="button" className="ghost-button" onClick={() => setFieldPlannerDeleteTarget(null)}>NO</button>
+          </div>
+        </section>
+      </div>
+    );
   }
 
   function renderMenuPanel() {
@@ -9605,28 +9875,136 @@ function App() {
                   const tasks = getSemesterTasks(state, semester.id);
                   const active = expandedSemesterIds.includes(semester.id);
                   return (
-                    <button key={semester.id} type="button" className={`fn-rail-row ${active ? "active" : ""}`} onClick={() => toggleSemester(semester.id)}>
-                      <strong>{semester.name}</strong>
-                      <span>{courses.length} courses · {tasks.length} tasks</span>
-                    </button>
+                    <div key={semester.id} className="fn-semester-tree">
+                      <button type="button" className={`fn-rail-row fn-semester-folder ${active ? "active" : ""}`} onClick={() => toggleSemester(semester.id)}>
+                        <strong>{semester.name}</strong>
+                        <span>{courses.length} courses · {tasks.length} tasks</span>
+                      </button>
+                      {active ? (
+                        <div className="fn-course-tree">
+                          {courses.map((course) => {
+                            const courseTasks = getCourseTasks(state, course.id);
+                            const courseActive = expandedCourseIds.includes(course.id);
+                            return (
+                              <div key={course.id} className="fn-course-tree-item">
+                                <button type="button" className={`fn-course-folder ${courseActive ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => toggleCourse(course.id)}>
+                                  <strong>{course.name}</strong>
+                                  <span>{courseTasks.length}</span>
+                                </button>
+                                {courseActive ? (
+                                  <div className="fn-task-tree">
+                                    {courseTasks.length ? courseTasks.map((task) => (
+                                      <button key={task.id} type="button" className={`fn-sidebar-task ${fieldPlannerTaskId === task.id ? "active" : ""}`} onClick={() => {
+                                        setSelectedTaskId(task.id);
+                                        setFieldPlannerTaskId(task.id);
+                                        setFieldPlannerTaskMode("view");
+                                      }}>
+                                        <span>{task.title}</span>
+                                        <em>{task.completedUnits}/{task.totalUnits}</em>
+                                      </button>
+                                    )) : <p className="fn-sidebar-empty">No tasks yet.</p>}
+                                    <button type="button" className="fn-rail-link fn-sidebar-add-task" onClick={() => {
+                                      setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, title: "", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" }));
+                                      setFieldPlannerTaskId(null);
+                                      setFieldPlannerTaskMode("create");
+                                    }}>+ add task</button>
+                                    <div className="fn-sidebar-actions">
+                                      <button type="button" onClick={() => startEditingCourse(course)}>edit course</button>
+                                      <button type="button" className="danger" onClick={() => setFieldPlannerDeleteTarget({ type: "course", id: course.id, name: course.name })}>remove course</button>
+                                    </div>
+                                    {editingCourseId === course.id ? (
+                                      <form className="fn-sidebar-form" onSubmit={updateCourse}>
+                                        <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Course name" />
+                                        <div className="fn-sidebar-form-grid">
+                                          <select value={courseEditDraft.targetGrade} onChange={(event) => setCourseEditDraft((current) => ({ ...current, targetGrade: event.target.value }))}>
+                                            {swissGrades.map((grade) => <option key={grade} value={grade.toString()}>{formatSwissGrade(grade)}</option>)}
+                                          </select>
+                                          <input aria-label="Course color" type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
+                                        </div>
+                                        <div className="fn-sidebar-form-actions">
+                                          <button type="submit">Save</button>
+                                          <button type="button" onClick={() => setEditingCourseId(null)}>Cancel</button>
+                                        </div>
+                                      </form>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                          {addingCourseSemesterId === semester.id ? (
+                            <form className="fn-sidebar-form" onSubmit={addCourse}>
+                              <input value={courseDraft.name} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, name: event.target.value }))} placeholder="Course name" />
+                              <div className="fn-sidebar-form-grid">
+                                <select value={courseDraft.targetGrade} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, targetGrade: event.target.value }))}>
+                                  {swissGrades.map((grade) => <option key={grade} value={grade.toString()}>{formatSwissGrade(grade)}</option>)}
+                                </select>
+                                <input aria-label="Course color" type="color" value={courseDraft.color} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, color: event.target.value }))} />
+                              </div>
+                              <div className="fn-sidebar-form-actions">
+                                <button type="submit">Add</button>
+                                <button type="button" onClick={() => setAddingCourseSemesterId(null)}>Cancel</button>
+                              </div>
+                            </form>
+                          ) : null}
+                          <button type="button" className="fn-rail-link fn-sidebar-add-course" onClick={() => {
+                            setCourseDraft((current) => ({ ...current, semesterId: semester.id }));
+                            setAddingCourseSemesterId((current) => (current === semester.id ? null : semester.id));
+                          }}>+ add course</button>
+                          <div className="fn-sidebar-actions fn-semester-actions">
+                            <button type="button" onClick={() => startEditingSemester(semester)}>edit semester</button>
+                            <button type="button" className="danger" onClick={() => setFieldPlannerDeleteTarget({ type: "semester", id: semester.id, name: semester.name })}>remove semester</button>
+                          </div>
+                          {editingSemesterId === semester.id ? (
+                            <form className="fn-sidebar-form" onSubmit={updateSemester}>
+                              <input value={semesterEditName} onChange={(event) => setSemesterEditName(event.target.value)} placeholder="Semester name" />
+                              <div className="fn-sidebar-form-actions">
+                                <button type="submit">Save</button>
+                                <button type="button" onClick={() => setEditingSemesterId(null)}>Cancel</button>
+                              </div>
+                            </form>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   );
                 })}
+                {showSemesterForm ? (
+                  <form className="fn-sidebar-form" onSubmit={addSemester}>
+                    <input value={semesterName} onChange={(event) => setSemesterName(event.target.value)} placeholder="Semester name" />
+                    <div className="fn-sidebar-form-actions">
+                      <button type="submit">Add</button>
+                      <button type="button" onClick={() => setShowSemesterForm(false)}>Cancel</button>
+                    </div>
+                  </form>
+                ) : null}
                 <button type="button" className="fn-rail-link" onClick={() => setShowSemesterForm((current) => !current)}>+ new semester</button>
-              </div>
-              <div className="fn-rail-section">
-                <div className="fn-rail-label">Course folders</div>
-                {state.courses.map((course) => {
-                  const active = expandedCourseIds.includes(course.id);
-                  return (
-                    <button key={course.id} type="button" className={`fn-course-folder ${active ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => {
-                      setExpandedSemesterIds((current) => (current.includes(course.semesterId) ? current : [...current, course.semesterId]));
-                      toggleCourse(course.id);
-                    }}>
-                      <strong>{course.name}</strong>
-                      <span>{getCourseTasks(state, course.id).length}</span>
-                    </button>
-                  );
-                })}
+                <section className="fn-sidebar-workload" aria-label="Workload calculator">
+                  <div className="fn-rail-label">Workload</div>
+                  <label>
+                    <span>Selection</span>
+                    <select value={fieldPlannerWorkloadId} onChange={(event) => setFieldPlannerWorkloadId(event.target.value)}>
+                      <option value={TOTAL_WORKLOAD_ID}>Total workload</option>
+                      {state.courses.map((course) => (
+                        <option key={course.id} value={course.id}>{course.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="fn-workload-card">
+                    <strong>{fieldPlannerWorkload.label}</strong>
+                    <p>{fieldPlannerWorkload.message}</p>
+                    <div className="fn-workload-track" aria-label={`${fieldPlannerWorkload.progress}% complete`}>
+                      <i style={{ width: `${fieldPlannerWorkload.progress}%` }} />
+                    </div>
+                    <div className="fn-workload-ledger">
+                      <span>Left <b>{fieldPlannerWorkload.remainingUnits}</b></span>
+                      <span>Done <b>{fieldPlannerWorkload.progress}%</b></span>
+                      <span>Days <b>{fieldPlannerWorkload.daysLeft ?? "set"}</b></span>
+                      <span>Pace <b>{fieldPlannerWorkload.unitsPerDay.toFixed(1)}/d</b></span>
+                    </div>
+                    {fieldPlannerWorkload.nearestDueDate ? <em>Nearest deadline {formatDate(fieldPlannerWorkload.nearestDueDate)}</em> : null}
+                  </div>
+                </section>
               </div>
             </aside>
           ) : null}
@@ -10280,6 +10658,8 @@ function App() {
               )}
             </div>
           </article>
+          {appStyle === "field-notebook" ? renderFieldPlannerTaskModal() : null}
+          {appStyle === "field-notebook" ? renderFieldPlannerDeleteDialog() : null}
         </section>
       ) : null}
 
@@ -10463,7 +10843,32 @@ function App() {
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
                   <span className="timer-context-title">{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
-                <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+                {appStyle !== "field-notebook" ? (
+                  <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+                ) : timerFaceEditing ? (
+                  <input
+                    className="timer-face-input"
+                    value={timerFaceDraft}
+                    onChange={(event) => setTimerFaceDraft(event.target.value)}
+                    onBlur={applyTimerFaceDraft}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        applyTimerFaceDraft();
+                      } else if (event.key === "Escape") {
+                        setTimerFaceEditing(false);
+                        setTimerFaceDraft(formatClock(state.timer.remainingSeconds));
+                      }
+                    }}
+                    inputMode="numeric"
+                    aria-label="Timer duration"
+                    autoFocus
+                  />
+                ) : (
+                  <button type="button" className="timer-face-time" onClick={startTimerFaceEditing} disabled={appStyle !== "field-notebook" || state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}>
+                    {formatClock(state.timer.remainingSeconds)}
+                  </button>
+                )}
                 <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
                 {timerTask ? <span className="timer-context-unit">{getNextUnitLabel(timerTask).replace("Next: ", "")}</span> : null}
               </div>
@@ -10733,7 +11138,7 @@ function App() {
                     </div>
                     <div className="session-side">
                       <span>{session.confidence}/5</span>
-                      <small>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(session.endedAt))}</small>
+                      <small>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(new Date(session.endedAt))} · {new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date(session.endedAt))}</small>
                       <button type="button" className="mini-danger" aria-label={`Delete session ${session.goal || session.presetLabel}`} onClick={() => removeSession(session.id)}>
                         {'\u2715'}
                       </button>
@@ -10762,32 +11167,87 @@ function App() {
                   <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>{space.label}</button>
                 ))}
               </div>
-              <div className="fn-rail-section">
-                <div className="fn-rail-label">Recent daily notes</div>
-                <button type="button" className="fn-rail-row active" onClick={() => setVaultNoteDate(calendarToday)}>
-                  <strong>{calendarToday}</strong>
-                  <span>{state.sessions.filter((session) => isoDate(new Date(session.endedAt)) === calendarToday).length} sessions · today</span>
-                </button>
-                {state.exports.slice(0, 5).map((item) => (
-                  <button key={item.id} type="button" className="fn-rail-row" onClick={() => setVaultNoteDate(item.noteDate)}>
-                    <strong>{item.noteDate}</strong>
-                    <span>{item.notePath}</span>
-                  </button>
-                ))}
+              <div className="fn-vault-tools">
+                <button type="button" onClick={() => setMarkdownCheatsheetOpen(true)}>Markdown</button>
+                <button type="button" onClick={() => setVaultSetupOpen((current) => !current)}>{vaultSetupOpen ? "Close setup" : "Vault setup"}</button>
               </div>
-              <div className="fn-rail-section">
-                <div className="fn-rail-label">Drawers by course</div>
-                {state.courses.slice(0, 8).map((course) => (
-                  <div key={course.id} className="fn-vault-course" style={{ "--fn-course": course.color } as CSSProperties}>
-                    <span />
-                    <strong>{course.name}</strong>
-                    <em>{getCourseTasks(state, course.id).length} tasks</em>
+              {vaultSpace === "daily" ? (
+                <>
+                  <div className="fn-rail-section">
+                    <div className="fn-rail-label">Recent daily notes</div>
+                    <button type="button" className="fn-rail-row active" onClick={() => setVaultNoteDate(calendarToday)}>
+                      <strong>{calendarToday}</strong>
+                      <span>{state.sessions.filter((session) => isoDate(new Date(session.endedAt)) === calendarToday).length} sessions · today</span>
+                    </button>
+                    {state.exports.slice(0, 5).map((item) => (
+                      <button key={item.id} type="button" className="fn-rail-row" onClick={() => setVaultNoteDate(item.noteDate)}>
+                        <strong>{item.noteDate}</strong>
+                        <span>{item.notePath}</span>
+                      </button>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <div className="fn-rail-section fn-vault-tree">
+                  <div className="fn-rail-label">Course drawers</div>
+                  {state.semesters.map((semester) => {
+                    const courses = getSemesterCourses(state, semester.id);
+                    const activeSemester = expandedSemesterIds.includes(semester.id);
+                    return (
+                      <div key={semester.id} className="fn-semester-tree">
+                        <button type="button" className={`fn-rail-row fn-semester-folder ${activeSemester ? "active" : ""}`} onClick={() => toggleSemester(semester.id)}>
+                          <strong>{semester.name}</strong>
+                          <span>{activeSemester ? "close" : "open"} · {courses.length} courses</span>
+                        </button>
+                        {activeSemester ? (
+                          <div className="fn-course-tree">
+                            {courses.map((course) => {
+                              const activeCourse = vaultSpace === "references" ? course.id === referenceCourseId : course.id === summaryCourseId;
+                              return (
+                                <div key={course.id} className="fn-course-tree-item">
+                                  <button type="button" className={`fn-course-folder ${activeCourse ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => {
+                                    if (vaultSpace === "references") {
+                                      if (referenceDirty) {
+                                        setMessage("Save the current reference note before switching courses.");
+                                        return;
+                                      }
+                                      setReferenceSemesterId(semester.id);
+                                      setReferenceCourseId(course.id);
+                                    } else {
+                                      setSummarySemesterId(semester.id);
+                                      setSummaryCourseId(course.id);
+                                    }
+                                  }}>
+                                    <strong>{course.name}</strong>
+                                    <span>{vaultSpace === "references" ? "note" : vaultSpace === "summaries" && activeCourse ? summaryFiles.length : "files"}</span>
+                                  </button>
+                                  {vaultSpace === "summaries" && activeCourse ? (
+                                    <div className="fn-task-tree fn-summary-files-tree">
+                                      <div className="fn-sidebar-actions fn-summary-file-actions">
+                                        <button type="button" onClick={() => loadSummaryFileList()} disabled={summaryLoading}>{summaryLoading ? "loading" : "refresh"}</button>
+                                        <button type="button" onClick={handleAddSummaryFiles} disabled={summaryLoading}>add files</button>
+                                      </div>
+                                      {summaryFiles.length ? summaryFiles.map((file) => (
+                                        <button key={file.path} type="button" className={`fn-sidebar-task ${file.path === selectedSummaryFile?.path ? "active" : ""}`} onClick={() => setSelectedSummaryPath(file.path)}>
+                                          <span>{file.name}</span>
+                                          <em>{file.kind.toUpperCase()}</em>
+                                        </button>
+                                      )) : <p className="fn-sidebar-empty">No files yet.</p>}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </aside>
           ) : null}
-          <div className="vault-hero">
+          {appStyle !== "field-notebook" ? <div className="vault-hero">
             <div>
               <h1>Vault</h1>
               <p>Your Obsidian-compatible markdown knowledge base.</p>
@@ -10803,7 +11263,7 @@ function App() {
                 {vaultSetupOpen ? "Close setup" : "Vault setup"}
               </button>
             </div>
-          </div>
+          </div> : null}
 
           {markdownCheatsheetOpen ? (
             <div className="markdown-cheatsheet-backdrop" onMouseDown={() => setMarkdownCheatsheetOpen(false)}>
@@ -10969,31 +11429,31 @@ function App() {
                       </div>
                     </div>
                   ) : (
-                    <div className="vault-document-wrap">
-                      <article className="panel-card vault-document">
-                        <div className="vault-document-meta">
-                          <span>Daily</span>
-                          <code>{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</code>
-                        </div>
-                        <div className="markdown-preview vault-prose">{renderMarkdownPreview(dailyPreviewContent)}</div>
-                      </article>
+                      <div className="vault-document-wrap">
+                        <article className="panel-card vault-document">
+                          <div className="vault-document-meta">
+                            <span>Daily</span>
+                            <code>{vaultNotePath ?? `Daily/${vaultNoteDate}.md`}</code>
+                          </div>
+                          <div className="markdown-preview vault-prose">{renderMarkdownPreview(dailyPreviewContent)}</div>
+                        </article>
 
-                      <div className="vault-recent-list" data-tour="vault-recent">
-                        <p className="eyebrow">Recent exports</p>
-                        {state.exports.length ? state.exports.slice(0, 4).map((item) => (
-                          <div key={item.id} className="vault-recent-row">
+                        {appStyle !== "field-notebook" ? <div className="vault-recent-list" data-tour="vault-recent">
+                          <p className="eyebrow">Recent exports</p>
+                          {state.exports.length ? state.exports.slice(0, 4).map((item) => (
+                            <div key={item.id} className="vault-recent-row">
                             <span>{item.noteDate}</span>
                             <code>{item.notePath}</code>
-                          </div>
-                        )) : <p className="empty-copy">Exports will appear here once you save a daily note.</p>}
+                            </div>
+                          )) : <p className="empty-copy">Exports will appear here once you save a daily note.</p>}
+                        </div> : null}
                       </div>
-                    </div>
                   )}
                 </div>
               ) : vaultSpace === "references" ? (
                 <div className="vault-space-panel">
                   <div className="vault-toolbar">
-                    <div className="vault-toolbar-main references-toolbar-main">
+                    {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">
                       <label className="vault-compact-field">
                         <span>Semester</span>
                         <select
@@ -11028,7 +11488,10 @@ function App() {
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </div> : <div className="vault-toolbar-main references-toolbar-main fn-vault-selection-title">
+                      <p className="eyebrow">References</p>
+                      <h2>{selectedReferenceCourse ? selectedReferenceCourse.name : "Choose a course"}</h2>
+                    </div>}
                     <div className="vault-toolbar-actions">
                       {referenceEditing ? (
                         <button type="button" className="ghost-button" onClick={handleSaveReferenceNote} disabled={referenceLoading || !selectedReferenceCourse}>{referenceLoading ? "Saving..." : "Save"}</button>
@@ -11083,7 +11546,7 @@ function App() {
               ) : (
                 <div className="vault-space-panel">
                   <div className="vault-toolbar">
-                    <div className="vault-toolbar-main references-toolbar-main">
+                    {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">
                       <label className="vault-compact-field">
                         <span>Semester</span>
                         <select
@@ -11108,16 +11571,19 @@ function App() {
                           </button>
                         ))}
                       </div>
-                    </div>
-                    <div className="vault-toolbar-actions">
+                    </div> : <div className="vault-toolbar-main references-toolbar-main fn-vault-selection-title">
+                      <p className="eyebrow">Summaries</p>
+                      <h2>{selectedSummaryCourse ? selectedSummaryCourse.name : "Choose a course"}</h2>
+                    </div>}
+                    {appStyle !== "field-notebook" ? <div className="vault-toolbar-actions">
                       <button type="button" className="ghost-button" onClick={() => loadSummaryFileList()} disabled={summaryLoading || !selectedSummaryCourse}>{summaryLoading ? "Loading..." : "Refresh"}</button>
                       <button type="button" onClick={handleAddSummaryFiles} disabled={summaryLoading || !selectedSummaryCourse}>Add files</button>
-                    </div>
+                    </div> : null}
                   </div>
 
                   {selectedSummarySemester && selectedSummaryCourse ? (
                     <div className="summaries-layout">
-                      <aside className="panel-card summary-file-list">
+                      {appStyle !== "field-notebook" ? <aside className="panel-card summary-file-list">
                         <div className="summary-file-list-head">
                           <div>
                             <p className="eyebrow">Summaries</p>
@@ -11142,7 +11608,7 @@ function App() {
                         ) : (
                           <p className="empty-copy">No summaries yet. Add PDFs, formula sheets, or cheatsheet images for this course.</p>
                         )}
-                      </aside>
+                      </aside> : null}
 
                       <section className="panel-card summary-viewer-card">
                         {selectedSummaryFile && selectedSummaryUrl ? (
@@ -11717,8 +12183,8 @@ function App() {
                       </div>
                       <div className="arena-lb-rows squad-lb-rows">
                         {squadMemberLeaderboard.map((entry) => {
-const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
-                          return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
+                          const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
+                          return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
                         })}
                         {!squadMemberLeaderboard.length ? <div className="arena-empty small">Sync your squad to see member rankings.</div> : null}
                       </div>
@@ -11912,8 +12378,8 @@ const profileTarget = { userId: entry.userId, displayName: entry.displayName, fr
                 {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
                   <SquadArenaRow key={entry.squadId} entry={entry} period={squadScorePeriod} isSelf={entry.squadId === state.social.squad?.id} onOpen={() => void openSquadDetails(entry)} />
                 )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
-const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
-                          return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
+                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
+                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
                 })}
                 {socialScope === "squad" && !squadScoreLeaderboard.length ? (
                   <div className="arena-empty">
