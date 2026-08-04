@@ -8712,6 +8712,30 @@ input[type="color"] {
   font-family: var(--font-mono);
 }
 
+.session-log-card .session-row .session-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.session-log-card .session-row .session-side .mini-danger {
+  padding: 4px 10px;
+  border-radius: 10px;
+  line-height: 1;
+  font-size: 0.8rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.session-log-card .session-row:hover .session-side .mini-danger,
+.session-log-card .session-row .session-side .mini-danger:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 @media (max-width: 1180px) {
   .timer-preset-cards,
   .timer-link-strip,

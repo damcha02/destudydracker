@@ -6033,6 +6033,33 @@ function App() {
     setState((current) => ({ ...current, exams: current.exams.filter((exam) => exam.id !== examId) }));
   }
 
+  function removeSession(sessionId: string) {
+    const session = state.sessions.find((item) => item.id === sessionId);
+    if (!session) return;
+    const countsTowardLifetime = session.kind === "study" || session.kind === "exam";
+    if (!window.confirm("Delete this session? This removes its time from your history and statistics.")) return;
+    setState((current) => {
+      const remaining = current.sessions.filter((item) => item.id !== sessionId);
+      const removedMinutes = countsTowardLifetime ? Math.max(0, Math.round(session.minutes)) : 0;
+      const removedSessions = countsTowardLifetime ? 1 : 0;
+      return {
+        ...current,
+        sessions: remaining,
+        lifetimeStudyMinutes: Math.max(0, (current.lifetimeStudyMinutes || 0) - removedMinutes),
+        lifetimeStudySessions: Math.max(0, (current.lifetimeStudySessions || 0) - removedSessions),
+        social: {
+          ...current.social,
+          pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => post.id !== sessionId),
+          cachedFeeds: {
+            global: current.social.cachedFeeds.global.filter((post) => post.id !== sessionId),
+            friends: current.social.cachedFeeds.friends.filter((post) => post.id !== sessionId),
+          },
+        },
+      };
+    });
+    setMessage("Session deleted.");
+  }
+
   function unlockGame(name: string) {
     const t = isoDate();
     setState((current) => {
@@ -10222,6 +10249,9 @@ function App() {
                     <div className="session-side">
                       <span>{session.confidence}/5</span>
                       <small>{new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(session.endedAt))}</small>
+                      <button type="button" className="mini-danger" aria-label={`Delete session ${session.goal || session.presetLabel}`} onClick={() => removeSession(session.id)}>
+                        {'\u2715'}
+                      </button>
                     </div>
                   </div>
                 ))
