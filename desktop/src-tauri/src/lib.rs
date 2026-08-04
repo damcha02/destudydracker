@@ -283,6 +283,20 @@ fn stable_machine_id() -> String {
     String::new()
 }
 
+#[cfg(target_os = "macos")]
+fn enable_native_fullscreen(window: &tauri::WebviewWindow) {
+    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
+
+    if let Ok(ns_window) = window.ns_window() {
+        unsafe {
+            let ns_window: &NSWindow = &*ns_window.cast();
+            let behavior =
+                ns_window.collectionBehavior() | NSWindowCollectionBehavior::FullScreenPrimary;
+            ns_window.setCollectionBehavior(behavior);
+        }
+    }
+}
+
 #[tauri::command]
 fn get_device_identity() -> DeviceIdentity {
     let os = std::env::consts::OS;
@@ -952,6 +966,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             setup_timer_tray(app.handle())?;
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                enable_native_fullscreen(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
