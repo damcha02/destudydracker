@@ -14308,7 +14308,7 @@ input[type="color"] {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   border: 0;
   padding: 15px 0;
   background: transparent;
@@ -14316,8 +14316,30 @@ input[type="color"] {
   border-radius: 0;
   text-align: left;
   box-shadow: none;
-  cursor: pointer;
   transition: background-color 0.16s ease, padding-inline 0.16s ease, border-color 0.16s ease;
+}
+
+.fn-quiet-row .dashboard-task-check {
+  flex: none;
+}
+
+.fn-quiet-row-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.fn-quiet-row-body:focus-visible {
+  outline: 2px solid var(--fn-course, var(--fn-course-blue));
+  outline-offset: 3px;
 }
 
 .fn-quiet-row:last-child {
@@ -14986,18 +15008,26 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .social-feed-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  display: flex;
+  align-items: flex-start;
   gap: 30px;
-  align-items: start;
   max-width: 1180px;
 }
 
-:root[data-app-style="field-notebook"] .study-circle-root .social-feed-scope,
-:root[data-app-style="field-notebook"] .study-circle-root .stories,
-:root[data-app-style="field-notebook"] .study-circle-root .live-bar,
-:root[data-app-style="field-notebook"] .study-circle-root .feed-composer {
-  grid-column: 2;
+:root[data-app-style="field-notebook"] .study-circle-root .social-feed-main {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .social-feed-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  order: 2;
+  flex: 0 1 400px;
+  min-width: 360px;
+  max-width: 440px;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .social-feed-scope {
@@ -15005,7 +15035,7 @@ input[type="color"] {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-start;
-  margin: 0 0 18px;
+  margin: 0;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .live-bar {
@@ -15013,7 +15043,7 @@ input[type="color"] {
   grid-template-columns: 8px auto minmax(0, 1fr);
   gap: 10px 12px;
   align-items: center;
-  margin: 0 0 22px;
+  margin: 0;
   border: var(--fn-edge) !important;
   border-radius: 0;
   background: var(--surface-2) !important;
@@ -15091,13 +15121,6 @@ input[type="color"] {
   justify-self: start;
 }
 
-:root[data-app-style="field-notebook"] .study-circle-root .section-label,
-:root[data-app-style="field-notebook"] .study-circle-root .feed-card,
-:root[data-app-style="field-notebook"] .study-circle-root .milestone,
-:root[data-app-style="field-notebook"] .study-circle-root .week-compare {
-  grid-column: 1;
-}
-
 :root[data-app-style="field-notebook"] .study-circle-root .arena-leaderboard {
   min-height: 0;
 }
@@ -15115,9 +15138,10 @@ input[type="color"] {
 
 :root[data-app-style="field-notebook"] .study-circle-root .arena-lb-row {
   display: grid;
-  grid-template-columns: 52px 54px minmax(0, 1fr) auto;
+  grid-template-columns: 52px 54px minmax(0, 260px) auto;
   gap: 14px;
   align-items: center;
+  justify-content: start;
   min-height: 72px;
   padding: 12px 0;
 }
@@ -15187,8 +15211,7 @@ input[type="color"] {
 }
 
 @media (max-width: 1180px) {
-  .fn-dashboard-grid,
-  :root[data-app-style="field-notebook"] .study-circle-root .social-feed-shell {
+  .fn-dashboard-grid {
     grid-template-columns: 1fr;
   }
 
@@ -15197,15 +15220,13 @@ input[type="color"] {
     border-left: 0;
   }
 
-  :root[data-app-style="field-notebook"] .study-circle-root .social-feed-scope,
-  :root[data-app-style="field-notebook"] .study-circle-root .stories,
-  :root[data-app-style="field-notebook"] .study-circle-root .live-bar,
-  :root[data-app-style="field-notebook"] .study-circle-root .feed-composer,
-  :root[data-app-style="field-notebook"] .study-circle-root .section-label,
-  :root[data-app-style="field-notebook"] .study-circle-root .feed-card,
-  :root[data-app-style="field-notebook"] .study-circle-root .milestone,
-  :root[data-app-style="field-notebook"] .study-circle-root .week-compare {
-    grid-column: 1;
+  :root[data-app-style="field-notebook"] .study-circle-root .social-feed-shell {
+    flex-direction: column;
+  }
+
+  :root[data-app-style="field-notebook"] .study-circle-root .social-feed-sidebar {
+    max-width: none;
+    width: 100%;
   }
 }
 
@@ -16456,12 +16477,189 @@ input[type="color"] {
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .arena-podium {
-  display: none;
+  display: grid;
+  grid-template-columns: 1fr;
+  margin: 0 0 20px;
+  border: var(--fn-edge);
+  border-radius: 0;
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 260px) auto auto;
+  gap: 14px;
+  align-items: center;
+  justify-items: start;
+  justify-content: start;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: var(--fn-rule-dot);
+  border-right: 0;
+  text-align: left;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col:last-child {
+  border-bottom: 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col > span {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-align: right;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col .arena-podium-block,
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col .arena-podium-block--1,
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col .arena-podium-block--2,
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col .arena-podium-block--3 {
+  min-height: 0;
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: right;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .arena-podium-col .arena-podium-block small {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-table {
+  margin-top: 18px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-head,
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 90px minmax(0, 1fr) 60px;
+  align-items: center;
+  gap: 14px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-head {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--ink);
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-head span:last-child {
+  text-align: right;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row {
+  padding: 13px 0;
+  border-bottom: var(--fn-rule-dot);
+  cursor: pointer;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row:last-child {
+  border-bottom: 0;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row--self {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-rank {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row--self .fn-lb-rank {
+  color: var(--accent);
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-name em {
+  margin-left: 6px;
+  border: var(--fn-rule-soft);
+  padding: 2px 5px;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: normal;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-hours {
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-bar {
+  display: flex;
+  align-items: center;
+  height: 7px;
+  background: var(--surface-2);
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-bar i {
+  display: block;
+  height: 100%;
+  background: var(--fn-course-green);
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-row--self .fn-lb-bar i {
+  background: var(--accent);
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-sessions {
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-align: right;
+}
+
+:root[data-app-style="field-notebook"] .study-circle-root .fn-lb-note {
+  margin: 8px 0 0;
+  color: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 :root[data-app-style="field-notebook"] .study-circle-root .feed-card,
 :root[data-app-style="field-notebook"] .study-circle-root .milestone {
-  padding: 15px 0;
+  padding: 10px 0;
   border: 0 !important;
   border-bottom: var(--fn-rule-dot) !important;
 }

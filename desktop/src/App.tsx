@@ -487,7 +487,6 @@ type ThemePalette =
   | "ocean"
   | "ume"
   | "copper"
-  | "terminal"
   | "organs"
   | "lavender"
   | "gpt"
@@ -1298,7 +1297,6 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
   { id: "ocean", name: "Ocean", desc: "Deep-sea navy with bright blue focus.", swatch: "#4facfe" },
   { id: "ume", name: "Ume", desc: "Plum-blossom aubergine and pink.", swatch: "#f5a0c0" },
   { id: "copper", name: "Copper", desc: "Burnished copper and espresso warmth.", swatch: "#d4764e" },
-  { id: "terminal", name: "Terminal", desc: "Matrix green on pure black.", swatch: "#00ff41" },
   { id: "organs", name: "Organs", desc: "Cream on near-black with oxblood red.", swatch: "#c83240" },
   { id: "lavender", name: "Lavender", desc: "Soft violet on lilac white.", swatch: "#9b6dcc" },
   { id: "gpt", name: "GPT", desc: "Monochrome graphite and grey.", swatch: "#949494" },
@@ -3568,6 +3566,7 @@ function App() {
   const badgePerfectionist = badgeFullHouse && todayPlayedNames.length === STUDY_BREAK_GAME_COUNT;
   const badgeVeteran = state.totalUnlocks >= 10;
   const socialLeaderboard = getLeaderboardWithLocalSelf(state, socialScope, socialPeriod);
+  const socialLeaderboardTopMinutes = Math.max(1, ...socialLeaderboard.map((entry) => entry.minutes));
   const squadMemberLeaderboard = getLeaderboardWithLocalSelf(state, "squad", socialPeriod);
   const squadScoreLeaderboard = state.social.cachedSquadScoreLeaderboards[squadScorePeriod] ?? [];
   const socialArenaTitle = socialScope === "global" ? "World Arena" : socialScope === "squad" ? "Squad Arena" : "Friends Arena";
@@ -8760,17 +8759,28 @@ function App() {
                 const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
                 const active = selectedQuietEntry?.id === entry.id;
                 return (
-                  <button
+                  <div
                     key={entry.id}
-                    type="button"
                     className={`fn-quiet-row ${active ? "active" : ""}`}
                     style={{ "--fn-course": course?.color ?? "var(--fn-course-blue)" } as CSSProperties}
-                    onClick={() => setSelectedQuietDashboardEntryId(entry.id)}
                   >
-                    <i />
-                    <span>{task?.title ?? entry.adHocTitle ?? "Calendar task"} <em>{course?.name ?? "General"}</em></span>
-                    <strong>{active ? "selected" : task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</strong>
-                  </button>
+                    <input
+                      className="dashboard-task-check"
+                      type="checkbox"
+                      checked={entry.completed}
+                      onChange={() => toggleCalendarEntry(entry.id)}
+                      title="Mark done"
+                    />
+                    <button
+                      type="button"
+                      className="fn-quiet-row-body"
+                      onClick={() => setSelectedQuietDashboardEntryId(entry.id)}
+                    >
+                      <i />
+                      <span>{task?.title ?? entry.adHocTitle ?? "Calendar task"} <em>{course?.name ?? "General"}</em></span>
+                      <strong>{active ? "selected" : task?.dueDate ? `due ${formatDate(task.dueDate)}` : formatTimeRange(entry)}</strong>
+                    </button>
+                  </div>
                 );
               }) : (
                 <p className="fn-quiet-empty">No scheduled units today. Place one task in the planner calendar.</p>
@@ -9073,25 +9083,32 @@ function App() {
                 ))}
               </div>
               {themePanelView === "themes" ? (
-                <div className="theme-choice-grid">
-                  {themePalettes.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
-                      onClick={() => setPalette(p.id)}
-                    >
-                      <div className="theme-choice-main">
-                        <span className="theme-choice-swatch" style={{ background: p.swatch }} />
-                        <div>
-                          <strong>{p.name}</strong>
-                          <span>{p.desc}</span>
+                appStyle === "field-notebook" ? (
+                  <div className="arena-empty">
+                    <strong>Coming soon</strong>
+                    <span>Field Notebook doesn't support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
+                  </div>
+                ) : (
+                  <div className="theme-choice-grid">
+                    {themePalettes.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`theme-choice-card ${palette === p.id ? "active" : ""}`}
+                        onClick={() => setPalette(p.id)}
+                      >
+                        <div className="theme-choice-main">
+                          <span className="theme-choice-swatch" style={{ background: p.swatch }} />
+                          <div>
+                            <strong>{p.name}</strong>
+                            <span>{p.desc}</span>
+                          </div>
                         </div>
-                      </div>
-                      {palette === p.id ? <span className="design-chip">Active</span> : null}
-                    </button>
-                  ))}
-                </div>
+                        {palette === p.id ? <span className="design-chip">Active</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                )
               ) : (
                 <div className="theme-choice-grid style-choice-grid">
                   {appStyles.map((styleOption) => (
@@ -11678,96 +11695,99 @@ function App() {
 
           {socialSubtab === "feed" ? (
             <div className="social-feed-shell">
-              <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope" data-tour="social-feed-scope">
-                {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
-                  <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
-                    {appStyle === "field-notebook" ? (scope === "global" ? "Global log" : "Friends log") : (scope === "global" ? "Global Feed" : "Friends Feed")}
+              <div className="social-feed-sidebar">
+                <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope" data-tour="social-feed-scope">
+                  {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
+                    <button key={scope} type="button" className={feedScope === scope ? "arena-scope-btn arena-scope-btn--active" : "arena-scope-btn"} onClick={() => setFeedScope(scope)}>
+                      {appStyle === "field-notebook" ? (scope === "global" ? "Global log" : "Friends log") : (scope === "global" ? "Global Feed" : "Friends Feed")}
+                    </button>
+                  ))}
+                  <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" data-tour="social-refresh" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
+                    {socialSyncing ? "Syncing..." : "Refresh"}
                   </button>
-                ))}
-                <button type="button" className="arena-btn arena-btn--decline social-refresh-btn" data-tour="social-refresh" onClick={() => void runSocialSync()} disabled={socialSyncing || !socialConfigured}>
-                  {socialSyncing ? "Syncing..." : "Refresh"}
-                </button>
-              </div>
-
-              <div className="stories" aria-label="Study circle stories" data-tour="social-stories">
-                <div className="story">
-                  <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} avatar={state.social.avatar} self size="md" /></div>
-                  <span>You</span>
                 </div>
-                {state.social.friends.slice(0, 10).map((friend) => (
-                  <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(friend); } }}>
-                    <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="md" /></div>
-                    <span>{friend.displayName}</span>
+
+                <div className="stories" aria-label="Study circle stories" data-tour="social-stories">
+                  <div className="story">
+                    <div className="story__ring story__ring--self"><ArenaAvatar name={state.social.displayName} avatar={state.social.avatar} self size="md" /></div>
+                    <span>You</span>
                   </div>
-                ))}
-              </div>
-
-              <div className="live-bar" data-tour="social-live">
-                <span className="live-dot" />
-                <strong>{liveFriends.length ? `${liveFriends.length} friends` : "No friends"}</strong>
-                <span>recently active</span>
-                <small>{liveFriends.slice(0, 3).map((friend) => friend.displayName).join(" · ") || "Sync to update live status"}</small>
-              </div>
-
-              {canViewR2Usage && (r2UsageStatus?.warning || r2UsageStatus?.paused) ? (
-                <div className={`feed-r2-safety ${r2UsageStatus.paused ? "feed-r2-safety--paused" : ""}`}>
-                  <strong>{r2UsageStatus.paused ? "Image uploads paused" : "Image usage close to safety limit"}</strong>
-                  <span>
-                    Storage {formatBytes(r2UsageStatus.storageBytes)} / {formatBytes(r2UsageStatus.limits.storageHardBytes)} · Writes {formatCompactNumber(r2UsageStatus.classAOps)} / {formatCompactNumber(r2UsageStatus.limits.classAHardMonthly)} · Reads {formatCompactNumber(r2UsageStatus.classBOps)} / {formatCompactNumber(r2UsageStatus.limits.classBHardMonthly)}
-                  </span>
-                  <small>These strict app limits are far below Cloudflare R2's free tier to avoid overage risk.</small>
-                </div>
-              ) : null}
-
-              <form className="feed-composer" data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
-                <div>
-                  <span className="arena-kicker">{appStyle === "field-notebook" ? "Post your last block" : "Share latest session"}</span>
-                  <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
-                  <p>{latestFeedSession ? (appStyle === "field-notebook" ? "One line for the circle, or leave it blank." : "Write one sentence, or leave it blank for a chaotic default.") : "Finish a study or exam block, then publish it here."}</p>
-                </div>
-                <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder={appStyle === "field-notebook" ? "one line, or leave it blank..." : "one sentence for the feed..."} disabled={!latestFeedSession || latestFeedSessionPosted} />
-                <div className="feed-composer-actions">
-                  <label className="feed-action-icon" data-tour="social-image" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
-                    <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
-                    <span aria-hidden="true">▧</span>
-                  </label>
-                  <button type="button" className={`feed-action-icon ${feedPollHasDraft ? "feed-action-icon--active" : ""}`} data-tour="social-poll" onClick={() => setFeedPollPanelOpen((open) => !open)} disabled={!latestFeedSession || latestFeedSessionPosted} title="Create poll" aria-label="Create poll">◉</button>
-                </div>
-                <button type="submit" className="arena-btn arena-btn--send" data-tour="social-post" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
-                {feedPollPanelOpen ? (
-                  <div className="feed-poll-popover">
-                    <div className="feed-poll-popover__head">
-                      <strong>Create poll</strong>
-                      <label className="feed-poll-switch">
-                        <span>Multiple answers</span>
-                        <input type="checkbox" checked={feedPollDraft.multiple} onChange={(event) => setFeedPollDraft((current) => ({ ...current, multiple: event.target.checked }))} />
-                        <i className="ios-switch" aria-hidden="true" />
-                      </label>
+                  {state.social.friends.slice(0, 10).map((friend) => (
+                    <div key={friend.userId} className="story" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(friend); } }}>
+                      <div className={`story__ring ${isRecentlyActive(friend.lastSeenAt) ? "" : "story__ring--idle"}`}><ArenaAvatar name={friend.displayName} avatar={friend.avatar} size="md" /></div>
+                      <span>{friend.displayName}</span>
                     </div>
-                    <input className="arena-input" value={feedPollDraft.question} onChange={(event) => setFeedPollDraft((current) => ({ ...current, question: event.target.value }))} placeholder="Question" maxLength={180} />
-                    <div className="feed-poll-options-editor">
-                      {feedPollDraft.options.map((option, index) => (
-                        <div key={index} className="feed-poll-option-editor">
-                          <input className="arena-input" value={option} onChange={(event) => updateFeedPollOption(index, event.target.value)} placeholder={`Option ${index + 1}`} maxLength={100} />
-                          {feedPollDraft.options.length > 2 ? <button type="button" className="feed-poll-option-remove" onClick={() => removeFeedPollOption(index)} aria-label={`Remove option ${index + 1}`}>×</button> : null}
-                        </div>
-                      ))}
-                    </div>
-                    <button type="button" className="feed-poll-add-option" onClick={addFeedPollOption} disabled={feedPollDraft.options.length >= MAX_FEED_POLL_OPTIONS}>+ Add option</button>
-                    <div className="feed-poll-popover__actions">
-                      <button type="button" className="arena-btn arena-btn--send" onClick={() => setFeedPollPanelOpen(false)}>Done</button>
-                      <button type="button" className="ghost-button small-button" onClick={clearFeedPollDraft}>Clear</button>
-                    </div>
+                  ))}
+                </div>
+
+                <div className="live-bar" data-tour="social-live">
+                  <span className="live-dot" />
+                  <strong>{liveFriends.length ? `${liveFriends.length} friends` : "No friends"}</strong>
+                  <span>recently active</span>
+                  <small>{liveFriends.slice(0, 3).map((friend) => friend.displayName).join(" · ") || "Sync to update live status"}</small>
+                </div>
+
+                {canViewR2Usage && (r2UsageStatus?.warning || r2UsageStatus?.paused) ? (
+                  <div className={`feed-r2-safety ${r2UsageStatus.paused ? "feed-r2-safety--paused" : ""}`}>
+                    <strong>{r2UsageStatus.paused ? "Image uploads paused" : "Image usage close to safety limit"}</strong>
+                    <span>
+                      Storage {formatBytes(r2UsageStatus.storageBytes)} / {formatBytes(r2UsageStatus.limits.storageHardBytes)} · Writes {formatCompactNumber(r2UsageStatus.classAOps)} / {formatCompactNumber(r2UsageStatus.limits.classAHardMonthly)} · Reads {formatCompactNumber(r2UsageStatus.classBOps)} / {formatCompactNumber(r2UsageStatus.limits.classBHardMonthly)}
+                    </span>
+                    <small>These strict app limits are far below Cloudflare R2's free tier to avoid overage risk.</small>
                   </div>
                 ) : null}
-                {feedImageDraft ? (
-                  <div className="feed-image-draft">
-                    <img src={feedImageDraft.previewUrl} alt="Selected feed post preview" />
-                    <button type="button" className="ghost-button small-button" onClick={() => setFeedImageDraft((current) => { if (current) URL.revokeObjectURL(current.previewUrl); return null; })}>Remove image</button>
-                  </div>
-                ) : null}
-              </form>
 
+                <form className="feed-composer" data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
+                  <div>
+                    <span className="arena-kicker">{appStyle === "field-notebook" ? "Post your last block" : "Share latest session"}</span>
+                    <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
+                    <p>{latestFeedSession ? (appStyle === "field-notebook" ? "One line for the circle, or leave it blank." : "Write one sentence, or leave it blank for a chaotic default.") : "Finish a study or exam block, then publish it here."}</p>
+                  </div>
+                  <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder={appStyle === "field-notebook" ? "one line, or leave it blank..." : "one sentence for the feed..."} disabled={!latestFeedSession || latestFeedSessionPosted} />
+                  <div className="feed-composer-actions">
+                    <label className="feed-action-icon" data-tour="social-image" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
+                      <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
+                      <span aria-hidden="true">▧</span>
+                    </label>
+                    <button type="button" className={`feed-action-icon ${feedPollHasDraft ? "feed-action-icon--active" : ""}`} data-tour="social-poll" onClick={() => setFeedPollPanelOpen((open) => !open)} disabled={!latestFeedSession || latestFeedSessionPosted} title="Create poll" aria-label="Create poll">◉</button>
+                  </div>
+                  <button type="submit" className="arena-btn arena-btn--send" data-tour="social-post" disabled={!latestFeedSession || latestFeedSessionPosted}>{latestFeedSessionPosted ? "Posted" : "Post"}</button>
+                  {feedPollPanelOpen ? (
+                    <div className="feed-poll-popover">
+                      <div className="feed-poll-popover__head">
+                        <strong>Create poll</strong>
+                        <label className="feed-poll-switch">
+                          <span>Multiple answers</span>
+                          <input type="checkbox" checked={feedPollDraft.multiple} onChange={(event) => setFeedPollDraft((current) => ({ ...current, multiple: event.target.checked }))} />
+                          <i className="ios-switch" aria-hidden="true" />
+                        </label>
+                      </div>
+                      <input className="arena-input" value={feedPollDraft.question} onChange={(event) => setFeedPollDraft((current) => ({ ...current, question: event.target.value }))} placeholder="Question" maxLength={180} />
+                      <div className="feed-poll-options-editor">
+                        {feedPollDraft.options.map((option, index) => (
+                          <div key={index} className="feed-poll-option-editor">
+                            <input className="arena-input" value={option} onChange={(event) => updateFeedPollOption(index, event.target.value)} placeholder={`Option ${index + 1}`} maxLength={100} />
+                            {feedPollDraft.options.length > 2 ? <button type="button" className="feed-poll-option-remove" onClick={() => removeFeedPollOption(index)} aria-label={`Remove option ${index + 1}`}>×</button> : null}
+                          </div>
+                        ))}
+                      </div>
+                      <button type="button" className="feed-poll-add-option" onClick={addFeedPollOption} disabled={feedPollDraft.options.length >= MAX_FEED_POLL_OPTIONS}>+ Add option</button>
+                      <div className="feed-poll-popover__actions">
+                        <button type="button" className="arena-btn arena-btn--send" onClick={() => setFeedPollPanelOpen(false)}>Done</button>
+                        <button type="button" className="ghost-button small-button" onClick={clearFeedPollDraft}>Clear</button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {feedImageDraft ? (
+                    <div className="feed-image-draft">
+                      <img src={feedImageDraft.previewUrl} alt="Selected feed post preview" />
+                      <button type="button" className="ghost-button small-button" onClick={() => setFeedImageDraft((current) => { if (current) URL.revokeObjectURL(current.previewUrl); return null; })}>Remove image</button>
+                    </div>
+                  ) : null}
+                </form>
+              </div>
+
+              <div className="social-feed-main">
               <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : "Activity"} {feedLoading ? "· Refreshing" : ""}</div>
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
@@ -11934,6 +11954,7 @@ function App() {
                   );
                 }) : <p className="empty-copy">Weekly comparison appears after you sync with friends.</p>}
               </article>
+              </div>
             </div>
           ) : null}
 
@@ -12355,7 +12376,41 @@ function App() {
                 </div>
               ) : null}
 
-              {socialScope !== "squad" && socialLeaderboard.length >= 3 ? (
+              {socialScope !== "squad" && appStyle === "field-notebook" ? (
+                <div className="fn-lb-table">
+                  <div className="fn-lb-head">
+                    <span />
+                    <span>Name</span>
+                    <span>Hours</span>
+                    <span>{socialPeriod === "daily" ? "Today" : socialPeriod === "overall" ? "All time" : "This week"}</span>
+                    <span>Sessions</span>
+                  </div>
+                  <div className="arena-lb-rows">
+                    {socialLeaderboard.map((entry) => {
+                      const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
+                      const barPct = entry.minutes > 0 ? Math.max(4, Math.round((entry.minutes / socialLeaderboardTopMinutes) * 100)) : 0;
+                      return (
+                        <div key={entry.userId} className={`fn-lb-row ${entry.isSelf ? "fn-lb-row--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(profileTarget); } }}>
+                          <span className="fn-lb-rank">{entry.rank}</span>
+                          <span className="fn-lb-name">{entry.displayName}{entry.isSelf ? <em>{entry.friendCode}</em> : null}</span>
+                          <span className="fn-lb-hours">{formatMinutes(entry.minutes)}</span>
+                          <span className="fn-lb-bar"><i style={{ width: `${barPct}%` }} /></span>
+                          <span className="fn-lb-sessions">{entry.sessions}</span>
+                        </div>
+                      );
+                    })}
+                    {!socialLeaderboard.length ? (
+                      <div className="arena-empty">
+                        <strong>No contenders yet</strong>
+                        <span>Start studying and sync to claim your rank.</span>
+                      </div>
+                    ) : null}
+                  </div>
+                  {socialLeaderboard.length ? <p className="fn-lb-note">Bars are relative to the top of the board.</p> : null}
+                </div>
+              ) : null}
+
+              {socialScope !== "squad" && appStyle !== "field-notebook" && socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
                     const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
@@ -12374,26 +12429,28 @@ function App() {
                 </div>
               ) : null}
 
-              <div className="arena-lb-rows">
-                {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
-                  <SquadArenaRow key={entry.squadId} entry={entry} period={squadScorePeriod} isSelf={entry.squadId === state.social.squad?.id} onOpen={() => void openSquadDetails(entry)} />
-                )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
-                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
-                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
-                })}
-                {socialScope === "squad" && !squadScoreLeaderboard.length ? (
-                  <div className="arena-empty">
-                    <strong>No eligible squads yet</strong>
-                    <span>Squads need at least 2 members to enter the Squad Arena.</span>
-                  </div>
-                ) : null}
-                {socialScope !== "squad" && !socialLeaderboard.length ? (
-                  <div className="arena-empty">
-                    <strong>No contenders yet</strong>
-                    <span>Start studying and sync to claim your rank.</span>
-                  </div>
-                ) : null}
-              </div>
+              {socialScope === "squad" || appStyle !== "field-notebook" ? (
+                <div className="arena-lb-rows">
+                  {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
+                    <SquadArenaRow key={entry.squadId} entry={entry} period={squadScorePeriod} isSelf={entry.squadId === state.social.squad?.id} onOpen={() => void openSquadDetails(entry)} />
+                  )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
+                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
+                    return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
+                  })}
+                  {socialScope === "squad" && !squadScoreLeaderboard.length ? (
+                    <div className="arena-empty">
+                      <strong>No eligible squads yet</strong>
+                      <span>Squads need at least 2 members to enter the Squad Arena.</span>
+                    </div>
+                  ) : null}
+                  {socialScope !== "squad" && !socialLeaderboard.length ? (
+                    <div className="arena-empty">
+                      <strong>No contenders yet</strong>
+                      <span>Start studying and sync to claim your rank.</span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </article>
           ) : null}
         </section>

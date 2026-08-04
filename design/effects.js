@@ -35,10 +35,6 @@
       dark:  { type: 'constellations', color: '#64d2ff', intensity: 1 },
       light: { type: 'constellations', color: '#0aa3b4', intensity: 0.56 }
     },
-    terminal: {
-      dark:  { type: 'perlinflow', color: '#00ff41', intensity: 0.8 },
-      light: { type: 'perlinflow', color: '#1d8f37', intensity: 0.38 }
-    },
     organs: {
       dark:  { type: 'rain', color: '#5a1e22', intensity: 0.65 },
       light: { type: 'rain', color: '#b6242f', intensity: 0.28 }

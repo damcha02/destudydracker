@@ -64,7 +64,6 @@ const PALETTES = [
   { id: 'ocean', name: 'Ocean', note: 'Deep-sea blue', sw: ['#0b1a2c', '#64d2ff', '#4facfe'] },
   { id: 'ume', name: 'Ume', note: 'Plum blossom', sw: ['#2b1b2e', '#f5c2e7', '#f5a0c0'] },
   { id: 'copper', name: 'Copper', note: 'Burnished copper', sw: ['#1c1410', '#e8c39e', '#d4764e'] },
-  { id: 'terminal', name: 'Terminal', note: 'Matrix green', sw: ['#000000', '#003b00', '#00ff41'] },
   { id: 'organs', name: 'Organs', note: 'Cream & oxblood', sw: ['#0a0406', '#efe1c8', '#c83240'] },
   { id: 'lavender', name: 'Lavender', note: 'Soft violet', sw: ['#f3eef8', '#cec3de', '#9b6dcc'] },
   { id: 'gpt', name: 'GPT', note: 'Monochrome grey', sw: ['#212121', '#ececec', '#949494'] },

@@ -17,7 +17,6 @@
     retrowave: { type: 'embers',         color: 'fg',      intensity: 1 },
     forest:    { type: 'petals',         color: 'fg',      intensity: 1 },
     ocean:     { type: 'constellations', color: 'fg',      intensity: 1 },
-    terminal:  { type: 'perlinflow',     color: 'fg',      intensity: 0.8 },
     organs:    { type: 'rain',           color: '#451616', intensity: 0.65 },
     ume:       { type: 'petals',         color: '#f5a0c0', intensity: 1 },
     cute:      { type: 'sparkles',       color: '#ff8cb8', intensity: 1 },
