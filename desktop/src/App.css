@@ -886,6 +886,23 @@
   font-size: 1.45rem;
 }
 
+.arena-avatar--photo {
+  overflow: hidden;
+  background: var(--surface-2);
+  padding: 0;
+}
+
+.arena-avatar--photo.arena-avatar--self {
+  background: var(--surface-2);
+}
+
+.arena-avatar--photo .arena-avatar-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .arena-code-plate {
   display: inline-flex;
   width: fit-content;
@@ -2867,7 +2884,7 @@
 
 .profile-avatar-mode-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
   margin: 20px 0 16px;
   padding: 5px;
@@ -2875,6 +2892,111 @@
   border-radius: 999px;
   background: var(--surface-2);
 }
+
+.profile-avatar-photo-upload {
+  border: 1px dashed color-mix(in oklch, var(--accent) 45%, var(--border));
+  border-radius: 18px;
+  padding: 26px 14px;
+  background: color-mix(in oklch, var(--surface-2) 70%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 850;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.profile-avatar-photo-upload:hover {
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface));
+}
+
+.profile-avatar-photo-remove {
+  justify-self: start;
+}
+
+.profile-avatar-photo-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.4;
+}
+
+.profile-crop-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+}
+
+.profile-crop-head p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.profile-crop-stage {
+  position: relative;
+  align-self: center;
+  overflow: hidden;
+  border-radius: 10px;
+  background:
+    linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%),
+    linear-gradient(45deg, var(--border) 25%, transparent 25%, transparent 75%, var(--border) 75%);
+  background-color: var(--surface-2, #1e1e1e);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.profile-crop-stage--dragging {
+  cursor: grabbing;
+}
+
+.profile-crop-stage img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.profile-crop-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.35) 1px, transparent 1px);
+  background-size: 33.333% 33.333%;
+  background-position: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.profile-crop-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.profile-crop-zoom-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent, var(--primary));
+}
+
 
 .profile-avatar-mode-toggle button {
   border: 0;

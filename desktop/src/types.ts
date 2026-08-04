@@ -13,7 +13,8 @@ export type SocialSquadRole = "leader" | "co_leader" | "elder" | "member";
 export type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 export type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
-  | { kind: "icon"; icon: string };
+  | { kind: "icon"; icon: string }
+  | { kind: "photo"; name: string; url: string; mimeType: string };
 
 export interface Semester {
   id: string;

@@ -267,7 +267,24 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
       app,
     },
     stats: getLocalSocialStats(state.sessions),
-    feedPosts: state.social.pendingFeedPosts,
+    feedPosts: state.social.pendingFeedPosts.map((post) => {
+      return {
+        id: post.id,
+        type: post.type,
+        subject: post.subject,
+        detail: post.detail,
+        note: post.note,
+        icon: post.icon,
+        minutes: post.minutes,
+        presetLabel: post.presetLabel,
+        createdAt: post.createdAt,
+        poll: post.poll ? {
+          question: post.poll.question,
+          multiple: post.poll.multiple,
+          options: post.poll.options.map((option) => ({ id: option.id, text: option.text })),
+        } : null,
+      };
+    }),
   };
 
   return requestSocialApi<SocialSyncResponse>("/sync", {

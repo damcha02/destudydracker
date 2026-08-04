@@ -2039,6 +2039,73 @@ async function prepareFeedImage(file: File): Promise<PreparedFeedImage> {
   }
 }
 
+const AVATAR_IMAGE_MAX_BYTES = 1024 * 1024;
+const AVATAR_IMAGE_MAX_DIMENSION = 256;
+const AVATAR_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+const AVATAR_CROP_VIEWPORT_PX = 300;
+const AVATAR_CROP_MAX_ZOOM = 4;
+
+interface AvatarCropSource {
+  url: string;
+  width: number;
+  height: number;
+  name: string;
+}
+
+interface AvatarCropState {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("Could not read photo."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function loadImageElement(dataUrl: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Could not load photo."));
+    image.src = dataUrl;
+  });
+}
+
+function clampAvatarCrop(crop: AvatarCropState, source: AvatarCropSource): AvatarCropState {
+  const scale = Math.max(AVATAR_CROP_VIEWPORT_PX / source.width, AVATAR_CROP_VIEWPORT_PX / source.height) * crop.zoom;
+  const halfW = AVATAR_CROP_VIEWPORT_PX / (scale * 2 * source.width);
+  const halfH = AVATAR_CROP_VIEWPORT_PX / (scale * 2 * source.height);
+  return {
+    ...crop,
+    x: Math.min(1 - halfW, Math.max(halfW, crop.x)),
+    y: Math.min(1 - halfH, Math.max(halfH, crop.y)),
+  };
+}
+
+async function cropAvatarToDataUrl(source: AvatarCropSource, crop: AvatarCropState): Promise<string> {
+  const image = await loadImageElement(source.url);
+  const scale = Math.max(AVATAR_CROP_VIEWPORT_PX / source.width, AVATAR_CROP_VIEWPORT_PX / source.height) * crop.zoom;
+  const cropSize = AVATAR_CROP_VIEWPORT_PX / scale;
+  const cropX = crop.x * source.width - cropSize / 2;
+  const cropY = crop.y * source.height - cropSize / 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = AVATAR_IMAGE_MAX_DIMENSION;
+  canvas.height = AVATAR_IMAGE_MAX_DIMENSION;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not prepare photo.");
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, AVATAR_IMAGE_MAX_DIMENSION, AVATAR_IMAGE_MAX_DIMENSION);
+  const blob = await canvasToBlob(canvas, "image/webp", 0.78);
+  if (blob.size > AVATAR_IMAGE_MAX_BYTES) throw new Error("Photo is still too large after compression.");
+  return blobToDataUrl(blob);
+}
+
 function formatBytes(value: number) {
   if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   if (value >= 1024 * 1024) return `${Math.round(value / (1024 * 1024))} MB`;
@@ -2058,7 +2125,6 @@ function buildFeedPostFromSession(session: StudySession, state: AppState, course
     userId: state.social.userId,
     displayName: state.social.displayName,
     friendCode: state.social.friendCode,
-    avatar: state.social.avatar,
     type: "session",
     subject,
     detail,
@@ -2198,6 +2264,11 @@ async function minimizeWindow() {
   await getCurrentWindow().minimize();
 }
 
+async function toggleMaximizeWindow() {
+  if (!isTauriApp()) return;
+  await getCurrentWindow().toggleMaximize();
+}
+
 async function toggleFullscreenWindow() {
   if (!isTauriApp()) return;
   const window = getCurrentWindow();
@@ -2227,12 +2298,15 @@ function getFirstAvatarLetter(name: string) {
 function getAvatarDisplayName(avatar: SocialAvatar | undefined, name: string) {
   if (!avatar) return getInitials(name);
   if (avatar.kind === "icon") return avatar.icon;
+  if (avatar.kind === "photo") return avatar.url ? "" : getInitials(name);
   return avatar.letter || getFirstAvatarLetter(name);
 }
 
 function getAvatarClass(avatar: SocialAvatar | undefined) {
   if (!avatar) return "";
-  return avatar.kind === "icon" ? "arena-avatar--icon" : `arena-avatar--letter arena-avatar--letter-${avatar.style}`;
+  if (avatar.kind === "icon") return "arena-avatar--icon";
+  if (avatar.kind === "photo") return avatar.url ? "arena-avatar--photo" : "";
+  return `arena-avatar--letter arena-avatar--letter-${avatar.style}`;
 }
 
 function getArenaHue(name: string) {
@@ -2256,7 +2330,11 @@ function ArenaAvatar({ name, avatar, self = false, size = "md" }: { name: string
       style={{ "--avatar-hue": getArenaHue(name) } as CSSProperties}
       aria-hidden="true"
     >
-      {getAvatarDisplayName(avatar, name)}
+      {avatar?.kind === "photo" && avatar.url ? (
+        <img className="arena-avatar-photo" src={avatar.url} alt="" draggable={false} />
+      ) : (
+        getAvatarDisplayName(avatar, name)
+      )}
     </span>
   );
 }
@@ -2269,11 +2347,11 @@ function ArenaRankBadge({ rank, large = false }: { rank: number; large?: boolean
   );
 }
 
-function ArenaLeaderboardRow({ entry, onProfile }: { entry: SocialLeaderboardEntry; onProfile?: () => void }) {
+function ArenaLeaderboardRow({ entry, selfAvatar, onProfile }: { entry: SocialLeaderboardEntry; selfAvatar?: SocialAvatar; onProfile?: () => void }) {
   return (
     <div className={`arena-lb-row ${entry.isSelf ? "arena-lb-row--self" : ""}`} onClick={onProfile} role={onProfile ? "button" : undefined} tabIndex={onProfile ? 0 : undefined} onKeyDown={onProfile ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onProfile(); } } : undefined}>
       <ArenaRankBadge rank={entry.rank} />
-      <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size="sm" />
+      <ArenaAvatar name={entry.displayName} avatar={entry.isSelf ? selfAvatar : entry.avatar} self={entry.isSelf} size="sm" />
       <div className="arena-lb-person">
         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
         <span>{entry.friendCode}</span>
@@ -2612,6 +2690,7 @@ function App() {
     : ENDLESS_INACTIVITY_GRACE_MS;
   const endlessInactivityCountdownLabel = formatCountdown(endlessInactivityRemainingMs);
   const [fullscreen, setFullscreen] = useState(false);
+  const [windowMaximized, setWindowMaximized] = useState(false);
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
@@ -2722,6 +2801,12 @@ function App() {
   const [profileAvatarEditorOpen, setProfileAvatarEditorOpen] = useState(false);
   const [profileAvatarDraft, setProfileAvatarDraft] = useState<SocialAvatar>(() => state.social.avatar);
   const [profileAvatarLetterPickerOpen, setProfileAvatarLetterPickerOpen] = useState(false);
+  const profileAvatarFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [avatarCropOpen, setAvatarCropOpen] = useState(false);
+  const [avatarCropSource, setAvatarCropSource] = useState<AvatarCropSource | null>(null);
+  const [avatarCrop, setAvatarCrop] = useState<AvatarCropState>({ x: 0.5, y: 0.5, zoom: 1 });
+  const [avatarCropDragging, setAvatarCropDragging] = useState(false);
+  const avatarCropDragRef = useRef<{ pointerId: number; startX: number; startY: number; cropX: number; cropY: number } | null>(null);
   const [viewingFriend, setViewingFriend] = useState<SocialProfileTarget | null>(null);
   const [viewingFriendStats, setViewingFriendStats] = useState<PlayerStatsResponse | null>(null);
   const [viewingFriendLoading, setViewingFriendLoading] = useState(false);
@@ -3052,6 +3137,17 @@ function App() {
       setFullscreen(false);
     }
   }, [state.timer.phase]);
+
+  useEffect(() => {
+    if (!isTauriApp()) return;
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    getCurrentWindow().isMaximized().then((value) => { if (!cancelled) setWindowMaximized(value); }).catch(() => undefined);
+    getCurrentWindow().onResized(() => {
+      getCurrentWindow().isMaximized().then((value) => { if (!cancelled) setWindowMaximized(value); }).catch(() => undefined);
+    }).then((fn) => { if (cancelled) fn(); else unlisten = fn; }).catch(() => undefined);
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
 
   useEffect(() => {
     if (
@@ -4242,51 +4338,120 @@ function App() {
   }
 
   function applySelfAvatarToCachedSocial(appState: AppState, avatar: SocialAvatar): AppState {
-    const updatePost = (post: SocialFeedPost) => post.userId === appState.social.userId || post.isSelf ? { ...post, avatar } : post;
-    const updateLeaderboard = (entry: SocialLeaderboardEntry) => entry.userId === appState.social.userId || entry.isSelf ? { ...entry, avatar } : entry;
     return {
       ...appState,
       social: {
         ...appState.social,
         avatar,
-        pendingFeedPosts: appState.social.pendingFeedPosts.map(updatePost),
-        cachedFeeds: {
-          global: appState.social.cachedFeeds.global.map(updatePost),
-          friends: appState.social.cachedFeeds.friends.map(updatePost),
-        },
-        cachedLeaderboards: {
-          global: {
-            daily: appState.social.cachedLeaderboards.global.daily.map(updateLeaderboard),
-            weekly: appState.social.cachedLeaderboards.global.weekly.map(updateLeaderboard),
-            overall: appState.social.cachedLeaderboards.global.overall.map(updateLeaderboard),
-          },
-          friends: {
-            daily: appState.social.cachedLeaderboards.friends.daily.map(updateLeaderboard),
-            weekly: appState.social.cachedLeaderboards.friends.weekly.map(updateLeaderboard),
-            overall: appState.social.cachedLeaderboards.friends.overall.map(updateLeaderboard),
-          },
-          squad: {
-            daily: appState.social.cachedLeaderboards.squad.daily.map(updateLeaderboard),
-            weekly: appState.social.cachedLeaderboards.squad.weekly.map(updateLeaderboard),
-            overall: appState.social.cachedLeaderboards.squad.overall.map(updateLeaderboard),
-          },
-        },
-        squad: appState.social.squad ? {
-          ...appState.social.squad,
-          members: appState.social.squad.members.map((member) => member.userId === appState.social.userId || member.isSelf ? { ...member, avatar } : member),
-        } : null,
-        squadMessages: appState.social.squadMessages.map((message) => message.userId === appState.social.userId || message.isSelf ? { ...message, avatar } : message),
       },
     };
   }
 
   async function saveProfileAvatar() {
+    if (profileAvatarDraft.kind === "photo" && !profileAvatarDraft.url) {
+      setMessage("Choose a photo before saving.");
+      return;
+    }
     const nextState = applySelfAvatarToCachedSocial(state, profileAvatarDraft);
     setState(nextState);
     setProfileAvatarEditorOpen(false);
     setProfileAvatarLetterPickerOpen(false);
     setMessage(socialConfigured ? "Profile avatar saved and synced." : "Profile avatar saved locally.");
     if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
+  }
+
+  async function handleProfileAvatarPhotoChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      if (!AVATAR_IMAGE_TYPES.has(file.type)) throw new Error("Use PNG, JPEG, or WebP photos.");
+      if (file.size > AVATAR_IMAGE_MAX_BYTES) throw new Error("Photo is too large. Use an image under 1 MB.");
+      const url = await blobToDataUrl(file);
+      const element = await loadImageElement(url);
+      setAvatarCropSource({ url, width: element.naturalWidth, height: element.naturalHeight, name: file.name });
+      setAvatarCrop({ x: 0.5, y: 0.5, zoom: 1 });
+      avatarCropDragRef.current = null;
+      setAvatarCropOpen(true);
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error, "Could not prepare photo."));
+    }
+  }
+
+  function cancelAvatarCrop() {
+    avatarCropDragRef.current = null;
+    setAvatarCropDragging(false);
+    setAvatarCropSource(null);
+    setAvatarCropOpen(false);
+  }
+
+  async function confirmAvatarCrop() {
+    if (!avatarCropSource) return;
+    try {
+      const url = await cropAvatarToDataUrl(avatarCropSource, avatarCrop);
+      setProfileAvatarDraft({ kind: "photo", name: avatarCropSource.name, url, mimeType: "image/webp" });
+      avatarCropDragRef.current = null;
+      setAvatarCropDragging(false);
+      setAvatarCropSource(null);
+      setAvatarCropOpen(false);
+    } catch (error: unknown) {
+      setMessage(getErrorMessage(error, "Could not crop photo."));
+    }
+  }
+
+  function handleAvatarCropPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!avatarCropSource) return;
+    event.preventDefault();
+    avatarCropDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      cropX: avatarCrop.x,
+      cropY: avatarCrop.y,
+    };
+    setAvatarCropDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handleAvatarCropPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = avatarCropDragRef.current;
+    if (!avatarCropSource || !drag || drag.pointerId !== event.pointerId) return;
+    const { width, height } = avatarCropSource;
+    const scriptScale = Math.max(AVATAR_CROP_VIEWPORT_PX / width, AVATAR_CROP_VIEWPORT_PX / height) * avatarCrop.zoom;
+    const dispW = width * scriptScale;
+    const dispH = height * scriptScale;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    const next = clampAvatarCrop({
+      x: drag.cropX - dx / dispW,
+      y: drag.cropY - dy / dispH,
+      zoom: avatarCrop.zoom,
+    }, avatarCropSource);
+    setAvatarCrop(next);
+  }
+
+  function handleAvatarCropPointerEnd(event: React.PointerEvent<HTMLDivElement>) {
+    if (avatarCropDragRef.current?.pointerId === event.pointerId) {
+      avatarCropDragRef.current = null;
+      setAvatarCropDragging(false);
+    }
+  }
+
+  function handleAvatarCropWheel(event: React.WheelEvent<HTMLDivElement>) {
+    if (!avatarCropSource) return;
+    const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
+    setAvatarCrop((current) => clampAvatarCrop({
+      ...current,
+      zoom: Math.min(AVATAR_CROP_MAX_ZOOM, Math.max(1, current.zoom * factor)),
+    }, avatarCropSource));
+  }
+
+  function handleAvatarCropZoomChange(value: number) {
+    if (!avatarCropSource) return;
+    setAvatarCrop((current) => clampAvatarCrop({
+      ...current,
+      zoom: Math.min(AVATAR_CROP_MAX_ZOOM, Math.max(1, value)),
+    }, avatarCropSource));
   }
 
   function applyFeedPostImage(postId: string, image: Pick<SocialFeedPost, "imageUrl" | "imageMimeType" | "imageExpiresAt" | "imageExpiredAt">) {
@@ -5203,7 +5368,7 @@ function App() {
   });
 
   async function openFriendProfile(friend: SocialProfileTarget) {
-    setViewingFriend(friend);
+    setViewingFriend(friend.userId === state.social.userId ? { ...friend, avatar: state.social.avatar } : friend);
     setViewingFriendStats(null);
     setViewingFriendLoading(true);
     if (friend.userId === state.social.userId) {
@@ -8674,8 +8839,11 @@ function App() {
             <button type="button" onClick={() => void minimizeWindow()} aria-label="Minimize window" title="Minimize">
               <span aria-hidden="true">-</span>
             </button>
+            <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label={windowMaximized ? "Restore window" : "Maximize window"} title={windowMaximized ? "Restore window" : "Maximize window"}>
+              <span aria-hidden="true">{windowMaximized ? "❐" : "□"}</span>
+            </button>
             <button type="button" onClick={() => void toggleFullscreenWindow()} aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen">
-              <span aria-hidden="true">□</span>
+              <span aria-hidden="true">⛶</span>
             </button>
             <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
               <span aria-hidden="true">×</span>
@@ -10783,7 +10951,7 @@ function App() {
               <div className="section-label" data-tour="social-feed">Activity {feedLoading ? "· Refreshing" : ""}</div>
               {socialFeed.length ? socialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
-                const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: item.avatar };
+                const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: isOwnPost ? state.social.avatar : item.avatar };
                 const comments = item.comments ?? [];
                 const commentsOpen = expandedFeedComments.has(item.id);
                 return item.type === "milestone" ? (
@@ -10797,7 +10965,7 @@ function App() {
                 ) : (
                   <article key={item.id} className="feed-card">
                     <div className="feed-card__head">
-                      <ArenaAvatar name={item.displayName} avatar={item.avatar} self={isOwnPost} />
+                      <ArenaAvatar name={item.displayName} avatar={isOwnPost ? state.social.avatar : item.avatar} self={isOwnPost} />
                       <div>
                         <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(profileTarget)}>{item.displayName}{isOwnPost ? " (You)" : ""}</button>
                         <span>{formatFeedPostedAt(item.createdAt)}</span>
@@ -10898,10 +11066,10 @@ function App() {
                       {commentsOpen ? (
                         <div className="feed-card__comments">
                           {comments.length ? comments.map((comment: SocialFeedComment) => {
-                            const commentTarget = { userId: comment.userId, displayName: comment.displayName, friendCode: comment.friendCode, avatar: comment.avatar };
+                            const commentTarget = { userId: comment.userId, displayName: comment.displayName, friendCode: comment.friendCode, avatar: comment.isSelf ? state.social.avatar : comment.avatar };
                             return (
                               <div key={comment.id} className="feed-comment">
-                                <ArenaAvatar name={comment.displayName} avatar={comment.avatar} self={comment.isSelf} />
+                                <ArenaAvatar name={comment.displayName} avatar={comment.isSelf ? state.social.avatar : comment.avatar} self={comment.isSelf} />
                                 <div>
                                   <div className="feed-comment__meta">
                                     <button type="button" className="social-name-button social-name-button--strong" onClick={() => void openFriendProfile(commentTarget)}>{comment.displayName}{comment.isSelf ? " (You)" : ""}</button>
@@ -10938,7 +11106,7 @@ function App() {
                   const max = Math.max(1, ...weekCompareEntries.map((item) => item.minutes));
                   return (
                     <div key={entry.userId} className="week-compare__row">
-                      <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} />
+                      <ArenaAvatar name={entry.displayName} avatar={entry.isSelf ? state.social.avatar : entry.avatar} self={entry.isSelf} />
                       <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                       <div className="week-compare__bar-wrap"><span style={{ width: `${(entry.minutes / max) * 100}%` }} /></div>
                       <small>{formatMinutes(entry.minutes)}</small>
@@ -11160,7 +11328,7 @@ function App() {
                           return (
                             <div key={member.userId} className={`squad-member-card ${expanded ? "squad-member-card--expanded" : ""}`}>
                               <button type="button" className="squad-member-summary" onClick={() => setExpandedSquadMemberId((current) => current === member.userId ? null : member.userId)}>
-                                <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                                <ArenaAvatar name={member.displayName} avatar={member.isSelf ? state.social.avatar : member.avatar} self={member.isSelf} size="sm" />
                                 <div className="squad-member-main"><strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong><span>{member.friendCode} · {formatMinutes(member.minutes)} · {member.sessions} sessions</span></div>
                                 <span className={`squad-role-badge squad-role-badge--${member.role}`}>{squadRoleLabels[member.role]}</span>
                               </button>
@@ -11195,7 +11363,7 @@ function App() {
                       </div>
                       <div className="arena-lb-rows squad-lb-rows">
                         {squadMemberLeaderboard.map((entry) => {
-                          const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
+const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
                           return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
                         })}
                         {!squadMemberLeaderboard.length ? <div className="arena-empty small">Sync your squad to see member rankings.</div> : null}
@@ -11208,7 +11376,7 @@ function App() {
                     <div className="squad-chat-list">
                       {state.social.squadMessages.map((message) => (
                         <div key={message.id} className={`squad-chat-message ${message.isSelf ? "squad-chat-message--self" : ""}`}>
-                          <ArenaAvatar name={message.displayName} avatar={message.avatar} self={message.isSelf} size="sm" />
+                          <ArenaAvatar name={message.displayName} avatar={message.isSelf ? state.social.avatar : message.avatar} self={message.isSelf} size="sm" />
                           <div><strong>{message.displayName} <span>{squadRoleLabels[message.role]}</span></strong><p>{message.body}</p></div>
                           {message.isSelf ? <button type="button" className="squad-chat-delete" onClick={() => void deleteOwnSquadMessage(message.id)} title="Delete message">Delete</button> : null}
                         </div>
@@ -11370,10 +11538,10 @@ function App() {
               {socialScope !== "squad" && socialLeaderboard.length >= 3 ? (
                 <div className="arena-podium">
                   {[socialLeaderboard[1], socialLeaderboard[0], socialLeaderboard[2]].map((entry, index) => {
-                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
+                    const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
                     return (
                       <div key={entry.userId} className={`arena-podium-col ${entry.isSelf ? "arena-podium-col--self" : ""}`} onClick={() => void openFriendProfile(profileTarget)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openFriendProfile(profileTarget); } }}>
-                        <ArenaAvatar name={entry.displayName} avatar={entry.avatar} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
+                        <ArenaAvatar name={entry.displayName} avatar={entry.isSelf ? state.social.avatar : entry.avatar} self={entry.isSelf} size={index === 1 ? "lg" : "md"} />
                         <strong>{entry.displayName}{entry.isSelf ? " (You)" : ""}</strong>
                         <span>{formatMinutes(entry.minutes)}</span>
                         <div className={`arena-podium-block arena-podium-block--${entry.rank}`}>
@@ -11390,8 +11558,8 @@ function App() {
                 {socialScope === "squad" ? squadScoreLeaderboard.map((entry) => (
                   <SquadArenaRow key={entry.squadId} entry={entry} period={squadScorePeriod} isSelf={entry.squadId === state.social.squad?.id} onOpen={() => void openSquadDetails(entry)} />
                 )) : (socialLeaderboard.length >= 3 ? socialLeaderboard.slice(3) : socialLeaderboard).map((entry) => {
-                  const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.avatar };
-                  return <ArenaLeaderboardRow key={entry.userId} entry={entry} onProfile={() => void openFriendProfile(profileTarget)} />;
+const profileTarget = { userId: entry.userId, displayName: entry.displayName, friendCode: entry.friendCode, avatar: entry.isSelf ? state.social.avatar : entry.avatar };
+                          return <ArenaLeaderboardRow key={entry.userId} entry={entry} selfAvatar={state.social.avatar} onProfile={() => void openFriendProfile(profileTarget)} />;
                 })}
                 {socialScope === "squad" && !squadScoreLeaderboard.length ? (
                   <div className="arena-empty">
@@ -11497,7 +11665,7 @@ function App() {
                     <div className="section-label">Members</div>
                     {viewingSquadDetails.members.map((member) => (
                       <div key={member.userId} className="squad-details-member">
-                        <ArenaAvatar name={member.displayName} avatar={member.avatar} self={member.isSelf} size="sm" />
+                        <ArenaAvatar name={member.displayName} avatar={member.isSelf ? state.social.avatar : member.avatar} self={member.isSelf} size="sm" />
                         <div>
                           <strong>{member.displayName}{member.isSelf ? " (You)" : ""}</strong>
                           <span>{squadRoleLabels[member.role]} · today {formatMinutes(member.minutes)} · {member.sessions} sessions</span>
@@ -11570,6 +11738,7 @@ function App() {
             <div className="profile-avatar-mode-toggle" aria-label="Avatar type">
               <button type="button" className={profileAvatarDraft.kind === "letter" ? "active" : ""} onClick={() => setProfileAvatarDraft({ kind: "letter", letter: getFirstAvatarLetter(state.social.displayName), style: "classic" })}>Letter</button>
               <button type="button" className={profileAvatarDraft.kind === "icon" ? "active" : ""} onClick={() => setProfileAvatarDraft({ kind: "icon", icon: avatarIcons[0] })}>Icon</button>
+              <button type="button" className={profileAvatarDraft.kind === "photo" ? "active" : ""} onClick={() => setProfileAvatarDraft(profileAvatarDraft.kind === "photo" ? profileAvatarDraft : { kind: "photo", name: "", url: "", mimeType: "image/webp" })}>Photo</button>
             </div>
 
             {profileAvatarDraft.kind === "letter" ? (
@@ -11599,7 +11768,7 @@ function App() {
                   </div>
                 ) : null}
               </div>
-            ) : (
+            ) : profileAvatarDraft.kind === "icon" ? (
               <div className="profile-avatar-grid profile-avatar-grid--icons">
                 {avatarIcons.map((icon) => {
                   const avatar: SocialAvatar = { kind: "icon", icon };
@@ -11611,11 +11780,66 @@ function App() {
                   );
                 })}
               </div>
+            ) : (
+              <div className="profile-avatar-panel">
+                <button type="button" className="profile-avatar-photo-upload" onClick={() => profileAvatarFileInputRef.current?.click()}>
+                  {profileAvatarDraft.url ? "Change photo" : "Choose a photo"}
+                </button>
+                <input ref={profileAvatarFileInputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => void handleProfileAvatarPhotoChange(event)} />
+                {profileAvatarDraft.url ? (
+                  <button type="button" className="ghost-button small-button profile-avatar-photo-remove" onClick={() => setProfileAvatarDraft({ kind: "photo", name: "", url: "", mimeType: "image/webp" })}>Remove photo</button>
+                ) : null}
+                <p className="profile-avatar-photo-hint">Square photos look best. Up to 512px, under 1 MB. PNG, JPEG, or WebP (no GIFs).</p>
+              </div>
             )}
 
             <div className="profile-avatar-actions">
               <button type="button" className="ghost-button small-button" onClick={closeProfileAvatarEditor}>Cancel</button>
               <button type="button" className="arena-btn arena-btn--send" onClick={() => void saveProfileAvatar()} disabled={socialSyncing}>Save</button>
+            </div>
+          </article>
+        </div>
+      ) : null}
+
+      {avatarCropOpen && avatarCropSource ? (
+        <div className="calendar-drawer-backdrop" style={{ justifyContent: "center", alignItems: "center" }} onClick={cancelAvatarCrop} role="presentation">
+          <article className="profile-crop-editor" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Crop profile picture">
+            <div className="profile-crop-head">
+              <div>
+                <span className="arena-kicker">Profile picture</span>
+                <h3>Crop your photo</h3>
+                <p>Drag to reposition, scroll or use the slider to zoom. The result is a square picture.</p>
+              </div>
+            </div>
+            <div
+              className={`profile-crop-stage ${avatarCropDragging ? "profile-crop-stage--dragging" : ""}`}
+              style={{ width: AVATAR_CROP_VIEWPORT_PX, height: AVATAR_CROP_VIEWPORT_PX }}
+              onPointerDown={handleAvatarCropPointerDown}
+              onPointerMove={handleAvatarCropPointerMove}
+              onPointerUp={handleAvatarCropPointerEnd}
+              onPointerCancel={handleAvatarCropPointerEnd}
+              onWheel={handleAvatarCropWheel}
+            >
+              <img
+                src={avatarCropSource.url}
+                alt="Profile picture to crop"
+                draggable={false}
+                style={{
+                  width: avatarCropSource.width * Math.max(AVATAR_CROP_VIEWPORT_PX / avatarCropSource.width, AVATAR_CROP_VIEWPORT_PX / avatarCropSource.height) * avatarCrop.zoom,
+                  height: avatarCropSource.height * Math.max(AVATAR_CROP_VIEWPORT_PX / avatarCropSource.width, AVATAR_CROP_VIEWPORT_PX / avatarCropSource.height) * avatarCrop.zoom,
+                  transform: `translate(${AVATAR_CROP_VIEWPORT_PX / 2 - avatarCrop.x * avatarCropSource.width * Math.max(AVATAR_CROP_VIEWPORT_PX / avatarCropSource.width, AVATAR_CROP_VIEWPORT_PX / avatarCropSource.height) * avatarCrop.zoom}px, ${AVATAR_CROP_VIEWPORT_PX / 2 - avatarCrop.y * avatarCropSource.height * Math.max(AVATAR_CROP_VIEWPORT_PX / avatarCropSource.width, AVATAR_CROP_VIEWPORT_PX / avatarCropSource.height) * avatarCrop.zoom}px)`,
+                }}
+              />
+              <div className="profile-crop-grid" aria-hidden="true" />
+            </div>
+            <div className="profile-crop-zoom-row">
+              <span aria-hidden="true">−</span>
+              <input type="range" min={1} max={AVATAR_CROP_MAX_ZOOM} step={0.01} value={avatarCrop.zoom} onChange={(event) => handleAvatarCropZoomChange(Number(event.target.value))} aria-label="Zoom" />
+              <span aria-hidden="true">+</span>
+            </div>
+            <div className="profile-avatar-actions">
+              <button type="button" className="ghost-button small-button" onClick={cancelAvatarCrop}>Cancel</button>
+              <button type="button" className="arena-btn arena-btn--send" onClick={() => void confirmAvatarCrop()}>Apply crop</button>
             </div>
           </article>
         </div>

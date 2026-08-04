@@ -11,7 +11,8 @@ type SquadScorePeriod = "daily" | "season" | "overall";
 type SocialAvatarStyle = "classic" | "serif" | "cursive" | "graffiti" | "pixel" | "mono";
 type SocialAvatar =
   | { kind: "letter"; letter: string; style: SocialAvatarStyle }
-  | { kind: "icon"; icon: string };
+  | { kind: "icon"; icon: string }
+  | { kind: "photo"; name: string; url: string; mimeType: string };
 
 interface SyncPayload {
   user: {
@@ -163,6 +164,17 @@ function cleanAvatar(value: unknown, displayName: string): SocialAvatar {
     const letter = typeof record.letter === "string" && /^[A-Z]$/i.test(record.letter) ? record.letter.toUpperCase() : firstAvatarLetter(displayName);
     const style = typeof record.style === "string" && avatarStyles.has(record.style as SocialAvatarStyle) ? record.style as SocialAvatarStyle : "classic";
     return { kind: "letter", letter, style };
+  }
+  if (record.kind === "photo") {
+    const url = typeof record.url === "string" && record.url.startsWith("data:image/") ? record.url : "";
+    if (url) {
+      return {
+        kind: "photo",
+        name: typeof record.name === "string" ? record.name.slice(0, 180) : "photo",
+        url,
+        mimeType: typeof record.mimeType === "string" && record.mimeType.startsWith("image/") ? record.mimeType : "image/webp",
+      };
+    }
   }
   return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
 }

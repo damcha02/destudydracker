@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, TravlePuzzleState, WordlePuzzleState } from "../types";
+import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialLeaderboardEntry, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, TravlePuzzleState, WordlePuzzleState } from "../types";
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
@@ -108,6 +108,17 @@ function normalizeAvatar(avatar: unknown, displayName: string): SocialAvatar {
     const letter = typeof record.letter === "string" && /^[A-Z]$/i.test(record.letter) ? record.letter.toUpperCase() : firstAvatarLetter(displayName);
     const style = typeof record.style === "string" && avatarStyles.includes(record.style as SocialAvatarStyle) ? record.style as SocialAvatarStyle : "classic";
     return { kind: "letter", letter, style };
+  }
+  if (record.kind === "photo") {
+    const url = typeof record.url === "string" && record.url.startsWith("data:image/") ? record.url : "";
+    if (url) {
+      return {
+        kind: "photo",
+        name: typeof record.name === "string" ? record.name.slice(0, 180) : "photo",
+        url,
+        mimeType: typeof record.mimeType === "string" && record.mimeType.startsWith("image/") ? record.mimeType : "image/webp",
+      };
+    }
   }
   return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
 }
@@ -903,11 +914,59 @@ export function loadAppState(): AppState {
   }
 }
 
+function stripAvatarCopiesForStorage(state: AppState): AppState {
+  const withoutAvatar = <T extends { avatar?: unknown }>(item: T): Omit<T, "avatar"> => {
+    const copy = { ...item };
+    delete copy.avatar;
+    return copy;
+  };
+  const stripLeaderboard = (entry: SocialLeaderboardEntry) => withoutAvatar(entry);
+  return {
+    ...state,
+    social: {
+      ...state.social,
+      avatar: state.social.avatar,
+      pendingFeedPosts: state.social.pendingFeedPosts.map((post) => withoutAvatar(post)),
+      cachedFeeds: {
+        global: state.social.cachedFeeds.global.map((post) => withoutAvatar(post)),
+        friends: state.social.cachedFeeds.friends.map((post) => withoutAvatar(post)),
+      },
+      cachedLeaderboards: {
+        global: {
+          daily: state.social.cachedLeaderboards.global.daily.map(stripLeaderboard),
+          weekly: state.social.cachedLeaderboards.global.weekly.map(stripLeaderboard),
+          overall: state.social.cachedLeaderboards.global.overall.map(stripLeaderboard),
+        },
+        friends: {
+          daily: state.social.cachedLeaderboards.friends.daily.map(stripLeaderboard),
+          weekly: state.social.cachedLeaderboards.friends.weekly.map(stripLeaderboard),
+          overall: state.social.cachedLeaderboards.friends.overall.map(stripLeaderboard),
+        },
+        squad: {
+          daily: state.social.cachedLeaderboards.squad.daily.map(stripLeaderboard),
+          weekly: state.social.cachedLeaderboards.squad.weekly.map(stripLeaderboard),
+          overall: state.social.cachedLeaderboards.squad.overall.map(stripLeaderboard),
+        },
+      },
+      squad: state.social.squad ? {
+        ...state.social.squad,
+        members: state.social.squad.members.map((member) => withoutAvatar(member)),
+      } : null,
+      squadMessages: state.social.squadMessages.map((message) => withoutAvatar(message)),
+      friends: state.social.friends.map((friend) => withoutAvatar(friend)),
+    },
+  };
+}
+
 export function saveAppState(state: AppState) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch (error) {
-    console.warn("Study Tracker state could not be saved.", error);
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripAvatarCopiesForStorage(state)));
+    } catch {
+      console.warn("Study Tracker state could not be saved.", error);
+    }
   }
 }
 
