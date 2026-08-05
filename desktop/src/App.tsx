@@ -36,7 +36,7 @@ import {
 } from "./lib/metrics";
 import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
@@ -2070,8 +2070,15 @@ async function prepareFeedImage(file: File): Promise<PreparedFeedImage> {
   }
 }
 
-const AVATAR_IMAGE_MAX_BYTES = 1024 * 1024;
-const AVATAR_IMAGE_MAX_DIMENSION = 256;
+const AVATAR_SOURCE_IMAGE_MAX_BYTES = 1024 * 1024;
+const AVATAR_IMAGE_MAX_BYTES = 96 * 1024;
+const AVATAR_IMAGE_MAX_DIMENSION = 160;
+const AVATAR_IMAGE_COMPRESSION_ATTEMPTS = [
+  { dimension: AVATAR_IMAGE_MAX_DIMENSION, quality: 0.72 },
+  { dimension: AVATAR_IMAGE_MAX_DIMENSION, quality: 0.58 },
+  { dimension: AVATAR_IMAGE_MAX_DIMENSION, quality: 0.45 },
+  { dimension: 128, quality: 0.45 },
+];
 const AVATAR_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const AVATAR_CROP_VIEWPORT_PX = 300;
 const AVATAR_CROP_MAX_ZOOM = 4;
@@ -2096,6 +2103,11 @@ function blobToDataUrl(blob: Blob) {
     reader.onerror = () => reject(new Error("Could not read photo."));
     reader.readAsDataURL(blob);
   });
+}
+
+async function dataUrlToBlob(dataUrl: string) {
+  const response = await fetch(dataUrl);
+  return response.blob();
 }
 
 function loadImageElement(dataUrl: string) {
@@ -2125,16 +2137,21 @@ async function cropAvatarToDataUrl(source: AvatarCropSource, crop: AvatarCropSta
   const cropX = crop.x * source.width - cropSize / 2;
   const cropY = crop.y * source.height - cropSize / 2;
   const canvas = document.createElement("canvas");
-  canvas.width = AVATAR_IMAGE_MAX_DIMENSION;
-  canvas.height = AVATAR_IMAGE_MAX_DIMENSION;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Could not prepare photo.");
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  context.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, AVATAR_IMAGE_MAX_DIMENSION, AVATAR_IMAGE_MAX_DIMENSION);
-  const blob = await canvasToBlob(canvas, "image/webp", 0.78);
-  if (blob.size > AVATAR_IMAGE_MAX_BYTES) throw new Error("Photo is still too large after compression.");
-  return blobToDataUrl(blob);
+
+  for (const attempt of AVATAR_IMAGE_COMPRESSION_ATTEMPTS) {
+    canvas.width = attempt.dimension;
+    canvas.height = attempt.dimension;
+    context.clearRect(0, 0, attempt.dimension, attempt.dimension);
+    context.drawImage(image, cropX, cropY, cropSize, cropSize, 0, 0, attempt.dimension, attempt.dimension);
+    const blob = await canvasToBlob(canvas, "image/webp", attempt.quality);
+    if (blob.size <= AVATAR_IMAGE_MAX_BYTES) return blobToDataUrl(blob);
+  }
+
+  throw new Error("Photo is still too large after compression. Try a simpler or smaller photo.");
 }
 
 function formatBytes(value: number) {
@@ -4514,7 +4531,18 @@ function App() {
       setMessage("Choose a photo before saving.");
       return;
     }
-    const nextState = applySelfAvatarToCachedSocial(state, profileAvatarDraft);
+    let avatar = profileAvatarDraft;
+    if (avatar.kind === "photo" && socialConfigured && avatar.url.startsWith("data:image/")) {
+      try {
+        const image = await dataUrlToBlob(avatar.url);
+        const result = await uploadProfileAvatar(state.social, image, avatar.name || "avatar.webp");
+        avatar = result.avatar;
+      } catch (error: unknown) {
+        setMessage(getErrorMessage(error, "Could not upload profile photo."));
+        return;
+      }
+    }
+    const nextState = applySelfAvatarToCachedSocial(state, avatar);
     setState(nextState);
     setProfileAvatarEditorOpen(false);
     setProfileAvatarLetterPickerOpen(false);
@@ -4528,7 +4556,7 @@ function App() {
     if (!file) return;
     try {
       if (!AVATAR_IMAGE_TYPES.has(file.type)) throw new Error("Use PNG, JPEG, or WebP photos.");
-      if (file.size > AVATAR_IMAGE_MAX_BYTES) throw new Error("Photo is too large. Use an image under 1 MB.");
+      if (file.size > AVATAR_SOURCE_IMAGE_MAX_BYTES) throw new Error("Photo is too large. Use an image under 1 MB.");
       const url = await blobToDataUrl(file);
       const element = await loadImageElement(url);
       setAvatarCropSource({ url, width: element.naturalWidth, height: element.naturalHeight, name: file.name });
@@ -10361,7 +10389,7 @@ function App() {
     );
   }
 
-  const showWindowTitlebar = isTauriApp();
+  const showWindowTitlebar = false;
   const openHelp = helpTab ? pageHelp[helpTab] : null;
   const activeTourHelp = tourState ? pageHelp[tourState.tab] : null;
 

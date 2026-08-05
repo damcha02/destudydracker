@@ -85,6 +85,7 @@ const SQUAD_SEASON_END = "2026-08-31";
 const SERVER_TIME_ZONE = "Europe/Zurich";
 const SQUAD_SCORE_BACKFILL_DAYS = 14;
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
+const MAX_PROFILE_AVATAR_BYTES = 128 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
 const R2_STORAGE_HARD_BYTES = 500 * 1024 * 1024;
@@ -166,7 +167,8 @@ function cleanAvatar(value: unknown, displayName: string): SocialAvatar {
     return { kind: "letter", letter, style };
   }
   if (record.kind === "photo") {
-    const url = typeof record.url === "string" && record.url.startsWith("data:image/") ? record.url : "";
+    const rawUrl = typeof record.url === "string" ? record.url : "";
+    const url = rawUrl.startsWith("data:image/") || /^https:\/\/[^/]+\/profile\/avatar\//.test(rawUrl) ? rawUrl : "";
     if (url) {
       return {
         kind: "photo",
@@ -186,6 +188,12 @@ function parseAvatar(value: unknown, displayName: string): SocialAvatar {
   } catch {
     return cleanAvatar(null, displayName);
   }
+}
+
+function parseListAvatar(value: unknown, displayName: string): SocialAvatar {
+  const avatar = parseAvatar(value, displayName);
+  if (avatar.kind !== "photo") return avatar;
+  return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
 }
 
 function serverDateIso(date = new Date()) {
@@ -548,7 +556,7 @@ async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]
 
   const dates = [...new Set(cleanedStats.map((stat) => stat.date))];
   const minSyncedDate = dates.reduce((min, date) => date < min ? date : min, dates[0]);
-  const deletesCanCoverAllDates = validStats.length <= MAX_SYNC_STAT_ROWS;
+  const deletesCanCoverAllDates = validStats.length < MAX_SYNC_STAT_ROWS;
   const existingRows = await env.DB.prepare(`
     SELECT date, minutes, sessions
     FROM daily_stats
@@ -682,6 +690,43 @@ async function getSquadLeaderboard(env: Env, userId: string, period: Leaderboard
 
 async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberIds: string[], period: LeaderboardPeriod) {
   if (!memberIds.length) return [];
+  if (period === "overall") {
+    const rows = await env.DB.prepare(`
+      SELECT ranked.*,
+        (SELECT MAX(date) FROM daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
+      FROM (
+        SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
+          sm.role AS role,
+          u.lifetime_study_minutes AS minutes,
+          u.lifetime_study_sessions AS sessions
+        FROM users u
+        JOIN squad_members sm ON sm.user_id = u.id
+        WHERE u.id IN (${memberIds.map(() => "?").join(",")})
+        ORDER BY minutes DESC, displayName ASC
+        LIMIT 50
+      ) ranked
+      ORDER BY ranked.minutes DESC, ranked.displayName ASC
+    `).bind(...memberIds).all<{
+      userId: string;
+      displayName: string;
+      friendCode: string;
+      avatarJson: string;
+      role: SquadRole;
+      minutes: number;
+      sessions: number;
+      lastActiveDate: string | null;
+    }>();
+
+    return rows.results.map((row, index) => ({
+      ...row,
+      avatar: parseListAvatar(row.avatarJson, row.displayName),
+      avatarJson: undefined,
+      minutes: Number(row.minutes),
+      sessions: Number(row.sessions),
+      rank: index + 1,
+      isSelf: row.userId === userId,
+    }));
+  }
   const periodFilter = leaderboardWhere(period);
   const clauses = [`u.id IN (${memberIds.map(() => "?").join(",")})`];
   const params = [...memberIds, ...periodFilter.params];
@@ -689,8 +734,8 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role AS role,
-      ${period === "overall" ? "u.lifetime_study_minutes" : "COALESCE(SUM(ds.minutes), 0)"} AS minutes,
-      ${period === "overall" ? "u.lifetime_study_sessions" : "COALESCE(SUM(ds.sessions), 0)"} AS sessions,
+      COALESCE(SUM(ds.minutes), 0) AS minutes,
+      COALESCE(SUM(ds.sessions), 0) AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     JOIN squad_members sm ON sm.user_id = u.id
@@ -712,7 +757,7 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
 
   return rows.results.map((row, index) => ({
     ...row,
-    avatar: parseAvatar(row.avatarJson, row.displayName),
+    avatar: parseListAvatar(row.avatarJson, row.displayName),
     avatarJson: undefined,
     minutes: Number(row.minutes),
     sessions: Number(row.sessions),
@@ -971,7 +1016,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
     action,
     members: members.results.map((member) => ({
       ...member,
-      avatar: parseAvatar(member.avatarJson, member.displayName),
+      avatar: parseListAvatar(member.avatarJson, member.displayName),
       avatarJson: undefined,
       minutes: Number(member.minutes),
       sessions: Number(member.sessions),
@@ -1005,12 +1050,12 @@ async function getSquadSnapshot(env: Env, userId: string) {
 
   const squad = await env.DB.prepare(`
     SELECT s.id, s.name, s.is_private AS isPrivate, s.created_by_user_id AS createdByUserId, s.created_at AS createdAt,
-      COALESCE(SUM(ds.minutes), 0) AS totalMinutes,
-      COALESCE(SUM(ds.sessions), 0) AS totalSessions,
+      COALESCE(SUM(u.lifetime_study_minutes), 0) AS totalMinutes,
+      COALESCE(SUM(u.lifetime_study_sessions), 0) AS totalSessions,
       COUNT(DISTINCT sm.user_id) AS memberCount
     FROM squads s
     JOIN squad_members sm ON sm.squad_id = s.id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    JOIN users u ON u.id = sm.user_id
     WHERE s.id = ?
     GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
   `).bind(membership.squadId).first<{
@@ -1027,13 +1072,11 @@ async function getSquadSnapshot(env: Env, userId: string) {
   const members = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role, sm.joined_at AS joinedAt, u.last_seen_at AS lastSeenAt,
-      COALESCE(SUM(ds.minutes), 0) AS minutes,
-      COALESCE(SUM(ds.sessions), 0) AS sessions
+      u.lifetime_study_minutes AS minutes,
+      u.lifetime_study_sessions AS sessions
     FROM squad_members sm
     JOIN users u ON u.id = sm.user_id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
     WHERE sm.squad_id = ?
-    GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, sm.joined_at, u.last_seen_at
     ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
   `).bind(membership.squadId).all<{
     userId: string;
@@ -1096,7 +1139,7 @@ async function getSquadSnapshot(env: Env, userId: string) {
       myRole: membership.role,
       members: members.results.map((member) => ({
         ...member,
-        avatar: parseAvatar(member.avatarJson, member.displayName),
+        avatar: parseListAvatar(member.avatarJson, member.displayName),
         avatarJson: undefined,
         minutes: Number(member.minutes),
         sessions: Number(member.sessions),
@@ -1105,13 +1148,13 @@ async function getSquadSnapshot(env: Env, userId: string) {
     } : null,
     incomingSquadRequests: incoming.results.map((request) => ({
       ...request,
-      avatar: parseAvatar(request.avatarJson, request.displayName),
+      avatar: parseListAvatar(request.avatarJson, request.displayName),
       avatarJson: undefined,
     })),
     outgoingSquadRequests: [],
     squadMessages: messages.results.reverse().map((message) => ({
       ...message,
-      avatar: parseAvatar(message.avatarJson, message.displayName),
+      avatar: parseListAvatar(message.avatarJson, message.displayName),
       avatarJson: undefined,
       isSelf: message.userId === userId,
     })),
@@ -1122,6 +1165,48 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   if (scope === "squad") return getSquadLeaderboard(env, userId, period);
   const friendIds = scope === "friends" ? await getFriendIds(env, userId) : [];
   const allowedIds = scope === "friends" ? [userId, ...friendIds] : [];
+  if (period === "overall") {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (scope === "global") clauses.push("u.is_private = 0");
+    if (allowedIds.length) {
+      clauses.push(`u.id IN (${allowedIds.map(() => "?").join(",")})`);
+      params.push(...allowedIds);
+    }
+    const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = await env.DB.prepare(`
+      SELECT ranked.*,
+        (SELECT MAX(date) FROM daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
+      FROM (
+        SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
+          u.lifetime_study_minutes AS minutes,
+          u.lifetime_study_sessions AS sessions
+        FROM users u
+        ${whereClause}
+        ORDER BY minutes DESC, displayName ASC
+        LIMIT 50
+      ) ranked
+      ORDER BY ranked.minutes DESC, ranked.displayName ASC
+    `).bind(...params).all<{
+      userId: string;
+      displayName: string;
+      friendCode: string;
+      avatarJson: string;
+      minutes: number;
+      sessions: number;
+      lastActiveDate: string | null;
+    }>();
+
+    return rows.results.map((row, index) => ({
+      ...row,
+      avatar: parseListAvatar(row.avatarJson, row.displayName),
+      avatarJson: undefined,
+      minutes: Number(row.minutes),
+      sessions: Number(row.sessions),
+      rank: index + 1,
+      isSelf: row.userId === userId,
+    }));
+  }
   const periodFilter = leaderboardWhere(period);
   const clauses = [];
   const params = [...periodFilter.params];
@@ -1134,8 +1219,8 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
-      ${period === "overall" ? "u.lifetime_study_minutes" : "COALESCE(SUM(ds.minutes), 0)"} AS minutes,
-      ${period === "overall" ? "u.lifetime_study_sessions" : "COALESCE(SUM(ds.sessions), 0)"} AS sessions,
+      COALESCE(SUM(ds.minutes), 0) AS minutes,
+      COALESCE(SUM(ds.sessions), 0) AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
     LEFT JOIN daily_stats ds ON ds.user_id = u.id
@@ -1155,7 +1240,7 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
 
   return rows.results.map((row, index) => ({
     ...row,
-    avatar: parseAvatar(row.avatarJson, row.displayName),
+    avatar: parseListAvatar(row.avatarJson, row.displayName),
     avatarJson: undefined,
     minutes: Number(row.minutes),
     sessions: Number(row.sessions),
@@ -1268,7 +1353,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
         userId: row.userId,
         displayName: row.displayName,
         friendCode: row.friendCode,
-        avatar: parseAvatar(row.avatarJson, row.displayName),
+        avatar: parseListAvatar(row.avatarJson, row.displayName),
         body: row.body,
         createdAt: row.createdAt,
         isSelf: row.userId === userId,
@@ -1306,7 +1391,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
 
   return posts.results.map((post) => ({
     ...post,
-    avatar: parseAvatar(post.avatarJson, post.displayName),
+    avatar: parseListAvatar(post.avatarJson, post.displayName),
     avatarJson: undefined,
     minutes: Number(post.minutes),
     isSelf: post.userId === userId,
@@ -1320,7 +1405,6 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
 }
 
 async function getSocialSnapshot(request: Request, env: Env, userId: string) {
-  await scoreMissingCompletedSquadDates(env);
   const friends = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
     FROM friendships f
@@ -1383,20 +1467,20 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
     social: {
       friends: friends.results.map((friend) => ({
         ...friend,
-        avatar: parseAvatar((friend as { avatarJson?: string }).avatarJson, (friend as { displayName?: string }).displayName ?? "Student"),
+        avatar: parseListAvatar((friend as { avatarJson?: string }).avatarJson, (friend as { displayName?: string }).displayName ?? "Student"),
         avatarJson: undefined,
       })),
       incomingFriendRequests: incoming.results.map((request) => ({
         ...request,
-        fromAvatar: parseAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
-        toAvatar: parseAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+        fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+        toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
         fromAvatarJson: undefined,
         toAvatarJson: undefined,
       })),
       outgoingFriendRequests: outgoing.results.map((request) => ({
         ...request,
-        fromAvatar: parseAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
-        toAvatar: parseAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+        fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+        toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
         fromAvatarJson: undefined,
         toAvatarJson: undefined,
       })),
@@ -1539,6 +1623,71 @@ async function handleFeedImageGet(request: Request, env: Env, key: string) {
       ...corsHeaders,
       "content-type": post.imageMimeType || object.httpMetadata?.contentType || "application/octet-stream",
       "cache-control": "public, max-age=3600",
+    },
+  });
+}
+
+function profileAvatarUrl(request: Request, key: string) {
+  return `${new URL(request.url).origin}/profile/avatar/${encodeURIComponent(key)}`;
+}
+
+function profileAvatarKeyFromUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (!url.pathname.startsWith("/profile/avatar/")) return null;
+    return decodeURIComponent(url.pathname.slice("/profile/avatar/".length));
+  } catch {
+    return null;
+  }
+}
+
+async function handleProfileAvatarUpload(request: Request, env: Env) {
+  const form = await request.formData();
+  const userId = String(form.get("userId") ?? "").trim();
+  const deviceSecret = String(form.get("deviceSecret") ?? "");
+  await verifyUser(env, userId, deviceSecret);
+
+  const image = form.get("image");
+  if (!(image instanceof File)) return text("Missing avatar image.", 400);
+  if (!feedImageTypes.has(image.type)) return text("Use PNG, JPEG, WebP, or GIF images.", 400);
+  if (image.size > MAX_PROFILE_AVATAR_BYTES) return text("Avatar image is too large.", 413);
+
+  await assertR2ClassABudget(env, 1);
+  const existing = await env.DB.prepare("SELECT avatar_json AS avatarJson FROM users WHERE id = ?")
+    .bind(userId)
+    .first<{ avatarJson: string }>();
+  const previousAvatar = parseAvatar(existing?.avatarJson, "Student");
+  const previousKey = previousAvatar.kind === "photo" ? profileAvatarKeyFromUrl(previousAvatar.url) : null;
+  const key = `profile-avatars/${userId}/${crypto.randomUUID()}.webp`;
+  await env.FEED_IMAGES.put(key, image.stream(), {
+    httpMetadata: { contentType: image.type },
+  });
+  await incrementR2Usage(env, { classA: 1 });
+  if (previousKey) await env.FEED_IMAGES.delete(previousKey).catch(() => undefined);
+
+  const avatar: SocialAvatar = {
+    kind: "photo",
+    name: cleanText(form.get("name"), 180) || "photo",
+    url: profileAvatarUrl(request, key),
+    mimeType: image.type,
+  };
+  await env.DB.prepare("UPDATE users SET avatar_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(JSON.stringify(avatar), userId)
+    .run();
+  return json({ avatar });
+}
+
+async function handleProfileAvatarGet(env: Env, key: string) {
+  await assertR2ClassBBudget(env);
+  const object = await env.FEED_IMAGES.get(key);
+  if (!object) return text("Avatar not found.", 404);
+  await incrementR2Usage(env, { classB: 1 });
+  await maybeNotifyR2Usage(env);
+  return new Response(object.body, {
+    headers: {
+      ...corsHeaders,
+      "content-type": object.httpMetadata?.contentType ?? "image/webp",
+      "cache-control": "public, max-age=86400",
     },
   });
 }
@@ -1698,7 +1847,7 @@ async function handleFeedComment(request: Request, env: Env) {
       userId: row.userId,
       displayName: row.displayName,
       friendCode: row.friendCode,
-      avatar: parseAvatar(row.avatarJson, row.displayName),
+      avatar: parseListAvatar(row.avatarJson, row.displayName),
       body: row.body,
       createdAt: row.createdAt,
       isSelf: true,
@@ -2202,6 +2351,8 @@ export default {
       if (request.method === "POST" && url.pathname === "/announcements/update-notice") return await handleCreateUpdateNotice(request, env);
       if (request.method === "POST" && url.pathname === "/telemetry/heartbeat") return await handleTelemetryHeartbeat(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/admin/usage") return await handleAdminUsage(request, env);
+      if (request.method === "GET" && url.pathname.startsWith("/profile/avatar/")) return await handleProfileAvatarGet(env, decodeURIComponent(url.pathname.slice("/profile/avatar/".length)));
+      if (request.method === "POST" && url.pathname === "/profile/avatar") return await handleProfileAvatarUpload(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);

@@ -59,6 +59,13 @@ struct DeviceIdentity {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+struct NativeHttpResponse {
+    status: u16,
+    body: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SummaryFile {
     name: String,
     path: String,
@@ -951,6 +958,23 @@ async fn download_linux_update_package() -> Result<LinuxUpdateDownload, String> 
     }
 }
 
+#[tauri::command]
+async fn native_social_sync(endpoint: String, body: String) -> Result<NativeHttpResponse, String> {
+    let response = reqwest::Client::new()
+        .post(endpoint)
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| format!("Native social sync request failed: {error}"))?;
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|error| format!("Could not read native social sync response: {error}"))?;
+    Ok(NativeHttpResponse { status, body })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -992,6 +1016,7 @@ pub fn run() {
             export_daily_note,
             get_update_install_support,
             download_linux_update_package,
+            native_social_sync,
             get_device_identity,
             set_timer_tray_state
         ])

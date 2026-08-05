@@ -3,6 +3,9 @@ import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialF
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
+export const MAX_SYNC_BODY_BYTES = 256 * 1024;
+export const MAX_SYNC_STAT_ROWS = 370;
+export const MAX_SYNC_FEED_POSTS = 25;
 const DEFAULT_SOCIAL_API_URL = "https://study-tracker-social.danil-poluyanov13.workers.dev";
 const SOCIAL_API_URL = (import.meta.env.VITE_SOCIAL_API_URL || DEFAULT_SOCIAL_API_URL).replace(/\/$/, "");
 
@@ -19,6 +22,11 @@ interface SocialSyncResponse {
 interface DeviceIdentity {
   fingerprintHash: string;
   label: string;
+}
+
+interface NativeHttpResponse {
+  status: number;
+  body: string;
 }
 
 export interface AppMetadata {
@@ -151,6 +159,10 @@ export function getLocalSocialStats(sessions: StudySession[]) {
   return [...daily.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export function getSyncSocialStats(sessions: StudySession[]) {
+  return getLocalSocialStats(sessions).slice(-MAX_SYNC_STAT_ROWS);
+}
+
 export function getLocalLeaderboardEntry(state: AppState, period: SocialLeaderboardPeriod): SocialLeaderboardEntry {
   const today = isoDate();
   const weekStart = startOfWeek(new Date());
@@ -266,8 +278,8 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
       device,
       app,
     },
-    stats: getLocalSocialStats(state.sessions),
-    feedPosts: state.social.pendingFeedPosts.map((post) => {
+    stats: getSyncSocialStats(state.sessions),
+    feedPosts: state.social.pendingFeedPosts.slice(0, MAX_SYNC_FEED_POSTS).map((post) => {
       return {
         id: post.id,
         type: post.type,
@@ -287,10 +299,44 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
     }),
   };
 
-  return requestSocialApi<SocialSyncResponse>("/sync", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  const body = JSON.stringify(payload);
+  const endpoint = `${SOCIAL_API_URL}/sync`;
+  const payloadBytes = new TextEncoder().encode(body).length;
+
+  if (payloadBytes > MAX_SYNC_BODY_BYTES) {
+    throw new Error("Social sync payload is too large. Use a smaller profile photo, then sync again.");
+  }
+
+  let responseText: string;
+  let responseOk: boolean;
+  let responseStatus: number;
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    responseText = await response.text().catch(() => "");
+    responseOk = response.ok;
+    responseStatus = response.status;
+  } catch (error) {
+    try {
+      const nativeResponse = await invoke<NativeHttpResponse>("native_social_sync", { endpoint, body });
+      responseText = nativeResponse.body;
+      responseOk = nativeResponse.status >= 200 && nativeResponse.status < 300;
+      responseStatus = nativeResponse.status;
+    } catch (nativeError) {
+      const originalMessage = error instanceof Error ? error.message : String(error);
+      const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError);
+      const message = `Could not reach the social sync server. Check your connection; if this keeps happening, your network may be blocking IPv6 or the Worker domain. (${originalMessage}; native fallback: ${nativeMessage})`;
+      throw new Error(message);
+    }
+  }
+
+  if (!responseOk) {
+    throw new Error(responseText || `Social sync failed with HTTP ${responseStatus}.`);
+  }
+  return JSON.parse(responseText) as SocialSyncResponse;
 }
 
 export async function getSocialFeed(social: SocialState, scope: SocialFeedScope) {
@@ -386,6 +432,15 @@ export async function deleteFeedPostImage(social: SocialState, postId: string) {
       postId,
     }),
   });
+}
+
+export async function uploadProfileAvatar(social: SocialState, image: Blob, name: string) {
+  const form = new FormData();
+  form.set("userId", social.userId);
+  form.set("deviceSecret", social.deviceSecret);
+  form.set("name", name);
+  form.set("image", image, name || "avatar.webp");
+  return requestSocialForm<{ avatar: SocialAvatar }>("/profile/avatar", form);
 }
 
 export async function commentOnFeedPost(social: SocialState, postId: string, body: string) {
