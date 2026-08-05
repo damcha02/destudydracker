@@ -39,6 +39,7 @@ import type { SummaryFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
@@ -2911,6 +2912,14 @@ function App() {
     }, 700);
   }, [state]);
 
+  useEffect(() => {
+    if (!state.timer.running) return undefined;
+
+    return startTimerPersistenceHeartbeat(
+      () => latestStateRef.current,
+      saveAppState,
+    );
+  }, [state.timer.running]);
   useEffect(() => {
     const flushState = () => {
       if (saveStateTimeoutRef.current !== null) {
