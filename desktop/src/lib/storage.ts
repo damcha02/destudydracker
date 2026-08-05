@@ -439,29 +439,48 @@ function closeStaleOpenSegments(timer: TimerState): TimerState["activeSegments"]
   const openIndex = segments.findIndex((segment) => segment.endedAt === null);
   if (openIndex === -1) return segments;
 
-  const closedSeconds = segments.reduce((sum, segment, index) => {
-    if (index === openIndex || !segment.endedAt) return sum;
-    const seconds = (new Date(segment.endedAt).getTime() - new Date(segment.startedAt).getTime()) / 1000;
-    return sum + (Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
-  }, 0);
-
-  let elapsedSeconds = 0;
-  if (timer.phase === "stopwatch") {
-    elapsedSeconds = Math.max(0, timer.remainingSeconds) - closedSeconds;
-  } else if (timer.phase === "study" || timer.phase === "exam") {
-    const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
-    const activeSeconds = Math.max(0, Math.min(configuredSeconds, configuredSeconds - timer.remainingSeconds - timer.loggedSplitSeconds));
-    elapsedSeconds = activeSeconds - closedSeconds;
-  }
-
   const open = segments[openIndex];
   const startMs = new Date(open.startedAt).getTime();
   if (!Number.isFinite(startMs)) return segments;
-  const endMs = startMs + Math.max(0, elapsedSeconds) * 1000;
+
+  // Prefer the last confirmed-alive heartbeat as the cutoff: it directly answers
+  // "when did we last know the app was running," rather than trusting whatever
+  // remainingSeconds happened to be at the last save. Fall back to the older
+  // remainingSeconds-derived estimate only for saves from before lastAliveAt existed.
+  const aliveMs = getStateAliveMs(timer);
+  let endMs: number;
+  if (aliveMs !== null) {
+    endMs = Math.max(startMs, aliveMs);
+  } else {
+    const closedSeconds = segments.reduce((sum, segment, index) => {
+      if (index === openIndex || !segment.endedAt) return sum;
+      const seconds = (new Date(segment.endedAt).getTime() - new Date(segment.startedAt).getTime()) / 1000;
+      return sum + (Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
+    }, 0);
+
+    let elapsedSeconds = 0;
+    if (timer.phase === "stopwatch") {
+      elapsedSeconds = Math.max(0, timer.remainingSeconds) - closedSeconds;
+    } else if (timer.phase === "study" || timer.phase === "exam") {
+      const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
+      const activeSeconds = Math.max(0, Math.min(configuredSeconds, configuredSeconds - timer.remainingSeconds - timer.loggedSplitSeconds));
+      elapsedSeconds = activeSeconds - closedSeconds;
+    }
+    endMs = startMs + Math.max(0, elapsedSeconds) * 1000;
+  }
+
   return segments.map((segment, index) => {
     if (index !== openIndex) return segment;
     return { ...segment, endedAt: new Date(endMs).toISOString() };
   });
+}
+
+function sumSegmentSeconds(segments: TimerState["activeSegments"]): number {
+  return segments.reduce((sum, segment) => {
+    if (!segment.endedAt) return sum;
+    const seconds = (new Date(segment.endedAt).getTime() - new Date(segment.startedAt).getTime()) / 1000;
+    return sum + (Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
+  }, 0);
 }
 
 function getLastTimerActivityMs(timer: TimerState): number | null {
@@ -484,7 +503,10 @@ function getStateAliveMs(timer: Partial<TimerState>): number | null {
 }
 
 function recoverSessionsFromAbandonedTimer(timer: TimerState, sessions: StudySession[]): { timer: TimerState; sessions: StudySession[] } {
-  const canRecoverSessions = timer.phase === "study" || timer.phase === "exam" || timer.phase === "stopwatch";
+  // Endless/stopwatch timers are handled separately in rehydrateTimer: they never have a
+  // natural "should have ended by now" bound, so they're left paused instead of being
+  // auto-packaged into a session here.
+  const canRecoverSessions = timer.phase === "study" || timer.phase === "exam";
   const closedSegments = canRecoverSessions
     ? timer.activeSegments.filter((segment): segment is { startedAt: string; endedAt: string } => segment.endedAt !== null)
     : [];
@@ -524,7 +546,22 @@ function rehydrateTimer(timer: Partial<TimerState> | undefined, sessions: StudyS
 
   if (result.running || result.phase === "idle") return { timer: result, sessions };
 
-  const repaired = { ...result, activeSegments: closeStaleOpenSegments(result) };
+  const closedSegments = closeStaleOpenSegments(result);
+  const repaired = {
+    ...result,
+    activeSegments: closedSegments,
+    // For stopwatch mode, remainingSeconds IS the elapsed-time counter: recompute it
+    // directly from the now-authoritative (lastAliveAt-capped) segments instead of
+    // trusting whatever value happened to be persisted, so restore never invents or
+    // drops elapsed time.
+    remainingSeconds: result.phase === "stopwatch" ? sumSegmentSeconds(closedSegments) : result.remainingSeconds,
+  };
+
+  // Endless/stopwatch timers have no natural "should have finished by now" bound, so
+  // they always come back paused with their real elapsed time preserved — never reset
+  // to zero, never auto-saved into a session on our own initiative.
+  if (repaired.phase === "stopwatch") return { timer: repaired, sessions };
+
   const lastActivityMs = getLastTimerActivityMs(repaired);
   if (lastActivityMs !== null && Date.now() - lastActivityMs > ABANDONED_TIMER_INACTIVITY_MS) {
     return recoverSessionsFromAbandonedTimer(repaired, sessions);
@@ -615,7 +652,7 @@ function closeTimerSegmentsForRecovery(timer: TimerState, endedAt: string) {
   });
 }
 
-function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
+export function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   if (!timer.running || !timer.endsAt || (timer.phase !== "study" && timer.phase !== "exam")) {
     return rehydrateTimer(timer, sessions);
   }
