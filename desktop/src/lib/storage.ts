@@ -411,6 +411,70 @@ function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerSt
   return [];
 }
 
+const ABANDONED_TIMER_INACTIVITY_MS = 6 * 60 * 60 * 1000;
+
+function getRestoreIdleSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
+  if (timer.mode === "endless") return 0;
+  return (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60;
+}
+
+function resetTimerToIdle(timer: TimerState): TimerState {
+  return {
+    ...defaultTimer,
+    ...keepTimerContext(timer),
+    running: false,
+    startedAt: null,
+    endsAt: null,
+    phase: "idle",
+    loggedSplitSeconds: 0,
+    activeSegments: [],
+    remainingSeconds: getRestoreIdleSeconds(timer),
+  };
+}
+
+function closeStaleOpenSegments(timer: TimerState): TimerState["activeSegments"] {
+  const segments = timer.activeSegments;
+  const openIndex = segments.findIndex((segment) => segment.endedAt === null);
+  if (openIndex === -1) return segments;
+
+  const closedSeconds = segments.reduce((sum, segment, index) => {
+    if (index === openIndex || !segment.endedAt) return sum;
+    const seconds = (new Date(segment.endedAt).getTime() - new Date(segment.startedAt).getTime()) / 1000;
+    return sum + (Number.isFinite(seconds) ? Math.max(0, seconds) : 0);
+  }, 0);
+
+  let elapsedSeconds = 0;
+  if (timer.phase === "stopwatch") {
+    elapsedSeconds = Math.max(0, timer.remainingSeconds) - closedSeconds;
+  } else if (timer.phase === "study" || timer.phase === "exam") {
+    const configuredSeconds = timer.phase === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
+    const activeSeconds = Math.max(0, Math.min(configuredSeconds, configuredSeconds - timer.remainingSeconds - timer.loggedSplitSeconds));
+    elapsedSeconds = activeSeconds - closedSeconds;
+  }
+
+  const open = segments[openIndex];
+  const startMs = new Date(open.startedAt).getTime();
+  if (!Number.isFinite(startMs)) return segments;
+  const endMs = startMs + Math.max(0, elapsedSeconds) * 1000;
+  return segments.map((segment, index) => {
+    if (index !== openIndex) return segment;
+    return { ...segment, endedAt: new Date(endMs).toISOString() };
+  });
+}
+
+function getLastTimerActivityMs(timer: TimerState): number | null {
+  let lastMs: number | null = null;
+  timer.activeSegments.forEach((segment) => {
+    const ms = new Date(segment.endedAt ?? segment.startedAt).getTime();
+    if (Number.isFinite(ms) && (lastMs === null || ms > lastMs)) lastMs = ms;
+  });
+  if (lastMs === null && timer.startedAt) {
+    const ms = new Date(timer.startedAt).getTime();
+    if (Number.isFinite(ms)) lastMs = ms;
+  }
+  return lastMs;
+}
+
 function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
   const merged = {
     ...defaultTimer,
@@ -419,28 +483,28 @@ function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
     activeSegments: normalizeTimerSegments(timer),
   };
 
+  let result: TimerState;
   if (!merged.running || !merged.endsAt) {
-    return {
+    result = {
       ...merged,
       running: false,
       endsAt: null,
     };
+  } else {
+    const diff = Math.ceil((new Date(merged.endsAt).getTime() - Date.now()) / 1000);
+    result = diff <= 0
+      ? { ...merged, running: false, endsAt: null, remainingSeconds: 0 }
+      : { ...merged, remainingSeconds: diff };
   }
 
-  const diff = Math.ceil((new Date(merged.endsAt).getTime() - Date.now()) / 1000);
-  if (diff <= 0) {
-    return {
-      ...merged,
-      running: false,
-      endsAt: null,
-      remainingSeconds: 0,
-    };
-  }
+  if (result.running || result.phase === "idle") return result;
 
-  return {
-    ...merged,
-    remainingSeconds: diff,
-  };
+  const repaired = { ...result, activeSegments: closeStaleOpenSegments(result) };
+  const lastActivityMs = getLastTimerActivityMs(repaired);
+  if (lastActivityMs !== null && Date.now() - lastActivityMs > ABANDONED_TIMER_INACTIVITY_MS) {
+    return resetTimerToIdle(repaired);
+  }
+  return repaired;
 }
 
 function keepTimerContext(timer: TimerState) {

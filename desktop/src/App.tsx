@@ -2772,6 +2772,8 @@ function App() {
   const pendingUpdateRef = useRef<Update | null>(null);
   const latestStateRef = useRef(state);
   const saveStateTimeoutRef = useRef<number | null>(null);
+  const sessionSavePendingRef = useRef(false);
+  const pendingSaveRef = useRef<AppState | null>(null);
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
   const wordleModalRef = useRef<HTMLDivElement | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
@@ -2896,9 +2898,16 @@ function App() {
       }
       saveAppState(latestStateRef.current);
     };
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushState();
+    };
     window.addEventListener("beforeunload", flushState);
+    window.addEventListener("pagehide", flushState);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("beforeunload", flushState);
+      window.removeEventListener("pagehide", flushState);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       flushState();
     };
   }, []);
@@ -3066,7 +3075,7 @@ function App() {
               setEndlessInactivityPrompt(null);
               setTimerInactivityNoticeVisible(true);
               void sendTimerNotification("Timer stopped", "Timer was stopped due to inactivity.");
-              return {
+              const next = {
                 ...socialState,
                 timer: {
                   ...defaultTimer,
@@ -3074,11 +3083,13 @@ function App() {
                   running: false,
                   startedAt: null,
                   endsAt: null,
-                  phase: "idle",
+                  phase: "idle" as const,
                   remainingSeconds: getIdleTimerSeconds(timer),
                   activeSegments: [],
                 },
               };
+              pendingSaveRef.current = next;
+              return next;
             }
 
             if (elapsed === timer.remainingSeconds) return current;
@@ -3116,11 +3127,11 @@ function App() {
           if (timer.mode === "focus" && timer.breakMinutes > 0) {
             ringBell();
             void sendTimerNotification("Focus session finished", "Nice work. Time for a break.");
-            return {
+            const next = {
               ...socialState,
               timer: {
                 ...timer,
-                phase: "break",
+                phase: "break" as const,
                 running: true,
                   startedAt: endedAt,
                   endsAt: new Date(Date.now() + timer.breakMinutes * 60000).toISOString(),
@@ -3129,14 +3140,18 @@ function App() {
                   activeSegments: [],
                 },
               };
+            pendingSaveRef.current = next;
+            return next;
           }
 
           ringBell();
           void sendTimerNotification("Focus session finished", "Your study timer is complete.");
-          return {
+          const next = {
             ...socialState,
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
+          pendingSaveRef.current = next;
+          return next;
         }
 
         if (timer.phase === "exam") {
@@ -3144,21 +3159,32 @@ function App() {
           const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
           ringBell();
           void sendTimerNotification("Exam timer finished", "Your exam timer is complete.");
-          return {
+          const next = {
             ...socialState,
             timer: { ...defaultTimer, ...keepTimerContext(timer) },
           };
+          pendingSaveRef.current = next;
+          return next;
         }
 
         ringBell();
         if (timer.phase === "break") {
           void sendTimerNotification("Break finished", "Break is over. Ready for the next focus session?");
         }
-        return {
+        const next = {
           ...current,
           timer: { ...defaultTimer, ...keepTimerContext(timer) },
         };
+        pendingSaveRef.current = next;
+        return next;
       });
+      window.setTimeout(() => {
+        const pending = pendingSaveRef.current;
+        if (pending) {
+          pendingSaveRef.current = null;
+          saveAppState(pending);
+        }
+      }, 0);
     }, 500);
 
     return () => window.clearInterval(interval);
@@ -7230,6 +7256,7 @@ function App() {
   }
 
   function completeSessionManually() {
+    if (sessionSavePendingRef.current) return;
     if (state.timer.phase !== "study" && state.timer.phase !== "exam" && state.timer.phase !== "stopwatch") {
       setMessage("There is no active study block to save.");
       return;
@@ -7239,30 +7266,31 @@ function App() {
       return;
     }
 
-    setState((current) => {
-      const timer = current.timer;
-      if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return current;
-      const activeMinutes = getTimerMinutes(timer);
-      if (activeMinutes <= 0) return current;
-      const endedAt = new Date().toISOString();
-      const sessions = buildSessionsFromTimerRange(timer, endedAt);
-      const socialState = prependSessionsToState(current, sessions, sessions[sessions.length - 1]);
-      playBellSound();
-      endlessContinuousStartedAtRef.current = null;
-      clearEndlessInactivityPrompt();
-      return {
-        ...socialState,
-        timer: {
-          ...defaultTimer,
-          ...keepTimerContext(timer),
-          running: false,
-          startedAt: null,
-          endsAt: null,
-          phase: "idle",
-          remainingSeconds: getIdleTimerSeconds(timer),
-        },
-      };
-    });
+    sessionSavePendingRef.current = true;
+    const timer = state.timer;
+    const endedAt = new Date().toISOString();
+    const sessions = buildSessionsFromTimerRange(timer, endedAt);
+    const socialState = prependSessionsToState(state, sessions, sessions[sessions.length - 1]);
+    const nextState = {
+      ...socialState,
+      timer: {
+        ...defaultTimer,
+        ...keepTimerContext(timer),
+        running: false,
+        startedAt: null,
+        endsAt: null,
+        phase: "idle" as const,
+        remainingSeconds: getIdleTimerSeconds(timer),
+      },
+    };
+    playBellSound();
+    endlessContinuousStartedAtRef.current = null;
+    clearEndlessInactivityPrompt();
+    setState(nextState);
+    saveAppState(nextState);
+    window.setTimeout(() => {
+      sessionSavePendingRef.current = false;
+    }, 750);
     setMessage("Session saved.");
   }
 
