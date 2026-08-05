@@ -322,6 +322,7 @@ export const defaultTimer: TimerState = {
   nextStep: "",
   confidence: 3,
   presetLabel: "Pomodoro 25/5",
+  lastAliveAt: null,
 };
 
 export const defaultState: AppState = {
@@ -412,6 +413,7 @@ function normalizeTimerSegments(timer: Partial<TimerState> | undefined): TimerSt
 }
 
 const ABANDONED_TIMER_INACTIVITY_MS = 6 * 60 * 60 * 1000;
+const TIMER_ALIVE_GAP_MS = 5 * 60 * 1000;
 
 function getRestoreIdleSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
   if (timer.mode === "endless") return 0;
@@ -475,7 +477,26 @@ function getLastTimerActivityMs(timer: TimerState): number | null {
   return lastMs;
 }
 
-function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
+function getStateAliveMs(timer: Partial<TimerState>): number | null {
+  if (typeof timer.lastAliveAt !== "string") return null;
+  const ms = new Date(timer.lastAliveAt).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function recoverSessionsFromAbandonedTimer(timer: TimerState, sessions: StudySession[]): { timer: TimerState; sessions: StudySession[] } {
+  const canRecoverSessions = timer.phase === "study" || timer.phase === "exam" || timer.phase === "stopwatch";
+  const closedSegments = canRecoverSessions
+    ? timer.activeSegments.filter((segment): segment is { startedAt: string; endedAt: string } => segment.endedAt !== null)
+    : [];
+  const recoveredSessions = closedSegments.length ? buildRecoveredSessionsFromSegments(timer, closedSegments) : [];
+  const newSessions = recoveredSessions.filter((recoveredSession) => !sessions.some((session) => session.id === recoveredSession.id));
+  return {
+    timer: resetTimerToIdle(timer),
+    sessions: newSessions.length ? [...newSessions, ...sessions] : sessions,
+  };
+}
+
+function rehydrateTimer(timer: Partial<TimerState> | undefined, sessions: StudySession[]): { timer: TimerState; sessions: StudySession[] } {
   const merged = {
     ...defaultTimer,
     ...timer,
@@ -492,19 +513,23 @@ function rehydrateTimer(timer: Partial<TimerState> | undefined): TimerState {
     };
   } else {
     const diff = Math.ceil((new Date(merged.endsAt).getTime() - Date.now()) / 1000);
-    result = diff <= 0
-      ? { ...merged, running: false, endsAt: null, remainingSeconds: 0 }
-      : { ...merged, remainingSeconds: diff };
+    if (diff <= 0) {
+      result = { ...merged, running: false, endsAt: null, remainingSeconds: 0 };
+    } else {
+      const lastAliveMs = getStateAliveMs(merged);
+      const isStale = lastAliveMs !== null && Date.now() - lastAliveMs > TIMER_ALIVE_GAP_MS;
+      result = isStale ? { ...merged, running: false, endsAt: null } : { ...merged, remainingSeconds: diff };
+    }
   }
 
-  if (result.running || result.phase === "idle") return result;
+  if (result.running || result.phase === "idle") return { timer: result, sessions };
 
   const repaired = { ...result, activeSegments: closeStaleOpenSegments(result) };
   const lastActivityMs = getLastTimerActivityMs(repaired);
   if (lastActivityMs !== null && Date.now() - lastActivityMs > ABANDONED_TIMER_INACTIVITY_MS) {
-    return resetTimerToIdle(repaired);
+    return recoverSessionsFromAbandonedTimer(repaired, sessions);
   }
-  return repaired;
+  return { timer: repaired, sessions };
 }
 
 function keepTimerContext(timer: TimerState) {
@@ -592,12 +617,12 @@ function closeTimerSegmentsForRecovery(timer: TimerState, endedAt: string) {
 
 function recoverExpiredTimer(timer: TimerState, sessions: StudySession[]) {
   if (!timer.running || !timer.endsAt || (timer.phase !== "study" && timer.phase !== "exam")) {
-    return { timer: rehydrateTimer(timer), sessions };
+    return rehydrateTimer(timer, sessions);
   }
 
   const endsAtTime = new Date(timer.endsAt).getTime();
   if (!Number.isFinite(endsAtTime) || endsAtTime > Date.now()) {
-    return { timer: rehydrateTimer(timer), sessions };
+    return rehydrateTimer(timer, sessions);
   }
 
   const endedAt = new Date(endsAtTime).toISOString();
@@ -1023,11 +1048,12 @@ function stripAvatarCopiesForStorage(state: AppState): AppState {
 }
 
 export function saveAppState(state: AppState) {
+  const stateToSave: AppState = { ...state, timer: { ...state.timer, lastAliveAt: new Date().toISOString() } };
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
   } catch (error) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripAvatarCopiesForStorage(state)));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripAvatarCopiesForStorage(stateToSave)));
     } catch {
       console.warn("Study Tracker state could not be saved.", error);
     }

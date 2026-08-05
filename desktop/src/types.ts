@@ -323,6 +323,7 @@ export interface TimerState {
   nextStep: string;
   confidence: number;
   presetLabel: string;
+  lastAliveAt: string | null;
 }
 
 export interface PlayedBreak {
