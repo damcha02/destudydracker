@@ -82,10 +82,11 @@ const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const SQUAD_SEASON_START = "2026-07-29";
 const SQUAD_SEASON_END = "2026-08-31";
+const SQUAD_ZERO_POINT_DATES = new Set(["2026-08-05"]);
 const SERVER_TIME_ZONE = "Europe/Zurich";
 const SQUAD_SCORE_BACKFILL_DAYS = 14;
 const MAX_FEED_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_PROFILE_AVATAR_BYTES = 128 * 1024;
+const MAX_PROFILE_AVATAR_BYTES = 256 * 1024;
 const FEED_IMAGE_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const R2_STORAGE_WARNING_BYTES = 400 * 1024 * 1024;
 const R2_STORAGE_HARD_BYTES = 500 * 1024 * 1024;
@@ -193,6 +194,7 @@ function parseAvatar(value: unknown, displayName: string): SocialAvatar {
 function parseListAvatar(value: unknown, displayName: string): SocialAvatar {
   const avatar = parseAvatar(value, displayName);
   if (avatar.kind !== "photo") return avatar;
+  if (!avatar.url.startsWith("data:image/")) return avatar;
   return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
 }
 
@@ -250,6 +252,11 @@ function weekStartIso(date = new Date()) {
   const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
   const mondayOffset = (dayOfWeek + 6) % 7;
   return addIsoDays(today, -mondayOffset);
+}
+
+function squadRankPoints(date: string, rank: number) {
+  if (SQUAD_ZERO_POINT_DATES.has(date)) return 0;
+  return rank === 1 ? 2 : rank === 2 ? 1 : 0;
 }
 
 function friendPair(a: string, b: string) {
@@ -1641,6 +1648,17 @@ function profileAvatarKeyFromUrl(value: string) {
   }
 }
 
+function profileAvatarBytesFromDataUrl(value: string) {
+  const match = value.match(/^data:(image\/(?:png|jpeg|webp|gif));base64,(.+)$/);
+  if (!match) return null;
+  const binary = atob(match[2]);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return { mimeType: match[1], bytes };
+}
+
 async function handleProfileAvatarUpload(request: Request, env: Env) {
   const form = await request.formData();
   const userId = String(form.get("userId") ?? "").trim();
@@ -1690,6 +1708,59 @@ async function handleProfileAvatarGet(env: Env, key: string) {
       "cache-control": "public, max-age=86400",
     },
   });
+}
+
+async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; limit?: number }>(request);
+  const owner = await verifyUser(env, cleanUserId(payload.userId), String(payload.deviceSecret ?? ""));
+  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can migrate profile avatars.", 403);
+
+  const limit = Math.max(1, Math.min(10, Math.round(Number(payload.limit ?? 5))));
+  const rows = await env.DB.prepare(`
+    SELECT id AS userId, display_name AS displayName, avatar_json AS avatarJson
+    FROM users
+    WHERE avatar_json LIKE '%data:image/%'
+    ORDER BY updated_at ASC
+    LIMIT ?
+  `).bind(limit).all<{ userId: string; displayName: string; avatarJson: string }>();
+
+  let migrated = 0;
+  const skipped: Array<{ userId: string; reason: string }> = [];
+  for (const row of rows.results) {
+    const avatar = parseAvatar(row.avatarJson, row.displayName);
+    if (avatar.kind !== "photo" || !avatar.url.startsWith("data:image/")) {
+      skipped.push({ userId: row.userId, reason: "not a base64 photo avatar" });
+      continue;
+    }
+    const image = profileAvatarBytesFromDataUrl(avatar.url);
+    if (!image) {
+      skipped.push({ userId: row.userId, reason: "unsupported data URL" });
+      continue;
+    }
+    if (image.bytes.byteLength > MAX_PROFILE_AVATAR_BYTES) {
+      skipped.push({ userId: row.userId, reason: "avatar exceeds migration size limit" });
+      continue;
+    }
+
+    await assertR2ClassABudget(env, 1);
+    const key = `profile-avatars/${row.userId}/${crypto.randomUUID()}.webp`;
+    await env.FEED_IMAGES.put(key, image.bytes, {
+      httpMetadata: { contentType: image.mimeType },
+    });
+    await incrementR2Usage(env, { classA: 1 });
+    const nextAvatar: SocialAvatar = {
+      kind: "photo",
+      name: avatar.name || "photo",
+      url: profileAvatarUrl(request, key),
+      mimeType: image.mimeType,
+    };
+    await env.DB.prepare("UPDATE users SET avatar_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(JSON.stringify(nextAvatar), row.userId)
+      .run();
+    migrated += 1;
+  }
+
+  return json({ ok: true, scanned: rows.results.length, migrated, skipped });
 }
 
 async function handleFeedReaction(request: Request, env: Env) {
@@ -2351,6 +2422,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/announcements/update-notice") return await handleCreateUpdateNotice(request, env);
       if (request.method === "POST" && url.pathname === "/telemetry/heartbeat") return await handleTelemetryHeartbeat(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/admin/usage") return await handleAdminUsage(request, env);
+      if (request.method === "POST" && url.pathname === "/admin/migrate-profile-avatars") return await handleAdminMigrateProfileAvatars(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/profile/avatar/")) return await handleProfileAvatarGet(env, decodeURIComponent(url.pathname.slice("/profile/avatar/".length)));
       if (request.method === "POST" && url.pathname === "/profile/avatar") return await handleProfileAvatarUpload(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
