@@ -457,6 +457,7 @@ const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
 const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const APP_STYLE_STORAGE_KEY = "study-tracker-style";
 const FIELD_DASHBOARD_LAYOUT_KEY = "study-tracker-field-dashboard-layout";
+const WABI_CIRCLE_COMPETITIVE_KEY = "study-tracker-wabi-circle-competitive";
 const DISMISSED_ANNOUNCEMENTS_KEY = "study-tracker-dismissed-announcements";
 const TELEMETRY_INSTALL_ID_KEY = "study-tracker-telemetry-install-id";
 const SESSION_HISTORY_DAYS = 365;
@@ -492,7 +493,7 @@ type ThemePalette =
   | "gpt"
   | "claude"
   | "cute";
-type AppStyle = "modern" | "field-notebook";
+type AppStyle = "modern" | "field-notebook" | "wabi-sabi";
 type ThemePanelView = "themes" | "styles";
 type FieldDashboardLayout = "quiet" | "full";
 type FieldPlannerTaskMode = "view" | "edit" | "create";
@@ -1307,7 +1308,12 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
   { id: "modern", name: "Modern", desc: "Current rounded study dashboard with palette themes.", swatch: "linear-gradient(135deg, #8fb4ff, #98c379)" },
   { id: "field-notebook", name: "Field Notebook", desc: "Paper, ink, course tabs, ruled ledgers, and study-circle social styling.", swatch: "linear-gradient(135deg, #fbf8f0 0 45%, #23211d 45% 55%, #9c5a34 55%)" },
+  { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
 ];
+
+function isAppStyle(value: string | null): value is AppStyle {
+  return appStyles.some((style) => style.id === value);
+}
 
 function isThemePalette(value: string | null): value is ThemePalette {
   return themePalettes.some((palette) => palette.id === value);
@@ -1323,11 +1329,16 @@ function loadThemePalette(): ThemePalette {
 }
 
 function loadAppStyle(): AppStyle {
-  return localStorage.getItem(APP_STYLE_STORAGE_KEY) === "field-notebook" ? "field-notebook" : "modern";
+  const saved = localStorage.getItem(APP_STYLE_STORAGE_KEY);
+  return isAppStyle(saved) ? saved : "modern";
 }
 
 function loadFieldDashboardLayout(): FieldDashboardLayout {
   return localStorage.getItem(FIELD_DASHBOARD_LAYOUT_KEY) === "full" ? "full" : "quiet";
+}
+
+function loadWabiCircleCompetitive(): boolean {
+  return localStorage.getItem(WABI_CIRCLE_COMPETITIVE_KEY) === "true";
 }
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
@@ -2629,6 +2640,15 @@ function App() {
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [appStyle, setAppStyle] = useState<AppStyle>(loadAppStyle);
   const [themePanelView, setThemePanelView] = useState<ThemePanelView>("themes");
+  const [wabiQuietMode, setWabiQuietMode] = useState(false);
+  const [wabiQuietTaskId, setWabiQuietTaskId] = useState<string | null>(null);
+  const [wabiQuietTaskMenuOpen, setWabiQuietTaskMenuOpen] = useState(false);
+  const [wabiCircleCompetitive, setWabiCircleCompetitive] = useState<boolean>(loadWabiCircleCompetitive);
+  const [breakTimerMinutes, setBreakTimerMinutes] = useState(5);
+  const [breakTimerRemaining, setBreakTimerRemaining] = useState(5 * 60);
+  const [breakTimerRunning, setBreakTimerRunning] = useState(false);
+  const [breakTimerEditing, setBreakTimerEditing] = useState(false);
+  const [breakTimerDraft, setBreakTimerDraft] = useState("");
   const [fieldDashboardLayout, setFieldDashboardLayout] = useState<FieldDashboardLayout>(loadFieldDashboardLayout);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
@@ -2991,6 +3011,24 @@ function App() {
     document.documentElement.dataset.appStyle = appStyle;
     localStorage.setItem(APP_STYLE_STORAGE_KEY, appStyle);
   }, [appStyle]);
+
+  useEffect(() => {
+    localStorage.setItem(WABI_CIRCLE_COMPETITIVE_KEY, String(wabiCircleCompetitive));
+  }, [wabiCircleCompetitive]);
+
+  useEffect(() => {
+    if (!breakTimerRunning) return;
+    const id = setInterval(() => {
+      setBreakTimerRemaining((current) => {
+        if (current <= 1) {
+          setBreakTimerRunning(false);
+          return 0;
+        }
+        return current - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [breakTimerRunning]);
 
   useEffect(() => {
     if (palette === "default") {
@@ -3704,9 +3742,9 @@ function App() {
     how: `Pat the pet rock ${badge.label} times.`,
   }));
   const wordleKeyboardState = getWordleKeyboardState(state.wordlePuzzle.guesses, state.wordlePuzzle.answer);
-  const scoredWordleRows = state.wordlePuzzle.guesses.toReversed().map((guess) => scoreWordleGuess(guess, state.wordlePuzzle.answer));
+  const scoredWordleRows = state.wordlePuzzle.guesses.map((guess) => scoreWordleGuess(guess, state.wordlePuzzle.answer));
   const draftWordleRows = !state.wordlePuzzle.completed ? [Array.from({ length: WORDLE_WORD_LENGTH }, (_, colIndex) => ({ letter: wordleDraft[colIndex] ?? "", state: null }))] : [];
-  const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => [...draftWordleRows, ...scoredWordleRows][rowIndex] ?? Array.from({ length: WORDLE_WORD_LENGTH }, () => ({ letter: "", state: null })));
+  const wordleRows = Array.from({ length: WORDLE_MAX_GUESSES }, (_, rowIndex) => [...scoredWordleRows, ...draftWordleRows][rowIndex] ?? Array.from({ length: WORDLE_WORD_LENGTH }, () => ({ letter: "", state: null })));
   const wordleHardModeLocked = state.wordlePuzzle.guesses.length > 0 && !state.wordlePuzzle.completed;
   const geodleOptions = filterCountries(geodleDraft).slice(0, 80);
   const geodleRows = state.geodlePuzzle.guesses.toReversed().map((guess) => ({ guess, clues: scoreGeodleGuess(guess, state.geodlePuzzle.answer) }));
@@ -6768,6 +6806,36 @@ function App() {
     setTimeout(() => setRockBounce(false), 350);
   }
 
+  function toggleBreakTimerRun() {
+    setBreakTimerRunning((current) => {
+      if (!current && breakTimerRemaining <= 0) setBreakTimerRemaining(breakTimerMinutes * 60);
+      return !current;
+    });
+  }
+
+  function resetBreakTimer() {
+    setBreakTimerRunning(false);
+    setBreakTimerRemaining(breakTimerMinutes * 60);
+  }
+
+  function startBreakTimerEditing() {
+    if (breakTimerRunning) return;
+    setBreakTimerDraft(formatClock(breakTimerRemaining));
+    setBreakTimerEditing(true);
+  }
+
+  function applyBreakTimerDraft() {
+    const seconds = parseTimerFaceInput(breakTimerDraft);
+    if (seconds === null) {
+      setBreakTimerEditing(false);
+      setBreakTimerDraft(formatClock(breakTimerRemaining));
+      return;
+    }
+    setBreakTimerMinutes(Math.max(1, Math.round(seconds / 60)));
+    setBreakTimerRemaining(seconds);
+    setBreakTimerEditing(false);
+  }
+
   const [celebrating, setCelebrating] = useState<string | null>(null);
   const [quoteIndex] = useState(() => Math.floor(Math.random() * breakQuotes.length));
   const quote = breakQuotes[quoteIndex];
@@ -7103,7 +7171,7 @@ function App() {
   }
 
   function startTimerFaceEditing() {
-    if (appStyle !== "field-notebook" || state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)) return;
+    if (appStyle === "modern" || state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)) return;
     setTimerFaceDraft(formatClock(state.timer.remainingSeconds));
     setTimerFaceEditing(true);
   }
@@ -7562,6 +7630,22 @@ function App() {
       },
     }));
     setMessage(`"${task.title}" sent to timer.`);
+  }
+
+  function focusTaskInQuietMode(task: Task) {
+    setSelectedTaskId(task.id);
+    setWabiQuietTaskId(task.id);
+    setWabiQuietTaskMenuOpen(false);
+    setState((current) => ({
+      ...current,
+      timer: {
+        ...current.timer,
+        semesterId: task.semesterId,
+        courseId: task.courseId,
+        taskId: task.id,
+        goal: task.title,
+      },
+    }));
   }
 
   const getCalendarEntryTask = (entry: CalendarEntry) => taskLookup.get(entry.taskId) ?? null;
@@ -8945,6 +9029,380 @@ function App() {
     return fieldDashboardLayout === "quiet" ? renderFieldNotebookQuietDashboard() : renderFieldNotebookFullDashboard();
   }
 
+  function renderWabiBreakRoom() {
+    const breakMM = String(Math.floor(breakTimerRemaining / 60)).padStart(2, "0");
+    const breakSS = String(breakTimerRemaining % 60).padStart(2, "0");
+    return (
+      <section className="wabi-break-grid">
+        <div className="wabi-rest-card">
+          <span className="wabi-rest-ring" />
+          <h2>Rest, {breakTimerMinutes} minute{breakTimerMinutes === 1 ? "" : "s"}</h2>
+          <p>Water the plant on the sill, or play one round of something small.</p>
+          {breakTimerEditing ? (
+            <input
+              className="wabi-rest-clock-input"
+              value={breakTimerDraft}
+              onChange={(event) => setBreakTimerDraft(event.target.value)}
+              onBlur={applyBreakTimerDraft}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  applyBreakTimerDraft();
+                } else if (event.key === "Escape") {
+                  setBreakTimerEditing(false);
+                  setBreakTimerDraft(formatClock(breakTimerRemaining));
+                }
+              }}
+              inputMode="numeric"
+              aria-label="Meditation timer duration"
+              autoFocus
+            />
+          ) : (
+            <button type="button" className="wabi-rest-clock" onClick={startBreakTimerEditing} disabled={breakTimerRunning}>
+              {breakMM}:{breakSS}
+            </button>
+          )}
+          <div className="wabi-rest-actions">
+            <button type="button" className="wabi-btn-solid" onClick={toggleBreakTimerRun}>{breakTimerRunning ? "PAUSE" : "START"}</button>
+            <button type="button" className="wabi-text-link" onClick={resetBreakTimer}>RESET</button>
+          </div>
+        </div>
+
+        <div className="wabi-break-lower">
+          <div className="wabi-xp-water" data-tour="break-xp" title={`XP ${xpProgress} / 45 — ~${minsUntilNext} min to next unlock`}>
+            <div className="wabi-xp-water-track">
+              <div className="wabi-xp-water-fill" style={{ height: `${xpPercent}%` }} />
+            </div>
+            <span className="wabi-xp-water-label">{effectiveUnlocked.length}/{STUDY_BREAK_GAME_COUNT}</span>
+          </div>
+
+          <div className="wabi-games-col">
+            <div className="wabi-eyebrow-row">
+              <span className="wabi-eyebrow">GAMES</span>
+              <span className="wabi-faint-text">{effectiveUnlocked.length} of {STUDY_BREAK_GAME_COUNT} available</span>
+            </div>
+            <div className="wabi-games-grid" data-tour="break-games">
+              {studyBreakGames.map((game) => {
+                const unlocked = effectiveUnlocked.includes(game.name);
+                return (
+                  <div
+                    key={game.name}
+                    className={`wabi-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
+                    onAnimationEnd={() => setCelebrating(null)}
+                  >
+                    <div className="wabi-game-head">
+                      <strong>{game.name}</strong>
+                      {unlocked ? <span className="wabi-game-tag">READY</span> : null}
+                    </div>
+                    <span className="wabi-game-desc">{game.desc}</span>
+                    <div className="wabi-game-foot">
+                      {unlocked ? (
+                        game.name === "Daily Durak" ? (
+                          <>
+                            <span className="wabi-game-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span>
+                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>PLAY</button>
+                          </>
+                        ) : game.name === "Wordle" ? (
+                          <>
+                            {wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="wabi-game-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>PLAY</button>
+                          </>
+                        ) : game.name === "Travle" ? (
+                          <>
+                            {travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="wabi-game-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>PLAY</button>
+                          </>
+                        ) : game.name === "Geodle" ? (
+                          <>
+                            {geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="wabi-game-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>PLAY</button>
+                          </>
+                        ) : game.name === "Flaggle" ? (
+                          <>
+                            {flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="wabi-game-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
+                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>PLAY</button>
+                          </>
+                        ) : (
+                          <a href={game.url} target="_blank" rel="noreferrer" className="wabi-text-link" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>PLAY</a>
+                        )
+                      ) : canUnlockMore ? (
+                        <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>UNLOCK</button>
+                      ) : (
+                        <span className="wabi-game-progress">~{minsUntilNext} min</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="wabi-pet-rock"
+          data-tour="break-rock"
+          onClick={patRock}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.repeat) return;
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              patRock();
+            }
+          }}
+        >
+          <div className="rock-area">
+            <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
+            {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}
+          </div>
+          <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
+        </div>
+      </section>
+    );
+  }
+
+  function renderWabiQuietMode() {
+    const { nextTask, nextEntry, nextTitle, nextMeta } = getFieldDashboardData();
+    const quietTask = wabiQuietTaskId ? taskLookup.get(wabiQuietTaskId) ?? null : null;
+    const quietEntry = quietTask ? todayCalendarEntries.find((entry) => entry.taskId === quietTask.id) ?? null : null;
+    const focusTask = quietTask && !quietEntry?.completed ? quietTask : nextTask;
+    const focusEntry = quietTask && !quietEntry?.completed ? quietEntry : nextEntry;
+    const focusTitle = quietTask && !quietEntry?.completed ? quietTask.title : nextTitle;
+    const focusMeta = quietTask && !quietEntry?.completed
+      ? `${focusEntry ? getCalendarEntryUnitLabel(focusEntry) + " · " : ""}${courseLookup.get(quietTask.courseId)?.name ?? "General focus"}${quietTask.dueDate ? ` · due ${formatDate(quietTask.dueDate)}` : ""}`
+      : nextMeta;
+    const otherOpenTasks = todayCalendarEntries
+      .filter((entry) => !entry.completed && entry.taskId !== focusTask?.id)
+      .map((entry) => ({ entry, task: taskLookup.get(entry.taskId) }))
+      .filter((row): row is { entry: CalendarEntry; task: Task } => Boolean(row.task));
+
+    return (
+      <div className="wabi-quiet-overlay">
+        <div className="wabi-quiet-inner">
+          <span className="wabi-eyebrow">NOW</span>
+          <div className="wabi-quiet-task-picker">
+            <button type="button" className="wabi-quiet-title" onClick={() => setWabiQuietTaskMenuOpen((open) => !open)}>
+              {focusTitle}
+            </button>
+            {wabiQuietTaskMenuOpen ? (
+              <div className="wabi-quiet-dropdown" role="listbox">
+                {otherOpenTasks.length ? otherOpenTasks.map(({ entry, task }) => (
+                  <button key={entry.id} type="button" className="wabi-quiet-dropdown-item" onClick={() => focusTaskInQuietMode(task)}>
+                    <span>{task.title}</span>
+                    <em>{courseLookup.get(task.courseId)?.name ?? "General"}</em>
+                  </button>
+                )) : (
+                  <span className="wabi-quiet-dropdown-empty">Nothing else planned for today.</span>
+                )}
+              </div>
+            ) : null}
+          </div>
+          <p className="wabi-quiet-meta">{focusMeta}</p>
+          <div className="wabi-quiet-clock">{formatClock(state.timer.remainingSeconds)}</div>
+          <div className="wabi-quiet-actions">
+            <button type="button" className="wabi-btn-solid" onClick={() => (state.timer.running ? pauseTimer() : startTimer())}>{state.timer.running ? "PAUSE" : "START"}</button>
+            <button type="button" className="wabi-btn-outline" onClick={completeSessionManually}>DONE, LOG IT</button>
+          </div>
+          <button type="button" className="wabi-quiet-leave" onClick={() => setWabiQuietMode(false)}>LEAVE QUIET MODE</button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderWabiSidebar() {
+    const wabiTabLabels: Record<TabKey, string> = { dashboard: "Today", planner: "Plan", timer: "Timer", vault: "Notes", break: "Rest", friends: "Circle" };
+    const wabiTabKanji: Record<TabKey, string> = { dashboard: "今日", planner: "計画", timer: "時計", vault: "記録", break: "休み", friends: "仲間" };
+    const { goalProgress } = getFieldDashboardData();
+    const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
+    return (
+      <aside className="wabi-sidebar">
+        <div className="wabi-brand">
+          <span className="wabi-brand-mark" />
+          <span className="wabi-brand-name">Kokoro</span>
+        </div>
+        <div className="wabi-health" title="Heuristic score based on task progress, overdue work, and exam pressure.">
+          <div className="wabi-health-ring">
+            <svg width="36" height="36" style={{ transform: "rotate(-90deg)" }}>
+              <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--ring-track)" strokeWidth="4" />
+              <circle
+                cx="18" cy="18" r="15.5" fill="none" stroke={scoreColor} strokeWidth="4"
+                strokeDasharray="97.39"
+                strokeDashoffset={97.39 - (overallHealth / 100) * 97.39}
+                strokeLinecap="round"
+                style={{ transition: "stroke-dashoffset 0.7s cubic-bezier(0.2,0.7,0.3,1)" }}
+              />
+            </svg>
+            <div className="wabi-health-ring-value">{overallHealth}</div>
+          </div>
+          <div>
+            <div className="wabi-eyebrow">Overall</div>
+            <span className="wabi-health-label" style={{ color: scoreColor }}>{healthLabel}</span>
+          </div>
+        </div>
+
+        <div className="wabi-toolbar">
+          <button
+            type="button"
+            className="wabi-toolbar-button"
+            onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            title="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.5 6.5 0 0 0 21 12.8z" />
+              </svg>
+            )}
+          </button>
+          {state.settings.showHelpButton !== false ? (
+            <button type="button" className="wabi-toolbar-button" onClick={openMenuHelp} aria-label="Open menu help" title="Menu help">
+              ?
+            </button>
+          ) : null}
+          <div className="wabi-toolbar-menu-wrap">
+            <button
+              type="button"
+              className="wabi-toolbar-button"
+              aria-label="Open menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((current) => !current)}
+            >
+              <span className="hamburger-button-icon">
+                <span />
+                <span />
+                <span />
+              </span>
+            </button>
+            {menuOpen ? (
+              <div className="topbar-menu wabi-toolbar-menu" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    downloadBackup(state);
+                    setMenuOpen(false);
+                  }}
+                >
+                  Backup JSON
+                </button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+        <nav className="wabi-nav" aria-label="Primary navigation">
+          {primaryTabs.filter(({ id }) => visibleTabs[id] !== false).map(({ id: key }) => {
+            const active = state.activeTab === key && !wabiQuietMode;
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`wabi-nav-item ${active ? "active" : ""}`}
+                onClick={() => {
+                  setWabiQuietMode(false);
+                  setActiveTab(key);
+                }}
+              >
+                <span className="wabi-nav-label">
+                  <span>{wabiTabLabels[key]}</span>
+                  {active ? <em>{wabiTabKanji[key]}</em> : null}
+                  {key === "friends" && hasUnreadSocial ? <span className="nav-badge" /> : null}
+                </span>
+                <span className="wabi-nav-sub">{key}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <span className="wabi-sidebar-spacer" />
+        <div className="wabi-sidebar-foot">
+          <div className="wabi-eyebrow">TENDED TODAY</div>
+          <div className="wabi-foot-time">{formatMinutes(todayMinutes)}</div>
+          <div className="wabi-foot-track"><div style={{ width: `${goalProgress}%` }} /></div>
+          <button type="button" className="wabi-quiet-link" onClick={() => setWabiQuietMode((current) => !current)}>
+            {wabiQuietMode ? "← BACK TO THE APP" : "QUIET MODE →"}
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  function renderWabiSabiDashboard() {
+    const { todayLabel, dailyGoalMinutes, nextEntry, nextTask, nextTitle, nextMeta, queueCount } = getFieldDashboardData();
+    const minutesToGoal = Math.max(0, dailyGoalMinutes - todayMinutes);
+    const remainingLabel = queueCount > 0 ? `${queueCount} open · ${minutesToGoal > 0 ? `${formatMinutes(minutesToGoal)} to today's goal` : "goal met"}` : "goal met";
+
+    return (
+      <section className="wabi-dashboard fade-up">
+        <div className="wabi-today-head">
+          <div>
+            <p className="wabi-eyebrow">TODAY</p>
+            <h2>{todayLabel}</h2>
+          </div>
+          <span className="wabi-remaining">{remainingLabel}</span>
+        </div>
+
+        <div className="wabi-one-thing">
+          <p className="wabi-eyebrow accent">ONE THING</p>
+          <h3>{nextTitle}</h3>
+          <p className="wabi-meta">{nextMeta}</p>
+          <div className="wabi-one-thing-actions">
+            {nextTask ? (
+              <button type="button" className="wabi-btn-solid" onClick={() => focusTaskFromDashboard(nextTask)}>START</button>
+            ) : null}
+            {nextEntry ? (
+              <button type="button" className="wabi-btn-outline" onClick={() => toggleCalendarEntry(nextEntry.id)}>MARK DONE</button>
+            ) : null}
+            <button type="button" className="wabi-text-link" onClick={openTodayTodoDrawer}>SOMETHING ELSE</button>
+          </div>
+        </div>
+
+        <div className="wabi-task-list-head">
+          <span className="wabi-eyebrow">PLANNED TODAY</span>
+        </div>
+        <div className="wabi-task-list" data-tour="dashboard-urgent">
+          {todayCalendarEntries.length ? (
+            todayCalendarEntries.map((entry) => {
+              const task = taskLookup.get(entry.taskId);
+              const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
+              const title = task?.title ?? entry.adHocTitle ?? "Calendar task";
+              return (
+                <div className="wabi-task-row" key={entry.id}>
+                  <button
+                    type="button"
+                    className={`wabi-task-dot ${entry.completed ? "done" : ""}`}
+                    onClick={() => toggleCalendarEntry(entry.id)}
+                    aria-label={entry.completed ? "Mark not done" : "Mark done"}
+                  />
+                  <button
+                    type="button"
+                    className={`wabi-task-title ${entry.completed ? "done" : ""}`}
+                    onClick={() => (task ? startEditingTask(task) : openCalendarDrawer(entry.date))}
+                  >
+                    {title}
+                  </button>
+                  <span className="wabi-task-subject">{course?.name ?? "General"}</span>
+                  <span className="wabi-task-amount">{formatUnitAmount(getCalendarEntryAmount(entry))}</span>
+                  <span className="wabi-task-due">{task?.dueDate ? formatDate(task.dueDate) : formatTimeRange(entry)}</span>
+                </div>
+              );
+            })
+          ) : (
+            <p className="wabi-empty">Nothing planned today. Add tasks from the planner calendar.</p>
+          )}
+        </div>
+        <p className="wabi-hint">Click a title to edit it. Click the mark to close it out. Nothing here asks for confirmation.</p>
+      </section>
+    );
+  }
+
   function renderFieldPlannerTaskModal() {
     if (!fieldPlannerTaskMode) return null;
 
@@ -9111,10 +9569,10 @@ function App() {
                 ))}
               </div>
               {themePanelView === "themes" ? (
-                appStyle === "field-notebook" ? (
+                appStyle !== "modern" ? (
                   <div className="arena-empty">
                     <strong>Coming soon</strong>
-                    <span>Field Notebook doesn't support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
+                    <span>{appStyle === "field-notebook" ? "Field Notebook" : "Wabi-Sabi"} doesn't support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
                   </div>
                 ) : (
                   <div className="theme-choice-grid">
@@ -9449,6 +9907,8 @@ function App() {
       ) : null}
 
       <div className={`shell ${showWindowTitlebar ? "with-window-titlebar" : ""}`} style={{ "--accent": state.settings.accent } as CSSProperties}>
+      {appStyle === "wabi-sabi" ? renderWabiSidebar() : null}
+      {appStyle === "wabi-sabi" && wabiQuietMode ? renderWabiQuietMode() : null}
       <header className="topbar">
         <div className="brand-cluster">
           <TimerBrandMark phase={timerBrandPhase(state.timer)} />
@@ -9820,7 +10280,9 @@ function App() {
 
       {state.activeTab === "dashboard" && appStyle === "field-notebook" ? renderFieldNotebookDashboard() : null}
 
-      {state.activeTab === "dashboard" && appStyle !== "field-notebook" ? (
+      {state.activeTab === "dashboard" && appStyle === "wabi-sabi" ? renderWabiSabiDashboard() : null}
+
+      {state.activeTab === "dashboard" && appStyle === "modern" ? (
         <section className="dashboard-design fade-up">
           <div className="dashboard-design-head">
             <div>
@@ -9910,7 +10372,7 @@ function App() {
       ) : null}
 
       {state.activeTab === "planner" ? (
-        <section className={`planner-stack ${appStyle === "field-notebook" ? "fn-planner" : ""}`}>
+        <section className={`planner-stack ${appStyle === "field-notebook" ? "fn-planner" : appStyle === "wabi-sabi" ? "wabi-planner" : ""}`}>
           {appStyle === "field-notebook" ? (
             <aside className="fn-planner-rail" aria-label="Planner folders">
               <div className="fn-rail-section">
@@ -10709,7 +11171,7 @@ function App() {
       ) : null}
 
       {state.activeTab === "timer" ? (
-        <section className={`timer-grid ${appStyle === "field-notebook" ? "fn-timer" : ""}`}>
+        <section className={`timer-grid ${appStyle === "field-notebook" ? "fn-timer" : appStyle === "wabi-sabi" ? "wabi-timer" : ""}`}>
           <article className="panel-card timer-main-card">
             <div className="section-head">
               <div>
@@ -10888,7 +11350,7 @@ function App() {
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
                   <span className="timer-context-title">{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
-                {appStyle !== "field-notebook" ? (
+                {appStyle === "modern" ? (
                   <strong>{formatClock(state.timer.remainingSeconds)}</strong>
                 ) : timerFaceEditing ? (
                   <input
@@ -10910,7 +11372,7 @@ function App() {
                     autoFocus
                   />
                 ) : (
-                  <button type="button" className="timer-face-time" onClick={startTimerFaceEditing} disabled={appStyle !== "field-notebook" || state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}>
+                  <button type="button" className="timer-face-time" onClick={startTimerFaceEditing} disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}>
                     {formatClock(state.timer.remainingSeconds)}
                   </button>
                 )}
@@ -11199,7 +11661,7 @@ function App() {
       ) : null}
 
       {state.activeTab === "vault" ? (
-        <section className={`vault-shell ${appStyle === "field-notebook" ? "fn-vault" : ""}`}>
+        <section className={`vault-shell ${appStyle === "field-notebook" ? "fn-vault" : appStyle === "wabi-sabi" ? "wabi-vault" : ""}`}>
           {appStyle === "field-notebook" ? (
             <aside className="fn-vault-rail" aria-label="Vault drawers">
               <div className="fn-vault-status">
@@ -11697,15 +12159,46 @@ function App() {
       ) : null}
 
       {state.activeTab === "friends" ? (
-        <section className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : ""}`}>
-          {appStyle === "field-notebook" ? null : <ArenaBg />}
+        <section className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : appStyle === "wabi-sabi" ? "wabi-circle-root" : ""}`}>
+          {appStyle === "modern" ? <ArenaBg /> : null}
           <div className="arena-hero-header">
-            <span className="arena-hero-title">{appStyle === "field-notebook" ? "Study Circle" : "Study Arena"}</span>
-            <span className="arena-hero-sub">{appStyle === "field-notebook" ? "Attendance sheet · friends · squads · quiet accountability" : "Compete. Focus. Rise."}</span>
+            <span className="arena-hero-title">{appStyle === "field-notebook" ? "Study Circle" : appStyle === "wabi-sabi" ? "Circle" : "Study Arena"}</span>
+            <span className="arena-hero-sub">{appStyle === "field-notebook" ? "Attendance sheet · friends · squads · quiet accountability" : appStyle === "wabi-sabi" ? "Who is sitting down today. Attendance, not a leaderboard." : "Compete. Focus. Rise."}</span>
+            {appStyle === "wabi-sabi" ? (
+              <button
+                type="button"
+                className={`wabi-competitive-toggle ${wabiCircleCompetitive ? "active" : ""}`}
+                onClick={() => setWabiCircleCompetitive((current) => {
+                  const next = !current;
+                  if (!next && socialSubtab === "leaderboard") setSocialSubtab("feed");
+                  return next;
+                })}
+              >
+                {wabiCircleCompetitive ? "COMPETITIVE ON · SHOWING LEADERBOARD" : "TURN ON COMPETITIVE →"}
+              </button>
+            ) : null}
           </div>
 
+          {appStyle === "wabi-sabi" ? (
+            <div className="wabi-attendance" data-tour="social-live">
+              {state.social.friends.length ? (
+                state.social.friends.slice(0, 8).map((friend) => {
+                  const sitting = isRecentlyActive(friend.lastSeenAt);
+                  return (
+                    <div key={friend.userId} className="wabi-attendance-row" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openFriendProfile(friend); } }}>
+                      <span className="wabi-attendance-name">{friend.displayName}</span>
+                      <span className={`wabi-attendance-state ${sitting ? "sitting" : "resting"}`}>{sitting ? "sitting" : "resting"}</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="wabi-empty">No friends yet. Add one from the Friends tab below.</p>
+              )}
+            </div>
+          ) : null}
+
           <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
-            {socialSubtabs.map((space) => {
+            {socialSubtabs.filter((space) => appStyle !== "wabi-sabi" || space.id !== "leaderboard" || wabiCircleCompetitive).map((space) => {
               const active = space.id === socialSubtab;
               return (
                 <button key={space.id} type="button" data-tour={`social-${space.id}-tab`} className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
@@ -12750,7 +13243,9 @@ function App() {
         </div>
       ) : null}
 
-      {state.activeTab === "break" ? (
+      {state.activeTab === "break" && appStyle === "wabi-sabi" ? renderWabiBreakRoom() : null}
+
+      {state.activeTab === "break" && appStyle !== "wabi-sabi" ? (
         <section className={`break-grid ${appStyle === "field-notebook" ? "fn-break" : ""}`}>
           <article className="panel-card break-main-card">
             <div className="section-head">

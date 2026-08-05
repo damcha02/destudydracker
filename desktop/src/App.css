@@ -12435,7 +12435,7 @@ input[type="color"] {
 
 .travle-map-country {
   vector-effect: non-scaling-stroke;
-  fill: #413d38;
+  fill: #302e2b;
   stroke: transparent;
   stroke-width: 0;
   transition: fill 120ms ease, stroke 120ms ease, opacity 120ms ease;
@@ -16752,5 +16752,1083 @@ input[type="color"] {
 
   :root[data-app-style="field-notebook"] .fn-break .break-card-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Wabi-Sabi 侘寂 style: quiet paper, ink, sage, and vermilion.
+   Shares all state/logic with Modern and Field Notebook. Base
+   colors/fonts/radii come from the :root[data-app-style="wabi-sabi"]
+   tokens in index.css; this section reskins shared chrome (shell,
+   buttons, cards, menus) and styles the style's own new elements
+   (sidebar, Today, Quiet Mode, Break Room, Circle attendance).
+   ============================================================ */
+
+:root[data-app-style="wabi-sabi"] body {
+  background: var(--wabi-desk);
+}
+
+:root[data-app-style="wabi-sabi"] .window-titlebar {
+  height: 30px;
+  padding: 0 12px;
+  background: var(--wabi-paper-2);
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .window-titlebar-title {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] .shell {
+  width: min(1450px, calc(100vw - 186px - 48px));
+  margin: 0 0 0 186px;
+  padding: 22px 32px 56px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  /* state.settings.accent is set inline on this element (style={{ "--accent": ... }});
+     it would otherwise clobber the sage token for every shared component inside it. */
+  --accent: var(--wabi-sage) !important;
+  --accent-strong: var(--wabi-sage-deep) !important;
+  --accent-soft: color-mix(in oklch, var(--wabi-sage) 12%, transparent) !important;
+  --accent-line: color-mix(in oklch, var(--wabi-sage) 34%, transparent) !important;
+}
+
+:root[data-app-style="wabi-sabi"] .shell.with-window-titlebar {
+  padding-top: 60px;
+}
+
+:root[data-app-style="wabi-sabi"] .tab-row {
+  display: none;
+}
+
+/* -------- broad chrome reset: buttons, cards, menus -------- */
+
+:root[data-app-style="wabi-sabi"] .page-help-button,
+:root[data-app-style="wabi-sabi"] .theme-toggle,
+:root[data-app-style="wabi-sabi"] .hamburger-button,
+:root[data-app-style="wabi-sabi"] .ghost-button,
+:root[data-app-style="wabi-sabi"] button[type="submit"],
+:root[data-app-style="wabi-sabi"] .arena-btn,
+:root[data-app-style="wabi-sabi"] .timer-primary-action,
+:root[data-app-style="wabi-sabi"] .timer-save-action,
+:root[data-app-style="wabi-sabi"] .timer-reset-action,
+:root[data-app-style="wabi-sabi"] .timer-maximise-action,
+:root[data-app-style="wabi-sabi"] .preset-chip,
+:root[data-app-style="wabi-sabi"] .layout-control button,
+:root[data-app-style="wabi-sabi"] .theme-mode-row button,
+:root[data-app-style="wabi-sabi"] .theme-panel-switch button,
+:root[data-app-style="wabi-sabi"] .counter-row button,
+:root[data-app-style="wabi-sabi"] .task-row-actions button,
+:root[data-app-style="wabi-sabi"] .inline-form-actions button,
+:root[data-app-style="wabi-sabi"] .control-row button {
+  border: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: var(--wabi-paper-1);
+  color: var(--ink-3);
+  box-shadow: none;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] button[type="submit"],
+:root[data-app-style="wabi-sabi"] .arena-btn--send,
+:root[data-app-style="wabi-sabi"] .timer-primary-action {
+  background: var(--wabi-ink);
+  border-color: var(--wabi-ink);
+  color: var(--on-accent);
+  font-family: var(--font-serif);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-app-style="wabi-sabi"] .topbar-menu,
+:root[data-app-style="wabi-sabi"] .settings-panel,
+:root[data-app-style="wabi-sabi"] .help-modal {
+  border: var(--wabi-rule-hard);
+  border-radius: 0;
+  background: var(--wabi-paper);
+  box-shadow: var(--shadow-lg);
+}
+
+:root[data-app-style="wabi-sabi"] .settings-panel-head,
+:root[data-app-style="wabi-sabi"] .help-modal-head {
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .theme-panel-switch,
+:root[data-app-style="wabi-sabi"] .theme-mode-row,
+:root[data-app-style="wabi-sabi"] .layout-control {
+  border: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: var(--wabi-paper-1);
+}
+
+:root[data-app-style="wabi-sabi"] .theme-panel-switch button.active,
+:root[data-app-style="wabi-sabi"] .theme-mode-row button.active,
+:root[data-app-style="wabi-sabi"] .layout-control button.active {
+  border-color: var(--wabi-ink);
+  background: var(--wabi-paper);
+  color: var(--wabi-ink);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .theme-choice-card,
+:root[data-app-style="wabi-sabi"] .delete-data-card,
+:root[data-app-style="wabi-sabi"] .settings-update-card,
+:root[data-app-style="wabi-sabi"] .linux-update-command-card,
+:root[data-app-style="wabi-sabi"] .options-intro-card,
+:root[data-app-style="wabi-sabi"] .tab-toggle-row {
+  border: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: var(--wabi-paper-1);
+}
+
+:root[data-app-style="wabi-sabi"] .theme-choice-card.active,
+:root[data-app-style="wabi-sabi"] .style-choice-card.active {
+  border-color: var(--wabi-ink);
+  background: var(--wabi-paper);
+}
+
+:root[data-app-style="wabi-sabi"] .panel-card,
+:root[data-app-style="wabi-sabi"] .design-card,
+:root[data-app-style="wabi-sabi"] .arena-panel,
+:root[data-app-style="wabi-sabi"] .arena-player-card,
+:root[data-app-style="wabi-sabi"] .arena-leaderboard,
+:root[data-app-style="wabi-sabi"] .feed-card,
+:root[data-app-style="wabi-sabi"] .milestone,
+:root[data-app-style="wabi-sabi"] .week-compare,
+:root[data-app-style="wabi-sabi"] .vault-document,
+:root[data-app-style="wabi-sabi"] .course-sheet,
+:root[data-app-style="wabi-sabi"] .timer-main-card,
+:root[data-app-style="wabi-sabi"] .session-log-card,
+:root[data-app-style="wabi-sabi"] .calculator-card,
+:root[data-app-style="wabi-sabi"] .completion-card,
+:root[data-app-style="wabi-sabi"] .semester-overview-card {
+  border: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: var(--wabi-paper);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-card {
+  background: var(--wabi-paper-1);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-card.today {
+  background: var(--wabi-paper-2);
+  border-color: var(--wabi-sage);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-card.selected {
+  background: var(--wabi-paper);
+  border-color: var(--wabi-ink);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] input,
+:root[data-app-style="wabi-sabi"] textarea,
+:root[data-app-style="wabi-sabi"] select {
+  border-radius: 0;
+  font-family: var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] h1,
+:root[data-app-style="wabi-sabi"] h2,
+:root[data-app-style="wabi-sabi"] h3 {
+  font-family: var(--font-serif);
+  letter-spacing: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .dashboard-design-head h2,
+:root[data-app-style="wabi-sabi"] .arena-hero-title,
+:root[data-app-style="wabi-sabi"] .arena-player-copy h2,
+:root[data-app-style="wabi-sabi"] .arena-leaderboard h2,
+:root[data-app-style="wabi-sabi"] .arena-panel h3,
+:root[data-app-style="wabi-sabi"] .panel-card h2,
+:root[data-app-style="wabi-sabi"] .panel-card h3,
+:root[data-app-style="wabi-sabi"] .settings-panel-head h2 {
+  color: var(--wabi-ink);
+  font-family: var(--font-serif);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .brand-cluster {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .topbar-actions {
+  display: none !important;
+}
+
+:root[data-app-style="wabi-sabi"] .topbar {
+  display: none;
+}
+
+.wabi-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 22px 20px;
+}
+
+.wabi-toolbar-button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  color: var(--wabi-muted);
+  font: 400 13px var(--font-sans);
+}
+
+.wabi-toolbar-button:hover {
+  border-color: var(--wabi-ink);
+  color: var(--wabi-ink);
+}
+
+.hamburger-button-icon {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hamburger-button-icon span {
+  width: 14px;
+  height: 1.5px;
+  background: currentColor;
+}
+
+.wabi-toolbar-menu-wrap {
+  position: relative;
+}
+
+.wabi-toolbar-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 950;
+  width: 200px;
+}
+
+.wabi-health {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 22px 20px;
+}
+
+.wabi-health-ring {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex: none;
+}
+
+.wabi-health-ring-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--wabi-ink);
+}
+
+.wabi-health-label {
+  font: 600 11.5px var(--font-sans);
+}
+
+/* -------- sidebar -------- */
+
+.wabi-sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 186px;
+  display: flex;
+  flex-direction: column;
+  background: var(--wabi-paper-1);
+  border-right: var(--wabi-rule-soft);
+  z-index: 900;
+}
+
+:root[data-app-style="wabi-sabi"] .shell.with-window-titlebar .wabi-sidebar {
+  top: 30px;
+}
+
+.wabi-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 26px 22px 18px;
+}
+
+.wabi-brand-mark {
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--wabi-sage);
+  border-radius: 50%;
+  flex: none;
+}
+
+.wabi-brand-name {
+  font: 500 15px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-nav {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.wabi-nav-item {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+  padding: 11px 22px;
+  border-left: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wabi-nav-item:hover {
+  background: var(--wabi-paper-2);
+}
+
+.wabi-nav-item.active {
+  border-left-color: var(--wabi-sage);
+}
+
+.wabi-nav-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: 400 14.5px var(--font-serif);
+  color: var(--wabi-muted);
+  position: relative;
+}
+
+.wabi-nav-item.active .wabi-nav-label {
+  font-weight: 500;
+  color: var(--wabi-ink);
+}
+
+.wabi-nav-label em {
+  font: 400 12px var(--font-serif);
+  font-style: normal;
+  color: var(--wabi-vermilion);
+}
+
+.wabi-nav-sub {
+  display: none;
+}
+
+.wabi-sidebar-spacer {
+  flex: 1;
+}
+
+.wabi-sidebar-foot {
+  padding: 18px 22px 22px;
+  border-top: var(--wabi-rule-soft);
+}
+
+.wabi-sidebar-foot .wabi-eyebrow {
+  letter-spacing: 0.18em;
+}
+
+.wabi-foot-time {
+  font: 500 22px var(--font-serif);
+  color: var(--wabi-ink);
+  margin-top: 3px;
+}
+
+.wabi-foot-track {
+  height: 5px;
+  background: var(--line);
+  margin-top: 8px;
+}
+
+.wabi-foot-track > div {
+  height: 5px;
+  background: var(--wabi-sage);
+}
+
+.wabi-quiet-link {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.1em;
+  color: var(--wabi-sage);
+  border-top: 1px dotted var(--line);
+  padding-top: 14px;
+}
+
+.wabi-quiet-link:hover {
+  color: var(--wabi-vermilion);
+}
+
+/* -------- shared primitives -------- */
+
+:root[data-app-style="wabi-sabi"] .wabi-eyebrow {
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+.wabi-eyebrow.accent {
+  color: var(--wabi-vermilion);
+}
+
+.wabi-btn-solid {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font: 500 12px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--wabi-paper);
+  background: var(--wabi-ink);
+  padding: 12px 26px;
+}
+
+.wabi-btn-solid:hover {
+  background: var(--wabi-sage);
+}
+
+.wabi-btn-outline {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font: 400 12px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--wabi-ink);
+  border: 1px solid var(--line);
+  padding: 11px 18px;
+}
+
+.wabi-btn-outline:hover {
+  border-color: var(--wabi-ink);
+}
+
+.wabi-text-link {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font: 400 12px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+.wabi-text-link:hover {
+  color: var(--wabi-ink);
+}
+
+.wabi-empty,
+.wabi-hint,
+.wabi-faint-text {
+  font: 400 12px var(--font-sans);
+  color: var(--wabi-faint);
+}
+
+/* -------- Today (dashboard) -------- */
+
+.wabi-dashboard {
+  padding: 6px 0 40px;
+  font-family: var(--font-sans);
+  color: var(--wabi-ink);
+}
+
+.wabi-today-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+.wabi-today-head h2 {
+  font: 500 26px var(--font-serif);
+  color: var(--wabi-ink);
+  margin: 4px 0 0;
+}
+
+.wabi-remaining {
+  font: 400 12.5px var(--font-sans);
+  letter-spacing: 0.06em;
+  color: var(--wabi-muted);
+}
+
+.wabi-one-thing {
+  margin-top: 26px;
+  background: var(--wabi-paper-1);
+  border: var(--wabi-rule-soft);
+  padding: 28px 30px 26px;
+}
+
+.wabi-one-thing h3 {
+  font: 500 34px/1.2 var(--font-serif);
+  color: var(--wabi-ink);
+  margin: 8px 0 0;
+}
+
+.wabi-meta {
+  font: 400 14px var(--font-sans);
+  color: var(--wabi-muted);
+  margin: 6px 0 0;
+}
+
+.wabi-one-thing-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 22px;
+  flex-wrap: wrap;
+}
+
+.wabi-task-list-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 30px;
+  border-bottom: var(--wabi-rule-hard);
+  padding-bottom: 8px;
+}
+
+.wabi-task-list {
+  margin-top: 6px;
+}
+
+.wabi-task-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 160px 90px 76px;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+.wabi-task-dot {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wabi-faint);
+}
+
+.wabi-task-dot:hover {
+  border-color: var(--wabi-sage);
+}
+
+.wabi-task-dot.done {
+  background: var(--wabi-sage);
+  border-color: var(--wabi-sage);
+}
+
+.wabi-task-title {
+  all: unset;
+  box-sizing: border-box;
+  cursor: text;
+  font: 400 16px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-task-title:hover {
+  color: var(--wabi-sage);
+}
+
+.wabi-task-title.done {
+  color: var(--wabi-faint);
+  text-decoration: line-through;
+}
+
+.wabi-task-subject {
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.08em;
+  color: var(--wabi-muted);
+}
+
+.wabi-task-amount {
+  font: 400 12.5px var(--font-sans);
+  color: var(--ink-3);
+}
+
+.wabi-task-due {
+  text-align: right;
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.06em;
+  color: var(--wabi-muted);
+}
+
+.wabi-hint {
+  margin-top: 16px;
+  display: block;
+}
+
+/* -------- Quiet Mode overlay -------- */
+
+.wabi-quiet-overlay {
+  position: fixed;
+  top: 0;
+  left: 186px;
+  right: 0;
+  bottom: 0;
+  background: var(--wabi-paper);
+  z-index: 950;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 60px;
+  overflow-y: auto;
+}
+
+:root[data-app-style="wabi-sabi"] .shell.with-window-titlebar .wabi-quiet-overlay {
+  top: 30px;
+}
+
+.wabi-quiet-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0;
+  max-width: 640px;
+}
+
+.wabi-quiet-task-picker {
+  position: relative;
+  margin-top: 18px;
+}
+
+.wabi-quiet-title {
+  all: unset;
+  cursor: pointer;
+  font: 500 46px/1.25 var(--font-serif);
+  color: var(--wabi-ink);
+  text-align: center;
+  max-width: 620px;
+  text-wrap: pretty;
+}
+
+.wabi-quiet-title:hover {
+  color: var(--wabi-sage);
+}
+
+.wabi-quiet-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 320px;
+  max-width: 420px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--wabi-paper);
+  border: var(--wabi-rule-hard);
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  padding: 6px;
+}
+
+.wabi-quiet-dropdown-item {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  font: 400 14px var(--font-sans);
+  color: var(--wabi-ink);
+  border-bottom: var(--wabi-rule-dot);
+}
+
+.wabi-quiet-dropdown-item:last-child {
+  border-bottom: 0;
+}
+
+.wabi-quiet-dropdown-item:hover {
+  background: var(--wabi-paper-1);
+}
+
+.wabi-quiet-dropdown-item em {
+  font-style: normal;
+  color: var(--wabi-muted);
+  font-size: 11.5px;
+}
+
+.wabi-quiet-dropdown-empty {
+  display: block;
+  padding: 10px 12px;
+  font: 400 13px var(--font-sans);
+  color: var(--wabi-faint);
+}
+
+.wabi-quiet-meta {
+  font: 400 15px var(--font-sans);
+  color: var(--wabi-muted);
+  margin-top: 10px;
+}
+
+.wabi-quiet-clock {
+  font: 500 86px var(--font-serif);
+  color: var(--wabi-ink);
+  margin-top: 44px;
+  letter-spacing: 0.02em;
+}
+
+.wabi-quiet-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 30px;
+}
+
+.wabi-quiet-leave {
+  all: unset;
+  cursor: pointer;
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.14em;
+  color: var(--wabi-faint);
+  margin-top: 44px;
+}
+
+.wabi-quiet-leave:hover {
+  color: var(--wabi-ink);
+}
+
+/* -------- Break Room -------- */
+
+.wabi-break-grid {
+  padding: 6px 0 40px;
+  font-family: var(--font-sans);
+  color: var(--wabi-ink);
+}
+
+.wabi-rest-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 34px 0 30px;
+  border: var(--wabi-rule-soft);
+  background: var(--wabi-paper-1);
+}
+
+.wabi-rest-ring {
+  width: 96px;
+  height: 96px;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+}
+
+.wabi-rest-card h2 {
+  font: 500 24px var(--font-serif);
+  color: var(--wabi-ink);
+  margin: 24px 0 0;
+}
+
+.wabi-rest-card > p {
+  font: 400 14px/1.7 var(--font-sans);
+  color: var(--wabi-muted);
+  margin: 8px 0 0;
+  max-width: 400px;
+}
+
+.wabi-rest-clock,
+.wabi-rest-clock-input {
+  all: unset;
+  box-sizing: border-box;
+  font: 500 40px var(--font-serif);
+  color: var(--wabi-ink);
+  margin-top: 18px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.wabi-rest-clock:hover:not(:disabled) {
+  color: var(--wabi-sage);
+}
+
+.wabi-rest-clock:disabled {
+  cursor: default;
+}
+
+.wabi-rest-clock-input {
+  cursor: text;
+  border-bottom: 1px solid var(--wabi-vermilion);
+  width: 160px;
+}
+
+.wabi-rest-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+}
+
+.wabi-break-lower {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 30px;
+  margin-top: 30px;
+  align-items: start;
+}
+
+.wabi-xp-water {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 0;
+  border: var(--wabi-rule-soft);
+  background: var(--wabi-paper-1);
+  box-sizing: border-box;
+}
+
+.wabi-xp-water-track {
+  width: 26px;
+  height: 220px;
+  background: var(--line);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.wabi-xp-water-fill {
+  width: 100%;
+  background: var(--wabi-sage);
+  transition: height 300ms ease;
+}
+
+.wabi-xp-water-label {
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.06em;
+  color: var(--wabi-muted);
+}
+
+.wabi-games-col {
+  min-width: 0;
+}
+
+.wabi-eyebrow-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--wabi-ink);
+  padding-bottom: 8px;
+}
+
+.wabi-games-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.wabi-game-card {
+  border: var(--wabi-rule-soft);
+  background: var(--wabi-paper-1);
+  padding: 18px 20px 16px;
+}
+
+.wabi-game-card.unlocked {
+  cursor: default;
+}
+
+.wabi-game-card.celebrating {
+  animation: fadeUp 0.4s ease;
+}
+
+.wabi-game-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wabi-game-head strong {
+  font: 500 18px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-game-tag {
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.14em;
+  color: var(--wabi-vermilion);
+}
+
+.wabi-game-desc {
+  display: block;
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.08em;
+  color: var(--wabi-muted);
+  margin-top: 3px;
+}
+
+.wabi-game-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.wabi-game-progress {
+  font: 400 12px var(--font-sans);
+  color: var(--wabi-muted);
+}
+
+.wabi-pet-rock {
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: var(--wabi-rule-soft);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: center;
+}
+
+/* -------- Circle attendance + competitive toggle -------- */
+
+.wabi-competitive-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+  border: 1px solid var(--line);
+  padding: 8px 14px;
+  margin-top: 12px;
+}
+
+.wabi-competitive-toggle:hover {
+  border-color: var(--wabi-ink);
+  color: var(--wabi-ink);
+}
+
+.wabi-competitive-toggle.active {
+  border-color: var(--wabi-vermilion);
+  color: var(--wabi-vermilion);
+}
+
+.wabi-attendance {
+  margin: 20px 0 4px;
+  max-width: 640px;
+  border-top: var(--wabi-rule-soft);
+}
+
+.wabi-attendance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 4px;
+  border-bottom: var(--wabi-rule-soft);
+  cursor: pointer;
+}
+
+.wabi-attendance-name {
+  font: 400 16px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-attendance-state {
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wabi-faint);
+}
+
+.wabi-attendance-state.sitting {
+  color: var(--wabi-sage);
+}
+
+@media (max-width: 960px) {
+  :root[data-app-style="wabi-sabi"] .shell {
+    width: 100%;
+    margin-left: 0;
+    padding-left: 16px;
+  }
+
+  .wabi-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .wabi-quiet-overlay {
+    left: 0;
+  }
+
+  .wabi-task-row {
+    grid-template-columns: 20px 1fr;
+    row-gap: 4px;
+  }
+
+  .wabi-task-subject,
+  .wabi-task-amount,
+  .wabi-task-due {
+    grid-column: 2;
+  }
+
+  .wabi-break-lower {
+    grid-template-columns: 1fr;
+  }
+
+  .wabi-xp-water {
+    flex-direction: row;
+    height: auto;
+  }
+
+  .wabi-xp-water-track {
+    width: auto;
+    height: 26px;
+    min-height: 0;
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .wabi-xp-water-fill {
+    width: auto;
+    height: 100%;
   }
 }
