@@ -1308,7 +1308,8 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
   { id: "modern", name: "Modern", desc: "Current rounded study dashboard with palette themes.", swatch: "linear-gradient(135deg, #8fb4ff, #98c379)" },
   { id: "field-notebook", name: "Field Notebook", desc: "Paper, ink, course tabs, ruled ledgers, and study-circle social styling.", swatch: "linear-gradient(135deg, #fbf8f0 0 45%, #23211d 45% 55%, #9c5a34 55%)" },
-  { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
+  // Wabi-Sabi not ready yet — hidden from the picker until it ships. Re-add this entry to bring it back:
+  // { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
 ];
 
 function isAppStyle(value: string | null): value is AppStyle {
@@ -9029,6 +9030,477 @@ function App() {
     return fieldDashboardLayout === "quiet" ? renderFieldNotebookQuietDashboard() : renderFieldNotebookFullDashboard();
   }
 
+  function renderTimerLinkStrip() {
+    return (
+      <div className="timer-link-strip" data-tour="timer-links">
+        <label className="field compact-field">
+          <span>Semester</span>
+          <select
+            data-tour="timer-semester-select"
+            value={state.timer.semesterId ?? ""}
+            onChange={(event) => {
+              const semesterId = event.target.value || null;
+              const firstCourse = state.courses.find((course) => course.semesterId === semesterId);
+              setState((current) => ({
+                ...current,
+                timer: { ...current.timer, semesterId, courseId: firstCourse?.id ?? null, taskId: null },
+              }));
+            }}
+          >
+            <option value="">Any semester</option>
+            {state.semesters.map((semester) => (
+              <option key={semester.id} value={semester.id}>{semester.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field compact-field">
+          <span>Course</span>
+          <select
+            data-tour="timer-course-select"
+            value={state.timer.courseId ?? ""}
+            onChange={(event) => {
+              const courseId = event.target.value || null;
+              const course = courseId ? courseLookup.get(courseId) : null;
+              setState((current) => ({
+                ...current,
+                timer: { ...current.timer, semesterId: course?.semesterId ?? current.timer.semesterId, courseId, taskId: null },
+              }));
+            }}
+          >
+            <option value="">No linked course</option>
+            {timerCourses.map((course) => (
+              <option key={course.id} value={course.id}>{course.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field compact-field task-switch-field">
+          <span>Task</span>
+          <select
+            data-tour="timer-task-select"
+            value={state.timer.taskId ?? ""}
+            onChange={(event) => {
+              const taskId = event.target.value || null;
+              const task = taskId ? taskLookup.get(taskId) : null;
+              setState((current) => ({
+                ...current,
+                timer: {
+                  ...current.timer,
+                  semesterId: task?.semesterId ?? current.timer.semesterId,
+                  courseId: task?.courseId ?? current.timer.courseId,
+                  taskId,
+                  goal: task ? task.title : current.timer.goal,
+                },
+              }));
+            }}
+          >
+            <option value="">No linked task</option>
+            {timerSelectableTasks.map((task) => (
+              <option key={task.id} value={task.id}>{task.title}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    );
+  }
+
+  function renderTimerAdvancedPanel() {
+    return (
+      <>
+        <button type="button" className="timer-advanced-toggle ghost-button" data-tour="timer-advanced-toggle" onClick={() => setTimerAdvancedOpen((current) => !current)}>
+          <span>✎ Session log & links</span>
+          <em>optional</em>
+          <strong>{timerAdvancedOpen ? "⌄" : "›"}</strong>
+        </button>
+
+        {timerAdvancedOpen ? (
+          <div className="timer-advanced-panel roomy-top">
+            <div className="section-head compact-headline">
+              <div>
+                <p className="eyebrow">Advanced</p>
+                <h3>Session details and logging</h3>
+              </div>
+              <span className="section-note">Link a course or task, tune minutes, and write notes for the session log.</span>
+            </div>
+
+            <div className="timer-input-grid">
+              <label className="field">
+                <span>Semester</span>
+                <select
+                  value={state.timer.semesterId ?? ""}
+                  onChange={(event) => {
+                    const semesterId = event.target.value || null;
+                    const firstCourse = state.courses.find((course) => course.semesterId === semesterId);
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        semesterId,
+                        courseId: firstCourse?.id ?? null,
+                        taskId: null,
+                      },
+                    }));
+                  }}
+                >
+                  <option value="">Any semester</option>
+                  {state.semesters.map((semester) => (
+                    <option key={semester.id} value={semester.id}>
+                      {semester.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Course</span>
+                <select
+                  value={state.timer.courseId ?? ""}
+                  onChange={(event) => {
+                    const courseId = event.target.value || null;
+                    const course = courseId ? courseLookup.get(courseId) : null;
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        semesterId: course?.semesterId ?? current.timer.semesterId,
+                        courseId,
+                        taskId: null,
+                      },
+                    }));
+                  }}
+                >
+                  <option value="">No linked course</option>
+                  {timerCourses.map((course) => (
+                    <option key={course.id} value={course.id}>
+                      {course.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Task</span>
+                <select
+                  value={state.timer.taskId ?? ""}
+                  onChange={(event) => {
+                    const taskId = event.target.value || null;
+                    const task = taskId ? taskLookup.get(taskId) : null;
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        semesterId: task?.semesterId ?? current.timer.semesterId,
+                        courseId: task?.courseId ?? current.timer.courseId,
+                        taskId,
+                        goal: task ? task.title : current.timer.goal,
+                      },
+                    }));
+                  }}
+                >
+                  <option value="">No linked task</option>
+                  {timerTasks.map((task) => (
+                    <option key={task.id} value={task.id}>
+                      {task.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
+                  onChange={(event) => {
+                    const next = Math.max(1, Number(event.target.value) || 1);
+                    setState((current) => {
+                      const timer = {
+                        ...current.timer,
+                        studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                        examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
+                        presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
+                      };
+                      return {
+                        ...current,
+                        timer: {
+                          ...timer,
+                          remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                        },
+                      };
+                    });
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span>Break minutes</span>
+                <input
+                  type="number"
+                  min="0"
+                  disabled={state.timer.mode === "exam"}
+                  value={state.timer.breakMinutes}
+                  onChange={(event) =>
+                    setState((current) => ({
+                      ...current,
+                      timer: { ...current.timer, breakMinutes: Math.max(0, Number(event.target.value) || 0), presetLabel: "Custom" },
+                    }))
+                  }
+                />
+              </label>
+              <label className="field wide">
+                <span>Goal for this block</span>
+                <input
+                  data-tour="timer-goal"
+                  value={state.timer.goal}
+                  onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, goal: event.target.value } }))}
+                  placeholder="What should exist when the timer ends?"
+                />
+              </label>
+              <label className="field wide">
+                <span>What did you learn?</span>
+                <textarea
+                  data-tour="timer-learned"
+                  value={state.timer.learned}
+                  onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, learned: event.target.value } }))}
+                  placeholder="Short reflection that can go straight into Obsidian later."
+                />
+              </label>
+              <label className="field">
+                <span>What is still weak?</span>
+                <input
+                  data-tour="timer-blocker"
+                  value={state.timer.blocker}
+                  onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, blocker: event.target.value } }))}
+                  placeholder="Weak topic or blocker"
+                />
+              </label>
+              <label className="field">
+                <span>Next step</span>
+                <input
+                  data-tour="timer-next-step"
+                  value={state.timer.nextStep}
+                  onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, nextStep: event.target.value } }))}
+                  placeholder="What comes next?"
+                />
+              </label>
+              <label className="field">
+                <span>Confidence</span>
+                <input
+                  data-tour="timer-confidence"
+                  type="range"
+                  min="1"
+                  max="5"
+                  step="1"
+                  value={state.timer.confidence}
+                  onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, confidence: Number(event.target.value) } }))}
+                />
+                <span className="range-value">{state.timer.confidence}/5</span>
+              </label>
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  function renderWabiTimer() {
+    const phaseWord = state.timer.phase === "break" ? "BREAK"
+      : state.timer.phase === "stopwatch" ? "STOPWATCH"
+      : state.timer.mode === "exam" ? "EXAM"
+      : "WORK";
+    const phaseMinutes = state.timer.phase === "break" ? state.timer.breakMinutes
+      : state.timer.mode === "exam" ? state.timer.examMinutes
+      : state.timer.studyMinutes;
+    const phaseDetail = state.timer.phase === "stopwatch" ? "COUNTING UP" : `${phaseMinutes} MIN`;
+    const todaySessions = state.sessions.filter((session) => isoDate(new Date(session.endedAt)) === calendarToday);
+
+    return (
+      <section className="wabi-timer-grid fade-up">
+        <div className="wabi-timer-head">
+          <p className="wabi-eyebrow">TIMER</p>
+          <h2>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</h2>
+        </div>
+
+        {renderTimerLinkStrip()}
+
+        <div className="wabi-timer-body">
+          <div className="wabi-timer-clock-col">
+            {timerFaceEditing ? (
+              <input
+                className="wabi-timer-clock-input"
+                value={timerFaceDraft}
+                onChange={(event) => setTimerFaceDraft(event.target.value)}
+                onBlur={applyTimerFaceDraft}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    applyTimerFaceDraft();
+                  } else if (event.key === "Escape") {
+                    setTimerFaceEditing(false);
+                    setTimerFaceDraft(formatClock(state.timer.remainingSeconds));
+                  }
+                }}
+                inputMode="numeric"
+                aria-label="Timer duration"
+                autoFocus
+              />
+            ) : (
+              <button
+                type="button"
+                className="wabi-timer-clock"
+                onClick={startTimerFaceEditing}
+                disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}
+              >
+                {formatClock(state.timer.remainingSeconds)}
+              </button>
+            )}
+          </div>
+
+          <div className="wabi-timer-modes-col">
+            <p className="wabi-timer-phase-label">{phaseWord} · {phaseDetail}</p>
+            <div className="wabi-timer-mode-grid" data-tour="timer-presets">
+              {focusPresets.map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  className={`wabi-timer-mode-card ${state.timer.presetLabel === preset.label ? "active" : ""}`}
+                  disabled={state.timer.running}
+                  onClick={() => applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode)}
+                >
+                  <strong>{preset.label.replace(" 25/5", "").replace(" 52/17", "").replace(" 90/20", "")}</strong>
+                  <span>{preset.mode === "endless" ? "counts up" : preset.mode === "exam" ? `${preset.study} min` : `${preset.study} / ${preset.breakMinutes}`}</span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className={`wabi-timer-mode-card ${isCustomTimerPreset ? "active" : ""}`}
+                disabled={state.timer.running}
+                onClick={() =>
+                  setState((current) => ({
+                    ...current,
+                    timer: {
+                      ...current.timer,
+                      presetLabel: "Custom",
+                      mode: "focus",
+                      studyMinutes: defaultTimer.studyMinutes,
+                      breakMinutes: defaultTimer.breakMinutes,
+                      phase: "idle",
+                      running: false,
+                      startedAt: null,
+                      endsAt: null,
+                      remainingSeconds: defaultTimer.studyMinutes * 60,
+                      loggedSplitSeconds: 0,
+                      activeSegments: [],
+                    },
+                  }))
+                }
+              >
+                <strong>Custom</strong>
+                <span>set by hand</span>
+              </button>
+            </div>
+            {isCustomTimerPreset || state.timer.mode === "exam" ? (
+              <div className="wabi-timer-custom-row">
+                <label>
+                  <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
+                    disabled={state.timer.running}
+                    onChange={(event) => {
+                      const next = Math.max(1, Number(event.target.value) || 1);
+                      setState((current) => {
+                        const timer = {
+                          ...current.timer,
+                          studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
+                          examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
+                          presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
+                        };
+                        return {
+                          ...current,
+                          timer: { ...timer, remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer) },
+                        };
+                      });
+                    }}
+                  />
+                </label>
+                {state.timer.mode !== "exam" ? (
+                  <label>
+                    <span>Break minutes</span>
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={state.timer.running}
+                      value={state.timer.breakMinutes}
+                      onChange={(event) =>
+                        setState((current) => ({
+                          ...current,
+                          timer: { ...current.timer, breakMinutes: Math.max(0, Number(event.target.value) || 0), presetLabel: "Custom" },
+                        }))
+                      }
+                    />
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="wabi-timer-actions">
+          <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
+            {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
+          </button>
+          <button type="button" className="wabi-btn-outline" onClick={resetTimer}>RESET</button>
+          <button type="button" className="wabi-btn-outline" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
+            LOG AND CLOSE
+          </button>
+          {state.timer.mode !== "exam" && state.timer.mode !== "endless" ? (
+            <button
+              type="button"
+              className="wabi-text-link"
+              onClick={() => {
+                if (state.timer.phase === "study" && getTimerMinutes(state.timer) > 0) {
+                  setMessage("Save or reset the current study session before switching to break.");
+                  return;
+                }
+                setState((current) => ({
+                  ...current,
+                  timer: {
+                    ...current.timer,
+                    running: false,
+                    phase: current.timer.phase === "break" ? "study" : "break",
+                    remainingSeconds: (current.timer.phase === "break" ? current.timer.studyMinutes : current.timer.breakMinutes) * 60,
+                    startedAt: null,
+                    endsAt: null,
+                    loggedSplitSeconds: 0,
+                    activeSegments: [],
+                  },
+                }));
+              }}
+            >
+              Switch to {state.timer.phase === "break" ? "study" : "break"} →
+            </button>
+          ) : null}
+        </div>
+
+        {renderTimerAdvancedPanel()}
+
+        <div className="wabi-timer-log">
+          <p className="wabi-eyebrow">LOGGED TODAY</p>
+          {todaySessions.length ? (
+            todaySessions.map((session) => (
+              <div className="wabi-timer-log-row" key={session.id}>
+                <span className="wabi-timer-log-time">{new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(session.endedAt))}</span>
+                <span className="wabi-timer-log-title">{session.goal || session.presetLabel}</span>
+                <span className="wabi-timer-log-mins">{formatMinutes(session.minutes)}</span>
+                <button type="button" className="wabi-timer-log-remove" aria-label={`Delete session ${session.goal || session.presetLabel}`} onClick={() => removeSession(session.id)}>×</button>
+              </div>
+            ))
+          ) : (
+            <p className="wabi-empty">Nothing logged yet today.</p>
+          )}
+        </div>
+      </section>
+    );
+  }
+
   function renderWabiBreakRoom() {
     const breakMM = String(Math.floor(breakTimerRemaining / 60)).padStart(2, "0");
     const breakSS = String(breakTimerRemaining % 60).padStart(2, "0");
@@ -11170,8 +11642,10 @@ function App() {
         </section>
       ) : null}
 
-      {state.activeTab === "timer" ? (
-        <section className={`timer-grid ${appStyle === "field-notebook" ? "fn-timer" : appStyle === "wabi-sabi" ? "wabi-timer" : ""}`}>
+      {state.activeTab === "timer" && appStyle === "wabi-sabi" ? renderWabiTimer() : null}
+
+      {state.activeTab === "timer" && appStyle !== "wabi-sabi" ? (
+        <section className={`timer-grid ${appStyle === "field-notebook" ? "fn-timer" : ""}`}>
           <article className="panel-card timer-main-card">
             <div className="section-head">
               <div>
@@ -11226,74 +11700,7 @@ function App() {
                 </button>
               </div>
 
-              <div className="timer-link-strip" data-tour="timer-links">
-                <label className="field compact-field">
-                  <span>Semester</span>
-                  <select
-                    data-tour="timer-semester-select"
-                    value={state.timer.semesterId ?? ""}
-                    onChange={(event) => {
-                      const semesterId = event.target.value || null;
-                      const firstCourse = state.courses.find((course) => course.semesterId === semesterId);
-                      setState((current) => ({
-                        ...current,
-                        timer: { ...current.timer, semesterId, courseId: firstCourse?.id ?? null, taskId: null },
-                      }));
-                    }}
-                  >
-                    <option value="">Any semester</option>
-                    {state.semesters.map((semester) => (
-                      <option key={semester.id} value={semester.id}>{semester.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field compact-field">
-                  <span>Course</span>
-                  <select
-                    data-tour="timer-course-select"
-                    value={state.timer.courseId ?? ""}
-                    onChange={(event) => {
-                      const courseId = event.target.value || null;
-                      const course = courseId ? courseLookup.get(courseId) : null;
-                      setState((current) => ({
-                        ...current,
-                        timer: { ...current.timer, semesterId: course?.semesterId ?? current.timer.semesterId, courseId, taskId: null },
-                      }));
-                    }}
-                  >
-                    <option value="">No linked course</option>
-                    {timerCourses.map((course) => (
-                      <option key={course.id} value={course.id}>{course.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field compact-field task-switch-field">
-                  <span>Task</span>
-                  <select
-                    data-tour="timer-task-select"
-                    value={state.timer.taskId ?? ""}
-                    onChange={(event) => {
-                      const taskId = event.target.value || null;
-                      const task = taskId ? taskLookup.get(taskId) : null;
-                      setState((current) => ({
-                        ...current,
-                        timer: {
-                          ...current.timer,
-                          semesterId: task?.semesterId ?? current.timer.semesterId,
-                          courseId: task?.courseId ?? current.timer.courseId,
-                          taskId,
-                          goal: task ? task.title : current.timer.goal,
-                        },
-                      }));
-                    }}
-                  >
-                    <option value="">No linked task</option>
-                    {timerSelectableTasks.map((task) => (
-                      <option key={task.id} value={task.id}>{task.title}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              {renderTimerLinkStrip()}
 
               {isCustomTimerPreset || state.timer.mode === "exam" ? (
                 <div className="timer-custom-row" data-tour="timer-custom">
@@ -11432,195 +11839,7 @@ function App() {
               ) : null}
             </div>
 
-            <button type="button" className="timer-advanced-toggle ghost-button" data-tour="timer-advanced-toggle" onClick={() => setTimerAdvancedOpen((current) => !current)}>
-              <span>✎ Session log & links</span>
-              <em>optional</em>
-              <strong>{timerAdvancedOpen ? "⌄" : "›"}</strong>
-            </button>
-
-            {timerAdvancedOpen ? (
-              <div className="timer-advanced-panel roomy-top">
-                <div className="section-head compact-headline">
-                  <div>
-                    <p className="eyebrow">Advanced</p>
-                    <h3>Session details and logging</h3>
-                  </div>
-                  <span className="section-note">Link a course or task, tune minutes, and write notes for the session log.</span>
-                </div>
-
-                <div className="timer-input-grid">
-                  <label className="field">
-                    <span>Semester</span>
-                    <select
-                      value={state.timer.semesterId ?? ""}
-                      onChange={(event) => {
-                        const semesterId = event.target.value || null;
-                        const firstCourse = state.courses.find((course) => course.semesterId === semesterId);
-                        setState((current) => ({
-                          ...current,
-                          timer: {
-                            ...current.timer,
-                            semesterId,
-                            courseId: firstCourse?.id ?? null,
-                            taskId: null,
-                          },
-                        }));
-                      }}
-                    >
-                      <option value="">Any semester</option>
-                      {state.semesters.map((semester) => (
-                        <option key={semester.id} value={semester.id}>
-                          {semester.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Course</span>
-                    <select
-                      value={state.timer.courseId ?? ""}
-                      onChange={(event) => {
-                        const courseId = event.target.value || null;
-                        const course = courseId ? courseLookup.get(courseId) : null;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
-                            ...current.timer,
-                            semesterId: course?.semesterId ?? current.timer.semesterId,
-                            courseId,
-                            taskId: null,
-                          },
-                        }));
-                      }}
-                    >
-                      <option value="">No linked course</option>
-                      {timerCourses.map((course) => (
-                        <option key={course.id} value={course.id}>
-                          {course.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>Task</span>
-                    <select
-                      value={state.timer.taskId ?? ""}
-                      onChange={(event) => {
-                        const taskId = event.target.value || null;
-                        const task = taskId ? taskLookup.get(taskId) : null;
-                        setState((current) => ({
-                          ...current,
-                          timer: {
-                            ...current.timer,
-                            semesterId: task?.semesterId ?? current.timer.semesterId,
-                            courseId: task?.courseId ?? current.timer.courseId,
-                            taskId,
-                            goal: task ? task.title : current.timer.goal,
-                          },
-                        }));
-                      }}
-                    >
-                      <option value="">No linked task</option>
-                      {timerTasks.map((task) => (
-                        <option key={task.id} value={task.id}>
-                          {task.title}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>{state.timer.mode === "exam" ? "Exam minutes" : "Focus minutes"}</span>
-                    <input
-                      type="number"
-                      min="1"
-                      value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
-                      onChange={(event) => {
-                        const next = Math.max(1, Number(event.target.value) || 1);
-                        setState((current) => {
-                          const timer = {
-                            ...current.timer,
-                            studyMinutes: current.timer.mode === "exam" ? current.timer.studyMinutes : next,
-                            examMinutes: current.timer.mode === "exam" ? next : current.timer.examMinutes,
-                            presetLabel: current.timer.mode === "exam" ? current.timer.presetLabel : "Custom",
-                          };
-                          return {
-                            ...current,
-                            timer: {
-                              ...timer,
-                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
-                            },
-                          };
-                        });
-                      }}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Break minutes</span>
-                    <input
-                      type="number"
-                      min="0"
-                      disabled={state.timer.mode === "exam"}
-                      value={state.timer.breakMinutes}
-                      onChange={(event) =>
-                        setState((current) => ({
-                          ...current,
-                          timer: { ...current.timer, breakMinutes: Math.max(0, Number(event.target.value) || 0), presetLabel: "Custom" },
-                        }))
-                      }
-                    />
-                  </label>
-                  <label className="field wide">
-                    <span>Goal for this block</span>
-                    <input
-                      data-tour="timer-goal"
-                      value={state.timer.goal}
-                      onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, goal: event.target.value } }))}
-                      placeholder="What should exist when the timer ends?"
-                    />
-                  </label>
-                  <label className="field wide">
-                    <span>What did you learn?</span>
-                    <textarea
-                      data-tour="timer-learned"
-                      value={state.timer.learned}
-                      onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, learned: event.target.value } }))}
-                      placeholder="Short reflection that can go straight into Obsidian later."
-                    />
-                  </label>
-                  <label className="field">
-                    <span>What is still weak?</span>
-                    <input
-                      data-tour="timer-blocker"
-                      value={state.timer.blocker}
-                      onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, blocker: event.target.value } }))}
-                      placeholder="Weak topic or blocker"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Next step</span>
-                    <input
-                      data-tour="timer-next-step"
-                      value={state.timer.nextStep}
-                      onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, nextStep: event.target.value } }))}
-                      placeholder="What comes next?"
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Confidence</span>
-                    <input
-                      data-tour="timer-confidence"
-                      type="range"
-                      min="1"
-                      max="5"
-                      step="1"
-                      value={state.timer.confidence}
-                      onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, confidence: Number(event.target.value) } }))}
-                    />
-                    <span className="range-value">{state.timer.confidence}/5</span>
-                  </label>
-                </div>
-              </div>
-            ) : null}
+            {renderTimerAdvancedPanel()}
           </article>
 
           <article className="panel-card session-log-card" data-tour="timer-session-log">
