@@ -10534,10 +10534,8 @@ function App() {
           {appAnnouncement ? (
             <aside className="update-notice" role="status">
               <div>
-                <strong>New update available.</strong>
-                <span>
-                  Go to <button type="button" onClick={openUpdateSettingsFromNotice}>Settings</button> to update the app.
-                </span>
+                <strong>{appAnnouncement.title}</strong>
+                <span>{appAnnouncement.body}</span>
               </div>
               <button type="button" className="update-notice-close" onClick={() => dismissAppAnnouncement(appAnnouncement.id)} aria-label="Dismiss announcement">
                 X

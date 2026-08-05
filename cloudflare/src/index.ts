@@ -808,7 +808,7 @@ async function scoreSquadDate(env: Env, date: string) {
     const rank = previousAverage !== null && row.averageMinutes === previousAverage ? previousRank : index + 1;
     previousAverage = row.averageMinutes;
     previousRank = rank;
-    const points = rank === 1 ? 2 : rank === 2 ? 1 : 0;
+    const points = squadRankPoints(date, rank);
     return env.DB.prepare(`
       INSERT INTO squad_daily_scores (squad_id, date, average_minutes, total_minutes, member_count, rank, points, scored_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -882,7 +882,7 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
         totalSessions: Number(row.totalSessions),
         averageMinutes,
         rank,
-        points: rank === 1 ? 2 : rank === 2 ? 1 : 0,
+        points: squadRankPoints(date, rank),
       };
     });
   }
