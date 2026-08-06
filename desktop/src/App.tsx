@@ -10,6 +10,7 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
+import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import {
   buildDailyNoteMarkdown,
   calculateAggregateWorkload,
@@ -2670,6 +2671,9 @@ function App() {
   const [breakTimerRunning, setBreakTimerRunning] = useState(false);
   const [breakTimerEditing, setBreakTimerEditing] = useState(false);
   const [breakTimerDraft, setBreakTimerDraft] = useState("");
+  const [wabiRestRoom, setWabiRestRoom] = useState<"games" | "meditation">("games");
+  const [breathOn, setBreathOn] = useState(false);
+  const [breathElapsedSeconds, setBreathElapsedSeconds] = useState(0);
   const [fieldDashboardLayout, setFieldDashboardLayout] = useState<FieldDashboardLayout>(loadFieldDashboardLayout);
   const [dashboardLayout, setDashboardLayout] = useState<DashboardLayout>(loadDashboardLayout);
   const [customDashboardLayout, setCustomDashboardLayout] = useState<DashboardWidgetLayout[]>(loadCustomDashboardLayout);
@@ -3062,6 +3066,20 @@ function App() {
     }, 1000);
     return () => clearInterval(id);
   }, [breakTimerRunning]);
+
+  useEffect(() => {
+    if (!breathOn) return;
+    const id = setInterval(() => {
+      setBreathElapsedSeconds((current) => {
+        if (current >= 75) {
+          setBreathOn(false);
+          return 0;
+        }
+        return current + 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [breathOn]);
 
   useEffect(() => {
     if (palette === "default") {
@@ -6818,6 +6836,11 @@ function App() {
     setBreakTimerRemaining(breakTimerMinutes * 60);
   }
 
+  function toggleBreathingExercise() {
+    setBreathOn((current) => !current);
+    setBreathElapsedSeconds(0);
+  }
+
   function startBreakTimerEditing() {
     if (breakTimerRunning) return;
     setBreakTimerDraft(formatClock(breakTimerRemaining));
@@ -9614,132 +9637,99 @@ function App() {
   function renderWabiBreakRoom() {
     const breakMM = String(Math.floor(breakTimerRemaining / 60)).padStart(2, "0");
     const breakSS = String(breakTimerRemaining % 60).padStart(2, "0");
+    const breakTotalSeconds = Math.max(1, breakTimerMinutes * 60);
+    const breakProgress = clamp(1 - breakTimerRemaining / breakTotalSeconds, 0, 1);
+    const breathStep = breathElapsedSeconds % 19;
+    const breathPhaseIndex = breathStep < 4 ? 0 : breathStep < 11 ? 1 : 2;
+    const breathPhases = [
+      { label: "Breathe in", seconds: 4, instruction: "Through the nose, quietly." },
+      { label: "Hold", seconds: 7, instruction: "Still, shoulders down." },
+      { label: "Breathe out", seconds: 8, instruction: "Through the mouth, slow and audible." },
+    ];
+    const breathPhase = breathPhases[breathPhaseIndex];
+    const breathPhaseElapsed = breathPhaseIndex === 0 ? breathStep : breathPhaseIndex === 1 ? breathStep - 4 : breathStep - 11;
+    const breathRemaining = breathPhase.seconds - breathPhaseElapsed;
+    const breathSize = breathPhaseIndex === 0
+      ? 60 + (breathStep / 4) * 110
+      : breathPhaseIndex === 1
+        ? 170
+        : 170 - ((breathStep - 11) / 8) * 110;
     return (
       <section className="wabi-break-grid">
-        <div className="wabi-rest-card">
-          <span className="wabi-rest-ring" />
-          <h2>Rest, {breakTimerMinutes} minute{breakTimerMinutes === 1 ? "" : "s"}</h2>
-          <p>Water the plant on the sill, or play one round of something small.</p>
-          {breakTimerEditing ? (
-            <input
-              className="wabi-rest-clock-input"
-              value={breakTimerDraft}
-              onChange={(event) => setBreakTimerDraft(event.target.value)}
-              onBlur={applyBreakTimerDraft}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  applyBreakTimerDraft();
-                } else if (event.key === "Escape") {
-                  setBreakTimerEditing(false);
-                  setBreakTimerDraft(formatClock(breakTimerRemaining));
-                }
-              }}
-              inputMode="numeric"
-              aria-label="Meditation timer duration"
-              autoFocus
-            />
-          ) : (
-            <button type="button" className="wabi-rest-clock" onClick={startBreakTimerEditing} disabled={breakTimerRunning}>
-              {breakMM}:{breakSS}
-            </button>
-          )}
-          <div className="wabi-rest-actions">
-            <button type="button" className="wabi-btn-solid" onClick={toggleBreakTimerRun}>{breakTimerRunning ? "PAUSE" : "START"}</button>
-            <button type="button" className="wabi-text-link" onClick={resetBreakTimer}>RESET</button>
-          </div>
+        <div className="wabi-rest-room-tabs" role="tablist" aria-label="Break room">
+          <button type="button" role="tab" aria-selected={wabiRestRoom === "games"} className={wabiRestRoom === "games" ? "active" : ""} onClick={() => setWabiRestRoom("games")}>GAMES</button>
+          <button type="button" role="tab" aria-selected={wabiRestRoom === "meditation"} className={wabiRestRoom === "meditation" ? "active" : ""} onClick={() => setWabiRestRoom("meditation")}>MEDITATION</button>
         </div>
 
-        <div className="wabi-break-lower">
-          <div className="wabi-xp-water" data-tour="break-xp" title={`XP ${xpProgress} / 45 — ~${minsUntilNext} min to next unlock`}>
-            <div className="wabi-xp-water-track">
-              <div className="wabi-xp-water-fill" style={{ height: `${xpPercent}%` }} />
+        {wabiRestRoom === "games" ? <>
+          <div className="wabi-rest-card">
+            <WabiRestFluidRing progress={breakProgress} running={breakTimerRunning} dark={theme === "dark"} />
+            <h2>Rest, {breakTimerMinutes} minute{breakTimerMinutes === 1 ? "" : "s"}</h2>
+            <p>Water the plant on the sill, or play one round of something small.</p>
+            {breakTimerEditing ? (
+              <input className="wabi-rest-clock-input" value={breakTimerDraft} onChange={(event) => setBreakTimerDraft(event.target.value)} onBlur={applyBreakTimerDraft} onKeyDown={(event) => {
+                if (event.key === "Enter") { event.preventDefault(); applyBreakTimerDraft(); }
+                else if (event.key === "Escape") { setBreakTimerEditing(false); setBreakTimerDraft(formatClock(breakTimerRemaining)); }
+              }} inputMode="numeric" aria-label="Break timer duration" autoFocus />
+            ) : (
+              <button type="button" className="wabi-rest-clock" onClick={startBreakTimerEditing} disabled={breakTimerRunning}>{breakMM}:{breakSS}</button>
+            )}
+            <div className="wabi-rest-actions">
+              <button type="button" className="wabi-btn-solid" onClick={toggleBreakTimerRun}>{breakTimerRunning ? "PAUSE" : "START"}</button>
+              <button type="button" className="wabi-text-link" onClick={resetBreakTimer}>RESET</button>
             </div>
-            <span className="wabi-xp-water-label">{effectiveUnlocked.length}/{STUDY_BREAK_GAME_COUNT}</span>
           </div>
 
-          <div className="wabi-games-col">
-            <div className="wabi-eyebrow-row">
-              <span className="wabi-eyebrow">GAMES</span>
-              <span className="wabi-faint-text">{effectiveUnlocked.length} of {STUDY_BREAK_GAME_COUNT} available</span>
+          <div className="wabi-break-lower">
+            <div className="wabi-xp-water" data-tour="break-xp" title={`XP ${xpProgress} / 45 — ~${minsUntilNext} min to next unlock`}>
+              <div className="wabi-xp-water-track"><div className="wabi-xp-water-fill" style={{ height: `${xpPercent}%` }} /></div>
+              <span className="wabi-xp-water-label">{effectiveUnlocked.length}/{STUDY_BREAK_GAME_COUNT}</span>
             </div>
-            <div className="wabi-games-grid" data-tour="break-games">
-              {studyBreakGames.map((game) => {
-                const unlocked = effectiveUnlocked.includes(game.name);
-                return (
-                  <div
-                    key={game.name}
-                    className={`wabi-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
-                    onAnimationEnd={() => setCelebrating(null)}
-                  >
-                    <div className="wabi-game-head">
-                      <strong>{game.name}</strong>
-                      {unlocked ? <span className="wabi-game-tag">READY</span> : null}
-                    </div>
+            <div className="wabi-games-col">
+              <div className="wabi-eyebrow-row"><span className="wabi-eyebrow">GAMES</span><span className="wabi-faint-text">{effectiveUnlocked.length} of {STUDY_BREAK_GAME_COUNT} available</span></div>
+              <div className="wabi-games-grid" data-tour="break-games">
+                {studyBreakGames.map((game) => {
+                  const unlocked = effectiveUnlocked.includes(game.name);
+                  return <div key={game.name} className={`wabi-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`} onAnimationEnd={() => setCelebrating(null)}>
+                    <div className="wabi-game-head"><strong>{game.name}</strong>{unlocked ? <span className="wabi-game-tag">READY</span> : null}</div>
                     <span className="wabi-game-desc">{game.desc}</span>
                     <div className="wabi-game-foot">
                       {unlocked ? (
-                        game.name === "Daily Durak" ? (
-                          <>
-                            <span className="wabi-game-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span>
-                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>PLAY</button>
-                          </>
-                        ) : game.name === "Wordle" ? (
-                          <>
-                            {wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="wabi-game-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
-                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>PLAY</button>
-                          </>
-                        ) : game.name === "Travle" ? (
-                          <>
-                            {travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="wabi-game-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
-                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>PLAY</button>
-                          </>
-                        ) : game.name === "Geodle" ? (
-                          <>
-                            {geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="wabi-game-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
-                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>PLAY</button>
-                          </>
-                        ) : game.name === "Flaggle" ? (
-                          <>
-                            {flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="wabi-game-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}
-                            <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>PLAY</button>
-                          </>
-                        ) : (
-                          <a href={game.url} target="_blank" rel="noreferrer" className="wabi-text-link" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>PLAY</a>
-                        )
-                      ) : canUnlockMore ? (
-                        <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>UNLOCK</button>
-                      ) : (
-                        <span className="wabi-game-progress">~{minsUntilNext} min</span>
-                      )}
+                        game.name === "Daily Durak" ? <><span className="wabi-game-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span><button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>PLAY</button></>
+                          : game.name === "Wordle" ? <>{wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="wabi-game-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>PLAY</button></>
+                            : game.name === "Travle" ? <>{travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="wabi-game-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>PLAY</button></>
+                              : game.name === "Geodle" ? <>{geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="wabi-game-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>PLAY</button></>
+                                : game.name === "Flaggle" ? <>{flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="wabi-game-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>PLAY</button></>
+                                  : <a href={game.url} target="_blank" rel="noreferrer" className="wabi-text-link" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>PLAY</a>
+                      ) : canUnlockMore ? <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>UNLOCK</button> : <span className="wabi-game-progress">~{minsUntilNext} min</span>}
                     </div>
-                  </div>
-                );
-              })}
+                  </div>;
+                })}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div
-          className="wabi-pet-rock"
-          data-tour="break-rock"
-          onClick={patRock}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(event) => {
-            if (event.repeat) return;
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              patRock();
-            }
-          }}
-        >
-          <div className="rock-area">
-            <span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>
-            {rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}
+          <div className="wabi-pet-rock" data-tour="break-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(event) => { if (!event.repeat && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); patRock(); } }}>
+            <div className="rock-area"><span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>{rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}</div>
+            <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
           </div>
-          <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
-        </div>
+        </> : (
+          <div className="wabi-meditation-room">
+            <div className="wabi-breath-orbit" aria-live="polite">
+              <span className="wabi-breath-ring" style={{ width: `${breathOn ? breathSize : 60}px`, height: `${breathOn ? breathSize : 60}px` }} />
+              <span className="wabi-breath-count">{breathOn ? breathRemaining : ""}</span>
+            </div>
+            <h2>{breathOn ? breathPhase.label : "Four, seven, eight"}</h2>
+            <p>{breathOn ? "Follow the ring. Count with it, do not rush the hold." : "In for four, hold for seven, out for eight. Four rounds and the break is over."}</p>
+            <button type="button" className="wabi-btn-solid" onClick={toggleBreathingExercise}>{breathOn ? "STOP" : "BEGIN"}</button>
+            <span className="wabi-breath-round">{breathOn ? `Round ${Math.floor(breathElapsedSeconds / 19) + 1} of 4` : "Four rounds, about eighty seconds."}</span>
+            <div className="wabi-breath-guide">
+              {breathPhases.map((phase, index) => <div key={phase.label} className={breathOn && breathPhaseIndex === index ? "active" : ""}>
+                <strong>{phase.seconds}</strong><span>SECONDS</span><h3>{phase.label}</h3><p>{phase.instruction}</p>
+              </div>)}
+            </div>
+            <p className="wabi-breath-note">Nose in, tongue behind the front teeth, mouth out. Sitting up, not lying down.</p>
+          </div>
+        )}
       </section>
     );
   }

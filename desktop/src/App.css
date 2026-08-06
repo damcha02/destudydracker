@@ -17774,6 +17774,33 @@ input[type="color"] {
   color: var(--wabi-ink);
 }
 
+.wabi-rest-room-tabs {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 28px;
+}
+
+.wabi-rest-room-tabs button {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 9px 22px;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.18em;
+}
+
+.wabi-rest-room-tabs button + button {
+  border-left: 0;
+}
+
+.wabi-rest-room-tabs button:hover,
+.wabi-rest-room-tabs button.active {
+  border-color: var(--wabi-ink);
+  background: var(--wabi-ink);
+  color: var(--wabi-paper-1);
+}
+
 .wabi-rest-card {
   display: flex;
   flex-direction: column;
@@ -17785,10 +17812,97 @@ input[type="color"] {
 }
 
 .wabi-rest-ring {
-  width: 96px;
-  height: 96px;
+  width: 112px;
+  height: 112px;
+  display: block;
+  overflow: visible;
+}
+
+.wabi-rest-fluid-ring {
+  box-sizing: border-box;
   border: 1.5px solid var(--line);
   border-radius: 50%;
+  background: transparent;
+}
+
+.wabi-rest-outline {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.wabi-rest-liquid {
+  fill: #11110d;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.wabi-rest-liquid--base {
+  opacity: 0.92;
+  animation: wabi-ink-sway 8s ease-in-out infinite;
+}
+
+.wabi-rest-liquid--wash {
+  fill: #303128;
+  opacity: 0.42;
+  animation: wabi-ink-drift 11s ease-in-out infinite reverse;
+}
+
+.wabi-rest-splash {
+  fill: #11110d;
+  opacity: 0;
+}
+
+.wabi-rest-ring.is-light-ink .wabi-rest-liquid {
+  fill: #e8e3d3;
+}
+
+.wabi-rest-ring.is-light-ink .wabi-rest-liquid--wash {
+  fill: #bdb7a6;
+}
+
+.wabi-rest-ring.is-light-ink .wabi-rest-splash {
+  fill: #e8e3d3;
+}
+
+.is-running .wabi-rest-splash--one {
+  animation: wabi-ink-splash 8s ease-in-out infinite 1.2s;
+}
+
+.is-running .wabi-rest-splash--two {
+  animation: wabi-ink-splash 8s ease-in-out infinite 3.9s;
+}
+
+.is-running .wabi-rest-splash--three {
+  animation: wabi-ink-splash 8s ease-in-out infinite 5.6s;
+}
+
+.is-paused .wabi-rest-liquid,
+.is-paused .wabi-rest-splash {
+  animation-play-state: paused;
+}
+
+@keyframes wabi-ink-sway {
+  0%, 100% { transform: translateX(-1px) scaleY(1); }
+  50% { transform: translateX(2px) scaleY(1.025); }
+}
+
+@keyframes wabi-ink-drift {
+  0%, 100% { transform: translateX(2px) scaleY(1.01); }
+  50% { transform: translateX(-2px) scaleY(0.985); }
+}
+
+@keyframes wabi-ink-splash {
+  0%, 72%, 100% { opacity: 0; transform: translateY(3px) scale(0.65); }
+  80% { opacity: 0.65; transform: translateY(-3px) scale(1); }
+  88% { opacity: 0; transform: translateY(-5px) scale(0.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wabi-rest-liquid,
+  .wabi-rest-splash {
+    animation: none;
+  }
 }
 
 .wabi-rest-card h2 {
@@ -17834,6 +17948,151 @@ input[type="color"] {
   align-items: center;
   gap: 14px;
   margin-top: 22px;
+}
+
+.wabi-meditation-room {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 24px 40px;
+  border: var(--wabi-rule-soft);
+  background: var(--wabi-paper-1);
+  text-align: center;
+}
+
+.wabi-breath-orbit {
+  position: relative;
+  display: grid;
+  width: 180px;
+  height: 180px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+.wabi-breath-ring {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1.5px solid var(--wabi-sage);
+  border-radius: 50%;
+  transition: width 1s linear, height 1s linear;
+}
+
+.wabi-breath-count {
+  position: relative;
+  z-index: 1;
+  color: var(--wabi-ink);
+  font: 400 13px var(--font-sans);
+  letter-spacing: 0.18em;
+}
+
+.wabi-meditation-room h2 {
+  margin: 22px 0 0;
+  color: var(--wabi-ink);
+  font: 500 24px var(--font-serif);
+}
+
+.wabi-meditation-room > p {
+  max-width: 400px;
+  margin: 6px 0 0;
+  color: var(--wabi-muted);
+  font: 400 14px/1.7 var(--font-sans);
+}
+
+.wabi-meditation-room > .wabi-btn-solid {
+  margin-top: 22px;
+}
+
+.wabi-breath-round {
+  margin-top: 12px;
+  color: var(--wabi-faint);
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.08em;
+}
+
+.wabi-breath-guide {
+  display: grid;
+  width: min(760px, 100%);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 30px;
+  border-top: var(--wabi-rule-hard);
+  border-bottom: var(--wabi-rule-soft);
+  text-align: left;
+}
+
+.wabi-breath-guide > div {
+  min-height: 146px;
+  padding: 16px 20px 18px;
+  border-right: var(--wabi-rule-soft);
+}
+
+.wabi-breath-guide > div:last-child {
+  border-right: 0;
+}
+
+.wabi-breath-guide > div.active {
+  background: color-mix(in srgb, var(--wabi-sage) 12%, var(--wabi-paper-1));
+}
+
+.wabi-breath-guide strong {
+  color: var(--wabi-muted);
+  font: 500 26px/1 var(--font-serif);
+}
+
+.wabi-breath-guide > div.active strong {
+  color: var(--wabi-vermilion);
+}
+
+.wabi-breath-guide span {
+  margin-left: 9px;
+  color: var(--wabi-faint);
+  font: 400 10px var(--font-sans);
+  letter-spacing: 0.16em;
+}
+
+.wabi-breath-guide h3 {
+  margin: 10px 0 0;
+  color: var(--wabi-ink);
+  font: 400 16px var(--font-serif);
+}
+
+.wabi-breath-guide p {
+  margin: 4px 0 0;
+  color: var(--wabi-muted);
+  font: 400 12.5px/1.6 var(--font-sans);
+}
+
+.wabi-meditation-room .wabi-breath-note {
+  max-width: 760px;
+  margin-top: 14px;
+  color: var(--wabi-faint);
+  font-size: 12px;
+  text-align: left;
+}
+
+@media (max-width: 620px) {
+  .wabi-rest-room-tabs button {
+    padding-inline: 16px;
+  }
+
+  .wabi-meditation-room {
+    padding-inline: 14px;
+  }
+
+  .wabi-breath-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .wabi-breath-guide > div,
+  .wabi-breath-guide > div:last-child {
+    min-height: 0;
+    border-right: 0;
+    border-bottom: var(--wabi-rule-soft);
+  }
+
+  .wabi-breath-guide > div:last-child {
+    border-bottom: 0;
+  }
 }
 
 .wabi-break-lower {
