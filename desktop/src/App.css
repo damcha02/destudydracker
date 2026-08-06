@@ -19572,7 +19572,6 @@ input[type="color"] {
 }
 
 :root[data-app-style="wabi-sabi"] .wabi-sidebar {
-  transform: translateZ(0);
   contain: layout;
 }
 

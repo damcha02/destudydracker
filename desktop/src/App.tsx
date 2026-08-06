@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties, ChangeEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -2689,6 +2690,8 @@ function App() {
   const endlessContinuousStartedAtRef = useRef<string | null>(null);
   const endlessInactivityPromptRef = useRef<EndlessInactivityPrompt | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [wabiMenuPosition, setWabiMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const wabiMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
   const [visibleTabsOptionsOpen, setVisibleTabsOptionsOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -3048,6 +3051,27 @@ function App() {
     document.documentElement.dataset.appStyle = appStyle;
     localStorage.setItem(APP_STYLE_STORAGE_KEY, appStyle);
   }, [appStyle]);
+
+  function updateWabiMenuPosition() {
+    const button = wabiMenuButtonRef.current;
+    if (!button) return;
+
+    const rect = button.getBoundingClientRect();
+    const menuWidth = 200;
+    const viewportPadding = 8;
+    setWabiMenuPosition({
+      top: rect.bottom + 8,
+      left: Math.min(rect.left, window.innerWidth - menuWidth - viewportPadding),
+    });
+  }
+
+  useLayoutEffect(() => {
+    if (!menuOpen || appStyle !== "wabi-sabi") return undefined;
+
+    updateWabiMenuPosition();
+    window.addEventListener("resize", updateWabiMenuPosition);
+    return () => window.removeEventListener("resize", updateWabiMenuPosition);
+  }, [appStyle, menuOpen]);
 
   useEffect(() => {
     localStorage.setItem(WABI_CIRCLE_COMPETITIVE_KEY, String(wabiCircleCompetitive));
@@ -9815,6 +9839,34 @@ function App() {
     );
   }
 
+  function renderWabiToolbarMenu() {
+    if (!menuOpen || !wabiMenuPosition) return null;
+
+    return createPortal(
+      <div
+        className="topbar-menu wabi-toolbar-menu"
+        role="menu"
+        style={{ position: "fixed", top: wabiMenuPosition.top, left: wabiMenuPosition.left, right: "auto" }}
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            downloadBackup(state);
+            setMenuOpen(false);
+          }}
+        >
+          Backup JSON
+        </button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
+      </div>,
+      document.body,
+    );
+  }
+
   function renderWabiSidebar() {
     const wabiTabLabels: Record<TabKey, string> = { dashboard: "Today", planner: "Plan", timer: "Timer", vault: "Notes", break: "Rest", friends: "Circle" };
     const wabiTabKanji: Record<TabKey, string> = { dashboard: "今日", planner: "計画", timer: "時計", vault: "記録", break: "休み", friends: "仲間" };
@@ -9871,11 +9923,15 @@ function App() {
           ) : null}
           <div className="wabi-toolbar-menu-wrap">
             <button
+              ref={wabiMenuButtonRef}
               type="button"
               className="wabi-toolbar-button"
               aria-label="Open menu"
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen((current) => !current)}
+              onClick={() => setMenuOpen((current) => {
+                if (!current) updateWabiMenuPosition();
+                return !current;
+              })}
             >
               <span className="hamburger-button-icon">
                 <span />
@@ -9883,24 +9939,7 @@ function App() {
                 <span />
               </span>
             </button>
-            {menuOpen ? (
-              <div className="topbar-menu wabi-toolbar-menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    downloadBackup(state);
-                    setMenuOpen(false);
-                  }}
-                >
-                  Backup JSON
-                </button>
-                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
-                <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
-                <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
-                <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
-              </div>
-            ) : null}
+            {renderWabiToolbarMenu()}
           </div>
         </div>
         <nav className="wabi-nav" aria-label="Primary navigation">
