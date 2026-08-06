@@ -19,6 +19,11 @@ interface SocialSyncResponse {
   social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedSquadScoreLeaderboards" | "cachedFeeds" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
 }
 
+interface SocialWriteResponse {
+  ok: boolean;
+  syncedAt?: string;
+}
+
 interface DeviceIdentity {
   fingerprintHash: string;
   label: string;
@@ -337,7 +342,7 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
   if (!responseOk) {
     throw new Error(responseText || `Social sync failed with HTTP ${responseStatus}.`);
   }
-  return JSON.parse(responseText) as SocialSyncResponse;
+  return JSON.parse(responseText) as SocialWriteResponse;
 }
 
 export async function getSocialFeed(social: SocialState, scope: SocialFeedScope) {

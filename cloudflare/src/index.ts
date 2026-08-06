@@ -1509,7 +1509,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
   };
 }
 
-async function handleSync(request: Request, env: Env) {
+async function handleSync(request: Request, env: Env, ctx: ExecutionContext) {
   const payload = await readJson<SyncPayload>(request);
   if (!payload.user || typeof payload.user !== "object") return text("Missing user identity.", 400);
   await upsertUser(env, payload.user);
@@ -1517,10 +1517,13 @@ async function handleSync(request: Request, env: Env) {
   const changedStatDates = await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
   await upsertFeedPosts(env, userId, payload.feedPosts);
   const today = todayIso();
-  await Promise.all(changedStatDates
-    .filter((date) => date < today)
-    .map((date) => scoreSquadDate(env, date).catch((error) => console.error("Squad rescoring failed.", date, error))));
-  return json(await getSocialSnapshot(request, env, userId));
+  const datesToRescore = changedStatDates.filter((date) => date < today);
+  if (datesToRescore.length) {
+    ctx.waitUntil(Promise.all(datesToRescore
+      .map((date) => scoreSquadDate(env, date).catch((error) => console.error("Squad rescoring failed.", date, error))))
+      .then(() => undefined));
+  }
+  return json({ ok: true, syncedAt: new Date().toISOString() });
 }
 
 async function handleFeed(request: Request, env: Env) {
@@ -2424,7 +2427,7 @@ async function handleAdminUsage(request: Request, env: Env) {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
     try {
@@ -2439,7 +2442,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/profile/avatar") return await handleProfileAvatarUpload(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
-      if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
+      if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env, ctx);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);

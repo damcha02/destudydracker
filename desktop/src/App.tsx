@@ -4404,25 +4404,39 @@ function App() {
 
     setSocialSyncing(true);
     try {
-      const result = await syncSocialState(syncState, getAppMetadata());
+      await syncSocialState(syncState, getAppMetadata());
       const syncedAt = new Date().toISOString();
-      updateFeedCommentNoticeFromFeeds([
-        { scope: "global", feed: result.social.cachedFeeds.global },
-        { scope: "friends", feed: result.social.cachedFeeds.friends },
-      ]);
       setState((current) => ({
         ...current,
         social: {
           ...current.social,
-          ...result.social,
           pendingFeedPosts: [],
           lastSyncedAt: syncedAt,
           lastSyncError: null,
           nextAutoSyncAt: getNextAutoSyncAt(),
         },
       }));
+      void (async () => {
+        try {
+          const status = await getFriendStatus(syncState.social);
+          updateFeedCommentNoticeFromFeeds([
+            { scope: "global", feed: status.social.cachedFeeds.global },
+            { scope: "friends", feed: status.social.cachedFeeds.friends },
+          ]);
+          setState((current) => ({
+            ...current,
+            social: {
+              ...current.social,
+              ...status.social,
+              pendingFeedPosts: current.social.pendingFeedPosts,
+            },
+          }));
+        } catch (refreshError: unknown) {
+          console.warn("Social status refresh after sync failed.", refreshError);
+        }
+      })();
       setHasUnreadSocial(true);
-      if (!silent) setMessage("Social leaderboards updated.");
+      if (!silent) setMessage("Social data synced.");
     } catch (error: unknown) {
       console.warn("Social sync failed.", error);
       setState((current) => ({
