@@ -17822,6 +17822,8 @@ input[type="color"] {
   box-sizing: border-box;
   border: 1.5px solid var(--line);
   border-radius: 50%;
+  clip-path: circle(50%);
+  overflow: hidden;
   background: transparent;
 }
 
