@@ -286,6 +286,7 @@ function makeDefaultSocialState(): SocialState {
       friends: [],
     },
     pendingFeedPosts: [],
+    pendingFeedPostDeletions: [],
     cachedLeaderboards: {
       global: { daily: [], weekly: [], overall: [] },
       friends: { daily: [], weekly: [], overall: [] },
@@ -718,6 +719,9 @@ function normalizeSocialState(social: unknown): SocialState {
       friends: normalizeFeedPosts(record.cachedFeeds?.friends),
     },
     pendingFeedPosts: normalizeFeedPosts(record.pendingFeedPosts),
+    pendingFeedPostDeletions: Array.isArray(record.pendingFeedPostDeletions)
+      ? [...new Set(record.pendingFeedPostDeletions.filter((id): id is string => typeof id === "string" && Boolean(id.trim())))]
+      : [],
     cachedLeaderboards: {
       global: {
         daily: record.cachedLeaderboards?.global?.daily ?? [],

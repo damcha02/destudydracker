@@ -294,6 +294,7 @@ export interface SocialState {
   squadMessages: SocialSquadMessage[];
   cachedFeeds: Record<SocialFeedScope, SocialFeedPost[]>;
   pendingFeedPosts: SocialFeedPost[];
+  pendingFeedPostDeletions: string[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
   cachedSquadScoreLeaderboards: Record<SocialSquadScorePeriod, SocialSquadScoreEntry[]>;
 }

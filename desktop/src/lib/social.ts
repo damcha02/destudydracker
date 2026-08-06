@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialState, StudySession } from "../types";
+import type { AppState, SocialAvatar, SocialFeedComment, SocialFeedPoll, SocialFeedPost, SocialFeedScope, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, StudySession } from "../types";
 import { isoDate } from "./metrics";
 
 export const SOCIAL_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000;
@@ -8,6 +8,8 @@ export const MAX_SYNC_STAT_ROWS = 370;
 export const MAX_SYNC_FEED_POSTS = 25;
 const DEFAULT_SOCIAL_API_URL = "https://study-tracker-social.danil-poluyanov13.workers.dev";
 const SOCIAL_API_URL = (import.meta.env.VITE_SOCIAL_API_URL || DEFAULT_SOCIAL_API_URL).replace(/\/$/, "");
+const squadScoreboardFetchedAt = new Map<SocialSquadScorePeriod, number>();
+const SQUAD_SCOREBOARD_CACHE_TTL_MS = 60 * 1000;
 
 export interface SocialDailyStat {
   date: string;
@@ -358,6 +360,17 @@ export async function getSocialFeed(social: SocialState, scope: SocialFeedScope)
       deviceSecret: social.deviceSecret,
     }),
   });
+}
+
+export async function getSquadScoreboard(social: SocialState, period: SocialSquadScorePeriod, force = false) {
+  const now = Date.now();
+  const fetchedAt = squadScoreboardFetchedAt.get(period) ?? 0;
+  if (!force && now - fetchedAt < SQUAD_SCOREBOARD_CACHE_TTL_MS) return null;
+  const result = await requestSocialApi<{ entries: SocialSquadScoreEntry[] }>(`/squads/scoreboard?period=${period}&userId=${encodeURIComponent(social.userId)}&deviceSecret=${encodeURIComponent(social.deviceSecret)}`, {
+    method: "GET",
+  });
+  squadScoreboardFetchedAt.set(period, now);
+  return result;
 }
 
 export async function getCurrentAnnouncement(app: AppMetadata) {

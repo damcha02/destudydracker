@@ -39,7 +39,7 @@ import {
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
@@ -2826,6 +2826,7 @@ function App() {
   const saveStateTimeoutRef = useRef<number | null>(null);
   const sessionSavePendingRef = useRef(false);
   const pendingSaveRef = useRef<AppState | null>(null);
+  const socialSyncInProgressRef = useRef(false);
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
   const wordleModalRef = useRef<HTMLDivElement | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
@@ -4426,15 +4427,27 @@ function App() {
       return;
     }
 
+    if (socialSyncInProgressRef.current) return;
+    socialSyncInProgressRef.current = true;
     setSocialSyncing(true);
     try {
       const result = await syncSocialState(syncState, getAppMetadata());
+      const deletedPostIds: string[] = [];
+      for (const postId of syncState.social.pendingFeedPostDeletions) {
+        try {
+          await deleteFeedPost(syncState.social, postId);
+          deletedPostIds.push(postId);
+        } catch (error) {
+          console.warn("Could not delete queued feed post.", postId, error);
+        }
+      }
       const syncedAt = new Date().toISOString();
       setState((current) => ({
         ...current,
         social: {
           ...current.social,
           pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => !result.sentFeedPostIds.includes(post.id)),
+          pendingFeedPostDeletions: current.social.pendingFeedPostDeletions.filter((id) => !deletedPostIds.includes(id)),
           lastSyncedAt: syncedAt,
           lastSyncError: null,
           nextAutoSyncAt: getNextAutoSyncAt(),
@@ -4469,6 +4482,7 @@ function App() {
       }));
       if (!silent) setMessage(getErrorMessage(error, "Could not sync social data."));
     } finally {
+      socialSyncInProgressRef.current = false;
       setSocialSyncing(false);
     }
   }
@@ -5585,6 +5599,26 @@ function App() {
     }
   });
 
+  const refreshSquadScoreboard = useEffectEvent(async () => {
+    if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "leaderboard" || socialScope !== "squad") return;
+    try {
+      const result = await getSquadScoreboard(state.social, squadScorePeriod);
+      if (!result) return;
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedSquadScoreLeaderboards: {
+            ...current.social.cachedSquadScoreLeaderboards,
+            [squadScorePeriod]: result.entries,
+          },
+        },
+      }));
+    } catch (error: unknown) {
+      console.warn("Could not refresh squad scoreboard.", error);
+    }
+  });
+
   async function openFriendProfile(friend: SocialProfileTarget) {
     setViewingFriend(friend.userId === state.social.userId ? { ...friend, avatar: state.social.avatar } : friend);
     setViewingFriendStats(null);
@@ -5749,6 +5783,10 @@ function App() {
   useEffect(() => {
     void refreshSocialLeaderboard();
   }, [socialScope, socialPeriod, socialSubtab, state.activeTab]);
+
+  useEffect(() => {
+    void refreshSquadScoreboard();
+  }, [socialScope, squadScorePeriod, socialSubtab, state.activeTab]);
 
   useEffect(() => {
     if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return undefined;
@@ -6431,6 +6469,7 @@ function App() {
     const session = state.sessions.find((item) => item.id === sessionId);
     if (!session) return;
     const countsTowardLifetime = session.kind === "study" || session.kind === "exam";
+    const publishedPost = [...state.social.cachedFeeds.global, ...state.social.cachedFeeds.friends].some((post) => post.id === sessionId);
     if (!window.confirm("Delete this session? This removes its time from your history and statistics.")) return;
     setState((current) => {
       const remaining = current.sessions.filter((item) => item.id !== sessionId);
@@ -6443,7 +6482,10 @@ function App() {
         lifetimeStudySessions: Math.max(0, (current.lifetimeStudySessions || 0) - removedSessions),
         social: {
           ...current.social,
-          pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => post.id !== sessionId),
+           pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => post.id !== sessionId),
+           pendingFeedPostDeletions: publishedPost && !current.social.pendingFeedPostDeletions.includes(sessionId)
+             ? [...current.social.pendingFeedPostDeletions, sessionId]
+             : current.social.pendingFeedPostDeletions,
           cachedFeeds: {
             global: current.social.cachedFeeds.global.filter((post) => post.id !== sessionId),
             friends: current.social.cachedFeeds.friends.filter((post) => post.id !== sessionId),
@@ -13905,6 +13947,7 @@ function App() {
         </section>
       ) : null}
 
+      {(showTravlePuzzle || showFlagglePuzzle || showGeodlePuzzle || showWordlePuzzle || showDurakPuzzle) ? createPortal(<>
       {showTravlePuzzle ? (
         <div className="travle-overlay" onClick={() => setShowTravlePuzzle(false)} role="presentation">
           <div className="travle-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Daily Travle puzzle">
@@ -14415,6 +14458,7 @@ function App() {
           </div>
         </div>
       ) : null}
+      </>, document.body) : null}
 
       {fullscreen && state.timer.phase !== "idle" ? (
         <div className="exam-fullscreen-overlay">

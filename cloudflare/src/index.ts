@@ -83,6 +83,8 @@ const MAX_SQUAD_MEMBERS = 4;
 const MAX_SQUAD_MESSAGE_LENGTH = 500;
 const SQUAD_SEASON_START = "2026-07-29";
 const SQUAD_SEASON_END = "2026-08-31";
+const SQUAD_NEXT_SEASON_START = "2026-09-01";
+const SQUAD_NEXT_SEASON_END = "2027-02-28";
 const SQUAD_ZERO_POINT_DATES = new Set(["2026-08-05"]);
 const SERVER_TIME_ZONE = "Europe/Zurich";
 const SQUAD_SCORE_BACKFILL_DAYS = 14;
@@ -260,6 +262,17 @@ function squadRankPoints(date: string, rank: number) {
   return rank === 1 ? 2 : rank === 2 ? 1 : 0;
 }
 
+function squadSeasonRange(date = todayIso()) {
+  return date <= SQUAD_SEASON_END
+    ? { start: SQUAD_SEASON_START, end: SQUAD_SEASON_END }
+    : { start: SQUAD_NEXT_SEASON_START, end: SQUAD_NEXT_SEASON_END };
+}
+
+function isSquadSeasonDate(date: string) {
+  return (date >= SQUAD_SEASON_START && date <= SQUAD_SEASON_END)
+    || (date >= SQUAD_NEXT_SEASON_START && date <= SQUAD_NEXT_SEASON_END);
+}
+
 function friendPair(a: string, b: string) {
   return a < b ? [a, b] : [b, a];
 }
@@ -281,8 +294,8 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
   const showHoursToFriends = payload.showHoursToFriends === false ? 0 : 1;
-  const lifetimeStudyMinutes = Math.min(10_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudyMinutes ?? 0))));
-  const lifetimeStudySessions = Math.min(1_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudySessions ?? 0))));
+  const lifetimeStudyMinutes = cleanFiniteNumber(payload.lifetimeStudyMinutes, "lifetimeStudyMinutes", 10_000_000);
+  const lifetimeStudySessions = cleanFiniteNumber(payload.lifetimeStudySessions, "lifetimeStudySessions", 1_000_000);
   const deviceFingerprintHash = cleanText(payload.device?.fingerprintHash, 120);
   const deviceLabel = cleanText(payload.device?.label, 120);
   const app = cleanAppMetadata(payload.app);
@@ -298,8 +311,8 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
     await env.DB.prepare(`
       UPDATE users
       SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, show_hours_to_friends = ?,
-        lifetime_study_minutes = MAX(lifetime_study_minutes, ?),
-        lifetime_study_sessions = MAX(lifetime_study_sessions, ?),
+        lifetime_study_minutes = ?,
+        lifetime_study_sessions = ?,
         device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
         device_label = COALESCE(NULLIF(?, ''), device_label),
         device_seen_at = CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE device_seen_at END,
@@ -324,6 +337,12 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
 
 function cleanText(value: unknown, max = 180) {
   return String(value ?? "").trim().slice(0, max);
+}
+
+function cleanFiniteNumber(value: unknown, label: string, max: number) {
+  const number = Number(value ?? 0);
+  if (!Number.isFinite(number)) throw new Response(`Invalid ${label}.`, { status: 400, headers: corsHeaders });
+  return Math.min(max, Math.max(0, Math.round(number)));
 }
 
 function cleanAppMetadata(value: unknown) {
@@ -394,7 +413,7 @@ async function getR2Usage(env: Env, month = usageMonth()) {
     env.DB.prepare("SELECT class_a_ops AS classAOps, class_b_ops AS classBOps FROM r2_usage_monthly WHERE month = ?")
       .bind(month)
       .first<{ classAOps: number; classBOps: number }>(),
-    env.DB.prepare("SELECT COALESCE(SUM(image_size_bytes), 0) AS storageBytes FROM feed_posts WHERE image_key IS NOT NULL")
+    env.DB.prepare("SELECT COALESCE((SELECT SUM(image_size_bytes) FROM feed_posts WHERE image_key IS NOT NULL), 0) + COALESCE((SELECT SUM(avatar_size_bytes) FROM users WHERE avatar_json LIKE '%/profile/avatar/%'), 0) AS storageBytes")
       .first<{ storageBytes: number }>(),
   ]);
   const storageBytes = Number(storage?.storageBytes ?? 0);
@@ -519,7 +538,7 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
     cleanText(post.detail, 80),
     cleanText(post.note, 220),
     cleanText(post.icon, 8),
-    Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(post.minutes ?? 0)))),
+    cleanFiniteNumber(post.minutes, "minutes", MAX_DAILY_MINUTES),
     cleanText(post.presetLabel, 60),
     /^\d{4}-\d{2}-\d{2}T/.test(String(post.createdAt ?? "")) ? String(post.createdAt) : new Date().toISOString(),
   ));
@@ -538,6 +557,11 @@ async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["fee
       VALUES (?, ?, ?)
       ON CONFLICT(post_id) DO UPDATE SET question = excluded.question, multiple = excluded.multiple
     `).bind(postId, poll.question, poll.multiple ? 1 : 0).run();
+    const optionIds = poll.options.map((option) => option.id);
+    const conflictingOptions = await env.DB.prepare(`SELECT id, post_id AS postId FROM feed_poll_options WHERE id IN (${optionIds.map(() => "?").join(",")})`).bind(...optionIds).all<{ id: string; postId: string }>();
+    if (conflictingOptions.results.some((option) => option.postId !== postId)) {
+      throw new Response("A poll option belongs to another post.", { status: 409, headers: corsHeaders });
+    }
     const optionStatements = poll.options.map((option, index) => env.DB.prepare(`
       INSERT INTO feed_poll_options (id, post_id, text, sort_order)
       VALUES (?, ?, ?, ?)
@@ -556,8 +580,8 @@ async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]
     .filter((stat) => /^\d{4}-\d{2}-\d{2}$/.test(stat.date))
     .map((stat) => ({
       date: stat.date,
-      minutes: Math.min(MAX_DAILY_MINUTES, Math.max(0, Math.round(Number(stat.minutes ?? 0)))),
-      sessions: Math.min(MAX_DAILY_SESSIONS, Math.max(0, Math.round(Number(stat.sessions ?? 0)))),
+      minutes: cleanFiniteNumber(stat.minutes, "minutes", MAX_DAILY_MINUTES),
+      sessions: cleanFiniteNumber(stat.sessions, "sessions", MAX_DAILY_SESSIONS),
     }));
   const cleanedStats = [...new Map(validStats
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -612,6 +636,16 @@ async function upsertStats(env: Env, userId: string, stats: SyncPayload["stats"]
 
   await env.DB.batch(statements);
   return [...changedDates, ...deletedDates];
+}
+
+async function reconcileLifetimeTotals(env: Env, userId: string) {
+  await env.DB.prepare(`
+    UPDATE users
+    SET lifetime_study_minutes = MAX(lifetime_study_minutes, COALESCE((SELECT SUM(minutes) FROM daily_stats WHERE user_id = ?), 0)),
+        lifetime_study_sessions = MAX(lifetime_study_sessions, COALESCE((SELECT SUM(sessions) FROM daily_stats WHERE user_id = ?), 0)),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(userId, userId, userId).run();
 }
 
 async function getFriendIds(env: Env, userId: string) {
@@ -788,7 +822,7 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
 
 async function scoreSquadDate(env: Env, date: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-  if (date < SQUAD_SEASON_START) return;
+  if (!isSquadSeasonDate(date)) return;
   const dayStart = serverDayStartIso(date);
   const dayEnd = new Date(new Date(serverDayStartIso(addIsoDays(date, 1))).getTime() - 1).toISOString();
   const rows = await env.DB.prepare(`
@@ -900,8 +934,9 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
     });
   }
 
+  const season = squadSeasonRange();
   const periodFilter = period === "season" ? "WHERE score.date >= ? AND score.date <= ?" : "WHERE score.date >= ?";
-  const params = period === "season" ? [SQUAD_SEASON_START, SQUAD_SEASON_END] : [SQUAD_SEASON_START];
+  const params = period === "season" ? [season.start, season.end] : [SQUAD_SEASON_START];
   const rows = await env.DB.prepare(`
     SELECT s.id AS squadId, s.name AS squadName, s.is_private AS isPrivate,
       (SELECT COUNT(*) FROM squad_members sm WHERE sm.squad_id = s.id) AS currentMemberCount,
@@ -1535,6 +1570,7 @@ async function handleSync(request: Request, env: Env, lightweight = false) {
   await upsertUser(env, payload.user);
   const userId = cleanUserId(payload.user.userId);
   const changedStatDates = await upsertStats(env, userId, payload.stats);
+  await reconcileLifetimeTotals(env, userId);
   await upsertFeedPosts(env, userId, payload.feedPosts);
   const today = todayIso();
   const datesToRescore = changedStatDates.filter((date) => date < today);
@@ -1704,17 +1740,20 @@ async function handleProfileAvatarUpload(request: Request, env: Env) {
   if (!feedImageTypes.has(image.type)) return text("Use PNG, JPEG, WebP, or GIF images.", 400);
   if (image.size > MAX_PROFILE_AVATAR_BYTES) return text("Avatar image is too large.", 413);
 
-  await assertR2ClassABudget(env, 1);
-  const existing = await env.DB.prepare("SELECT avatar_json AS avatarJson FROM users WHERE id = ?")
+  const existing = await env.DB.prepare("SELECT avatar_json AS avatarJson, avatar_size_bytes AS avatarSizeBytes FROM users WHERE id = ?")
     .bind(userId)
-    .first<{ avatarJson: string }>();
+    .first<{ avatarJson: string; avatarSizeBytes: number }>();
   const previousAvatar = parseAvatar(existing?.avatarJson, "Student");
   const previousKey = previousAvatar.kind === "photo" ? profileAvatarKeyFromUrl(previousAvatar.url) : null;
+  const classAOps = previousKey ? 2 : 1;
+  const usage = await assertR2ClassABudget(env, classAOps);
+  const nextStorageBytes = usage.storageBytes - Number(existing?.avatarSizeBytes ?? 0) + image.size;
+  if (nextStorageBytes > R2_STORAGE_HARD_BYTES) return text("Image uploads are paused to keep R2 storage below the free tier.", 429);
   const key = `profile-avatars/${userId}/${crypto.randomUUID()}.webp`;
   await env.FEED_IMAGES.put(key, image.stream(), {
     httpMetadata: { contentType: image.type },
   });
-  await incrementR2Usage(env, { classA: 1 });
+  await incrementR2Usage(env, { classA: classAOps });
   if (previousKey) await env.FEED_IMAGES.delete(previousKey).catch(() => undefined);
 
   const avatar: SocialAvatar = {
@@ -1723,8 +1762,8 @@ async function handleProfileAvatarUpload(request: Request, env: Env) {
     url: profileAvatarUrl(request, key),
     mimeType: image.type,
   };
-  await env.DB.prepare("UPDATE users SET avatar_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-    .bind(JSON.stringify(avatar), userId)
+   await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+     .bind(JSON.stringify(avatar), image.size, userId)
     .run();
   return json({ avatar });
 }
@@ -1749,7 +1788,7 @@ async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
   const owner = await verifyUser(env, cleanUserId(payload.userId), String(payload.deviceSecret ?? ""));
   if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can migrate profile avatars.", 403);
 
-  const limit = Math.max(1, Math.min(10, Math.round(Number(payload.limit ?? 5))));
+  const limit = Math.max(1, cleanFiniteNumber(payload.limit ?? 5, "limit", 10));
   const rows = await env.DB.prepare(`
     SELECT id AS userId, display_name AS displayName, avatar_json AS avatarJson
     FROM users
@@ -1788,8 +1827,8 @@ async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
       url: profileAvatarUrl(request, key),
       mimeType: image.mimeType,
     };
-    await env.DB.prepare("UPDATE users SET avatar_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .bind(JSON.stringify(nextAvatar), row.userId)
+     await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+       .bind(JSON.stringify(nextAvatar), image.bytes.length, row.userId)
       .run();
     migrated += 1;
   }
@@ -2040,6 +2079,22 @@ async function handleLeaderboard(request: Request, env: Env) {
   const scope = payload.scope === "friends" || payload.scope === "squad" ? payload.scope : "global";
   const period = payload.period === "daily" || payload.period === "overall" ? payload.period : "weekly";
   return json({ entries: await getLeaderboard(env, userId, scope, period) });
+}
+
+async function handleSquadScoreboard(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; period?: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const period: SquadScorePeriod = payload.period === "daily" || payload.period === "overall" ? payload.period : "season";
+  const cacheKey = new Request(`${new URL(request.url).origin}/squads/scoreboard?period=${period}`);
+  const cache = await caches.open("default");
+  const cached = await cache.match(cacheKey);
+  if (cached) return cached;
+
+  const response = json({ entries: await getSquadScoreLeaderboard(env, period) });
+  response.headers.set("cache-control", "public, max-age=30");
+  await cache.put(cacheKey, response.clone());
+  return response;
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
@@ -2486,6 +2541,7 @@ export default {
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status/v2") return await handleFriendStatus(request, env, false);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/leaderboard") return await handleLeaderboard(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/scoreboard") return await handleSquadScoreboard(request, env);
       if (request.method === "POST" && url.pathname === "/squads/create") return await handleSquadCreate(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/search") return await handleSquadSearch(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/details") return await handleSquadDetails(request, env);
