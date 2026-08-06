@@ -100,6 +100,73 @@ export function calculateDailyWork(task: Task) {
   };
 }
 
+export function calculateAggregateWorkload(tasks: Task[]) {
+  const totalUnits = tasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
+  const completedUnits = tasks.reduce(
+    (sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits),
+    0,
+  );
+  const remainingUnits = Math.max(0, totalUnits - completedUnits);
+  const unfinishedTasks = tasks.filter((task) => getRemainingUnits(task) > 0);
+  const datedTasks = unfinishedTasks.filter((task) => task.dueDate);
+  const nearestDueDate = getNearestDeadline(tasks);
+  const daysLeft = nearestDueDate ? daysUntil(nearestDueDate) : null;
+  const undatedRemainingUnits = unfinishedTasks
+    .filter((task) => !task.dueDate)
+    .reduce((sum, task) => sum + getRemainingUnits(task), 0);
+
+  if (remainingUnits <= 0) {
+    return {
+      totalUnits,
+      completedUnits,
+      remainingUnits,
+      progress: totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0,
+      unitsPerDay: 0,
+      daysLeft: 0,
+      nearestDueDate,
+      undatedRemainingUnits,
+      message: "Everything tracked is complete. Use the timer for revision or new work.",
+    };
+  }
+
+  if (!datedTasks.length) {
+    return {
+      totalUnits,
+      completedUnits,
+      remainingUnits,
+      progress: totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0,
+      unitsPerDay: remainingUnits,
+      daysLeft,
+      nearestDueDate,
+      undatedRemainingUnits,
+      message: "Add due dates to get a realistic overall pace.",
+    };
+  }
+
+  const unitsPerDay = datedTasks.reduce((sum, task) => {
+    const dueIn = daysUntil(task.dueDate ?? "");
+    const remaining = getRemainingUnits(task);
+    return sum + (dueIn <= 0 ? remaining : remaining / dueIn);
+  }, 0);
+  const deadlineCount = new Set(datedTasks.map((task) => task.dueDate)).size;
+  const deadlineLabel = deadlineCount === 1 ? "deadline" : "deadlines";
+  const undatedMessage = undatedRemainingUnits
+    ? ` ${undatedRemainingUnits} undated units are not included in this pace.`
+    : "";
+
+  return {
+    totalUnits,
+    completedUnits,
+    remainingUnits,
+    progress: totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0,
+    unitsPerDay,
+    daysLeft,
+    nearestDueDate,
+    undatedRemainingUnits,
+    message: `${unitsPerDay.toFixed(1)} units/day across ${deadlineCount} ${deadlineLabel}.${undatedMessage}`,
+  };
+}
+
 function getOverdueTasks(tasks: Task[]) {
   return tasks.filter((task) => task.dueDate && daysUntil(task.dueDate) < 0 && getRemainingUnits(task) > 0);
 }
@@ -128,14 +195,7 @@ function getNearestDeadline(tasks: Task[]) {
 }
 
 function getUnitsPerDay(tasks: Task[]) {
-  const remainingUnits = tasks.reduce((sum, task) => sum + getRemainingUnits(task), 0);
-  if (remainingUnits <= 0) return 0;
-
-  const nearestDeadline = getNearestDeadline(tasks);
-  if (!nearestDeadline) return remainingUnits;
-
-  const daysLeft = daysUntil(nearestDeadline);
-  return daysLeft <= 0 ? remainingUnits : remainingUnits / daysLeft;
+  return calculateAggregateWorkload(tasks).unitsPerDay;
 }
 
 function getPacePenalty(unitsPerDay: number) {

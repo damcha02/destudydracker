@@ -271,9 +271,10 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
       deviceSecret: state.social.deviceSecret,
       friendCode: state.social.friendCode,
       displayName: state.social.displayName,
-      avatar: state.social.avatar,
-      isPrivate: state.social.isPrivate,
-      lifetimeStudyMinutes: state.lifetimeStudyMinutes,
+       avatar: state.social.avatar,
+       isPrivate: state.social.isPrivate,
+       showHoursToFriends: state.social.showHoursToFriends,
+       lifetimeStudyMinutes: state.lifetimeStudyMinutes,
       lifetimeStudySessions: state.lifetimeStudySessions,
       device,
       app,
@@ -602,9 +603,10 @@ export interface PlayerStatsResponse {
   friendCode: string;
   avatar?: SocialAvatar;
   lastSeenAt: string | null;
-  daily: { minutes: number; sessions: number; lastActiveDate: string | null };
-  weekly: { minutes: number; sessions: number; lastActiveDate: string | null };
-  overall: { minutes: number; sessions: number; lastActiveDate: string | null };
+  hoursVisible: boolean;
+  daily: { minutes: number; sessions: number; lastActiveDate: string | null } | null;
+  weekly: { minutes: number; sessions: number; lastActiveDate: string | null } | null;
+  overall: { minutes: number; sessions: number; lastActiveDate: string | null } | null;
 }
 
 export async function getPlayerStats(social: SocialState, targetUserId: string) {

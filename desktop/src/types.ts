@@ -284,6 +284,7 @@ export interface SocialState {
   nextAutoSyncAt: string | null;
   isPrivate: boolean;
   autoPostSessions: boolean;
+  showHoursToFriends: boolean;
   friends: SocialFriend[];
   incomingFriendRequests: SocialFriendRequest[];
   outgoingFriendRequests: SocialFriendRequest[];

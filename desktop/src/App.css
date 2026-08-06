@@ -8404,7 +8404,7 @@ input[type="color"] {
 .calendar-drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 950;
   display: flex;
   justify-content: flex-end;
   padding: 18px;
@@ -16783,6 +16783,13 @@ input[type="color"] {
   color: var(--wabi-muted);
 }
 
+:root[data-app-style="wabi-sabi"] .window-titlebar-controls button {
+  width: 28px;
+  height: 22px;
+  border-radius: 0;
+  color: var(--wabi-muted);
+}
+
 :root[data-app-style="wabi-sabi"] .shell {
   width: min(1450px, calc(100vw - 186px - 48px));
   margin: 0 0 0 186px;
@@ -16799,7 +16806,7 @@ input[type="color"] {
 }
 
 :root[data-app-style="wabi-sabi"] .shell.with-window-titlebar {
-  padding-top: 60px;
+  padding-top: 38px;
 }
 
 :root[data-app-style="wabi-sabi"] .tab-row {
@@ -18011,6 +18018,2213 @@ input[type="color"] {
   color: var(--wabi-sage);
 }
 
+/* -------- Planner -------- */
+
+:root[data-app-style="wabi-sabi"] .wabi-planner {
+  gap: 28px;
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-card,
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-board-panel {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-head {
+  align-items: end;
+  padding-bottom: 12px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-head h2,
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-header h2 {
+  margin: 4px 0 0;
+  color: var(--wabi-ink);
+  font: 500 32px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-head .section-note {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-controls,
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-controls > div {
+  gap: 4px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-controls button {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 5px 8px;
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-controls button:hover,
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-controls button.active {
+  border-bottom-color: var(--wabi-sage);
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-weekday-row {
+  margin-top: 12px;
+  border: 0;
+  color: var(--wabi-faint);
+  font: 400 10px var(--font-sans);
+  letter-spacing: 0.12em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-grid {
+  border-top: var(--wabi-rule-soft);
+  border-left: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-card {
+  min-height: 118px;
+  border: 0;
+  border-right: var(--wabi-rule-soft);
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-card:hover,
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-card.selected {
+  background: var(--wabi-paper-1);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-card.today {
+  box-shadow: inset 0 2px 0 var(--wabi-vermilion);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-grid.week-view .calendar-day-card {
+  height: auto;
+  min-height: 320px;
+  overflow: visible;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-top {
+  color: var(--wabi-muted);
+  font-family: var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-top small {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill {
+  border: 0;
+  border-left: 3px solid var(--pill-color);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 400 11px/1.3 var(--font-sans);
+  padding: 3px 0 3px 7px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-header {
+  align-items: end;
+  padding: 24px 0 12px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-header .section-note {
+  margin: 8px 0 0;
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-header .ghost-button {
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-board {
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-card {
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-header-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 64px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-toggle {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-toggle strong {
+  color: var(--wabi-ink);
+  font: 500 23px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-toggle small {
+  color: var(--wabi-muted);
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.06em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-header-row .accordion-actions {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-card.open .semester-header-row .accordion-actions {
+  display: flex;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .mini-health {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .accordion-actions .ghost-button,
+:root[data-app-style="wabi-sabi"] .wabi-planner .accordion-actions .mini-danger {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 4px;
+  font: 400 10px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .accordion-actions .mini-danger {
+  color: var(--wabi-vermilion);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .accordion-body {
+  gap: 0;
+  margin: 0;
+  padding: 0 0 16px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-stack {
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet {
+  padding: 0;
+  border: 0;
+  border-top: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-header-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-toggle {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-toggle-main {
+  display: grid;
+  grid-template-columns: 14px minmax(180px, 270px) minmax(90px, 225px);
+  gap: 18px;
+  width: 100%;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-toggle strong {
+  color: var(--wabi-ink);
+  font: 500 20px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-toggle small {
+  color: var(--wabi-muted);
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.06em;
+}
+
+.wabi-course-progress {
+  align-self: center;
+  height: 5px;
+  background: var(--line);
+}
+
+.wabi-course-progress i {
+  display: block;
+  height: 100%;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-actions {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet.open .course-actions {
+  display: flex;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-action-row {
+  gap: 2px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet .nested-body {
+  margin: 0;
+  padding: 0 0 8px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet .task-table {
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet .task-table > div {
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-card {
+  position: relative;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 14px;
+  min-height: 48px;
+  padding: 10px 0;
+  border-top: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-card::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  align-self: center;
+  border: 1.5px solid var(--wabi-faint);
+  border-radius: 50%;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-card.complete::before {
+  border-color: var(--wabi-sage);
+  background: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-card.selected {
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-main {
+  gap: 2px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-title-button {
+  color: var(--wabi-ink);
+  font: 400 18px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-title-button:hover {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-main p {
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.05em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-progress {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-actions {
+  gap: 3px;
+  justify-content: flex-end;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-actions button {
+  min-width: 25px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 3px 5px;
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-actions button:nth-child(n + 3) {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .task-row-actions button:hover {
+  color: var(--wabi-sage);
+}
+
+/* Course selection is an editor overlay in the Wabi-Sabi planner. */
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-sheet:has(.course-edit-form)::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgb(28 29 25 / 0.28);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form {
+  position: fixed;
+  z-index: 1001;
+  top: 50%;
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 28px;
+  border: var(--wabi-rule-hard);
+  border-radius: 0;
+  background: var(--wabi-paper);
+  box-shadow: var(--shadow-lg);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form::before {
+  content: "Edit course";
+  display: block;
+  margin-bottom: 18px;
+  color: var(--wabi-ink);
+  font: 500 28px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form .inline-form-grid-course {
+  grid-template-columns: minmax(0, 1fr) 130px 90px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form .inline-form-actions button {
+  border-radius: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-exam-panel,
+:root[data-app-style="wabi-sabi"] .wabi-planner .planner-support-grid,
+:root[data-app-style="wabi-sabi"] .wabi-planner .semester-overview-card {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-task-row.selected {
+  position: relative;
+  background: var(--wabi-paper-2);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-task-row.selected::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: -12px;
+  width: 2px;
+  background: var(--wabi-sage);
+  content: "";
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-task-row.selected .wabi-task-title {
+  color: var(--wabi-sage);
+}
+
+/* The planner day view uses its own scroll containers so its heading, hours,
+   and side controls remain accessible at every viewport size. */
+:root[data-app-style="wabi-sabi"] .calendar-day-view-backdrop {
+  align-items: center;
+  padding: 16px;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-view {
+  width: min(1180px, calc(100vw - 32px));
+  height: min(900px, calc(100vh - 32px));
+  max-height: none;
+  overflow: auto;
+  padding: 24px;
+  border: var(--wabi-rule-hard);
+  border-radius: 0;
+  background: var(--wabi-paper);
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-view-head {
+  flex-wrap: wrap;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-view-head h3 {
+  overflow-wrap: anywhere;
+  color: var(--wabi-ink);
+  font-family: var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-view-body {
+  min-height: 620px;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+/* -------- Vault -------- */
+
+:root[data-app-style="wabi-sabi"] .wabi-vault {
+  max-width: 1320px;
+  margin: 0 auto;
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-hero {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-nav {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: var(--wabi-rule-hard);
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-nav-item {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-faint);
+  padding: 10px 12px 9px;
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-nav-item.active {
+  border-bottom-color: var(--wabi-ink);
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  column-gap: 44px;
+  align-items: start;
+  padding-top: 26px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-toolbar,
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel > .vault-document-wrap {
+  grid-column: 1;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-toolbar {
+  grid-column: 2;
+  margin: 0;
+  padding: 0 0 14px;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-toolbar-main h2,
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-document h2,
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-viewer-head h2 {
+  color: var(--wabi-ink);
+  font-family: var(--font-serif);
+  font-weight: 500;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-toolbar-actions .ghost-button,
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-toolbar-actions > button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.wabi-vault-shelf {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  min-width: 0;
+  padding-right: 28px;
+  border-right: var(--wabi-rule-soft);
+}
+
+.wabi-vault-shelf > .wabi-eyebrow {
+  display: block;
+  margin: 2px 0 10px;
+  padding-bottom: 10px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+.wabi-vault-semester {
+  border-bottom: var(--wabi-rule-soft);
+}
+
+.wabi-vault-semester-toggle,
+.wabi-vault-course-list button {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  width: 100%;
+}
+
+.wabi-vault-semester-toggle {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 0;
+  color: var(--wabi-ink);
+  font: 500 16px var(--font-serif);
+}
+
+.wabi-vault-semester-toggle small {
+  color: var(--wabi-faint);
+  font: 400 10px var(--font-sans);
+  letter-spacing: 0.08em;
+}
+
+.wabi-vault-course-list {
+  display: grid;
+  gap: 1px;
+  padding: 0 0 10px 12px;
+}
+
+.wabi-vault-course-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  color: var(--wabi-muted);
+  font: 400 13px var(--font-sans);
+}
+
+.wabi-vault-course-list button > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.wabi-vault-course-list button:hover,
+.wabi-vault-course-list button.active {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .vault-document-wrap,
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .summaries-layout {
+  grid-column: 2;
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-document-wrap {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  padding-top: 22px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-document {
+  grid-column: 2;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-list {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  padding-right: 22px;
+  border-right: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-row {
+  display: grid;
+  gap: 3px;
+  padding: 10px 0;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-row span {
+  color: var(--wabi-ink);
+  font: 400 15px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-row code,
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-document-meta {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-prose {
+  color: var(--wabi-ink);
+  font: 400 20px/1.65 var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summaries-layout {
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  padding-top: 22px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-list,
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-viewer-card {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-list {
+  padding-right: 22px;
+  border-right: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-link {
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0;
+  color: var(--wabi-muted);
+  font-family: var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-link.active {
+  color: var(--wabi-sage);
+  background: transparent;
+}
+
+/* The shelf is the only course selector in Wabi-Sabi Vault. */
+:root[data-app-style="wabi-sabi"] .wabi-vault .references-toolbar-main {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel {
+  grid-template-columns: 220px minmax(0, 1fr);
+  column-gap: 24px;
+  padding-top: 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .vault-toolbar {
+  min-height: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .vault-toolbar:has(.references-toolbar-main) {
+  justify-content: flex-end;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel:not(.wabi-vault-daily-panel) > .vault-document-wrap {
+  grid-template-columns: minmax(0, 1fr);
+  padding-top: 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel:not(.wabi-vault-daily-panel) > .vault-document-wrap .vault-document {
+  grid-column: 1;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-document-wrap {
+  width: min(1040px, 100%);
+  grid-template-columns: 250px minmax(0, 720px);
+  gap: 34px;
+  padding-top: 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-toolbar {
+  display: flex;
+  width: min(1040px, 100%);
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  padding-bottom: 12px;
+}
+
+/* Keep Notes as one panel: the recent-note rail belongs inside the reader, not before it. */
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel.wabi-vault-daily-panel {
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-list {
+  padding-right: 18px;
+  border-right: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-row {
+  padding: 9px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-row:first-of-type {
+  border-color: transparent;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-row code {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-prose {
+  font-size: 18px;
+  line-height: 1.7;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-toolbar-main {
+  display: flex;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-toolbar-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  margin-left: auto;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-compact-field {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-compact-field span {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-compact-field input {
+  color: var(--wabi-ink);
+  font: 500 24px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-path-chip,
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .design-chip {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-document {
+  max-width: 720px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-document-meta {
+  margin-bottom: 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-document-meta span {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-list > .eyebrow {
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-recent-list {
+  padding-top: 2px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summaries-layout {
+  display: block;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-viewer-card {
+  min-height: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-viewer-empty {
+  min-height: 0;
+  padding: 20px 0;
+  text-align: left;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-list {
+  margin-bottom: 20px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-viewer-head {
+  border-bottom: var(--wabi-rule-soft);
+  padding-bottom: 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-pdf-viewer,
+:root[data-app-style="wabi-sabi"] .wabi-vault .summary-image-viewer {
+  width: 100%;
+}
+
+/* The Notes shelf mirrors the Bonsai reference: choose a note at left, read it at right. */
+:root[data-app-style="wabi-sabi"] .wabi-notes-layout {
+  display: grid;
+  grid-template-columns: 390px minmax(0, 1fr);
+  min-height: 480px;
+  max-width: 1180px;
+  margin-top: 26px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-shelf {
+  padding-right: 48px;
+  border-right: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav {
+  display: flex;
+  gap: 22px;
+  padding-bottom: 10px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button,
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions button {
+  border: 0;
+  background: transparent;
+  color: var(--wabi-faint);
+  padding: 0;
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button.active,
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button:hover,
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions button:hover:not(:disabled) {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-count {
+  margin: 14px 0 10px;
+  color: var(--wabi-faint);
+  font: 400 12px var(--font-sans);
+  letter-spacing: 0.08em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  background: transparent;
+  padding: 20px 0;
+  text-align: left;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row strong {
+  color: var(--wabi-muted);
+  font: 400 19px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row.active strong,
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row:hover strong {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row span {
+  color: var(--wabi-faint);
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader {
+  min-width: 0;
+  padding-left: 52px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader header {
+  margin-bottom: 30px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader h2 {
+  margin: 6px 0 0;
+  color: var(--wabi-ink);
+  font: 500 33px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader header p {
+  margin: 6px 0 0;
+  color: var(--wabi-faint);
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose {
+  max-width: 700px;
+  color: var(--wabi-ink);
+  font: 400 22px/1.8 var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose > :first-child {
+  margin-top: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-editor {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 500px;
+  resize: vertical;
+  border: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font: 400 19px/1.7 var(--font-serif);
+  outline: 0;
+}
+
+/* Notes use their own quiet workspace rather than the shared Vault chrome. */
+:root[data-app-style="wabi-sabi"] .wabi-vault {
+  max-width: 1240px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-layout {
+  grid-template-columns: 340px minmax(0, 1fr);
+  min-height: calc(100vh - 150px);
+  margin-top: 46px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault-space-nav {
+  max-width: 1180px;
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-shelf {
+  padding-right: 40px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav {
+  gap: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button {
+  position: relative;
+  padding: 0 18px 11px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button + button {
+  padding-left: 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-nav button.active::after {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--wabi-ink);
+  content: "";
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-count {
+  margin: 17px 0 8px;
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-shelf-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-shelf-head button,
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-shelf-head button:hover,
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions button:hover:not(:disabled) {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-empty {
+  margin: 18px 0;
+  color: var(--wabi-faint);
+  font: 400 15px var(--font-serif);
+  font-style: italic;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row {
+  padding: 18px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row strong {
+  font-size: 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row.active {
+  margin-left: -12px;
+  padding-left: 12px;
+  background: color-mix(in srgb, var(--wabi-paper-2) 58%, transparent);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-shelf-row.active strong {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions {
+  gap: 16px;
+  margin-top: 20px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions button {
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-notes-actions .wabi-note-delete:hover:not(:disabled) {
+  color: var(--wabi-vermilion);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader {
+  padding-left: 48px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 38px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader h2 {
+  margin: 0;
+  font-size: clamp(2rem, 3vw, 2.65rem);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-title-input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font: 500 clamp(2rem, 3vw, 2.65rem) var(--font-serif);
+  outline: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-title-input:focus {
+  border-bottom-color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-reader header p {
+  flex: none;
+  margin: 0;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose {
+  max-width: 680px;
+  font-size: 20px;
+  line-height: 1.75;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose > h1:first-child {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose h2 {
+  margin: 38px 0 16px;
+  padding-bottom: 8px;
+  border-bottom: var(--wabi-rule-soft);
+  color: var(--wabi-ink);
+  font: 400 12px var(--font-sans);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose h3 {
+  margin: 28px 0 8px;
+  color: var(--wabi-ink);
+  font: 500 20px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose p,
+:root[data-app-style="wabi-sabi"] .wabi-note-prose li {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-note-prose blockquote {
+  border-left-color: var(--wabi-sage);
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+}
+
+@media (max-width: 760px) {
+  :root[data-app-style="wabi-sabi"] .wabi-notes-layout {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    min-height: 0;
+    margin-top: 24px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-notes-shelf {
+    padding: 0;
+    border-right: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-note-reader {
+    padding: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-note-reader header {
+    display: block;
+    margin-bottom: 26px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-note-reader header p {
+    margin-top: 7px;
+  }
+}
+
+/* Remove the remaining arena controls from the Squad room in favor of the Bonsai ledger. */
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-hq-card {
+  border-bottom: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-hq-head {
+  align-items: flex-start;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-hq-head h2 {
+  margin-top: 4px;
+  font: 500 30px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-actions {
+  gap: 16px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-main-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-roster-panel .arena-panel-head h3,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-internal-leaderboard-panel .arena-panel-head h3 {
+  margin-top: 4px;
+  font-size: 22px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-periods {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-internal-leaderboard-panel .arena-panel-head::after {
+  margin-left: auto;
+  color: var(--wabi-faint);
+  content: "this week";
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 88px;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-rank-badge {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-faint);
+  padding: 0;
+  font: 400 16px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-person strong,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-score strong {
+  color: var(--wabi-ink);
+  font: 400 19px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-score {
+  text-align: right;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-score span,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-person span {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-row--self {
+  background: var(--wabi-paper-1);
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-card .arena-panel-head h3 {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-card .arena-panel-head .arena-kicker {
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] html {
+  scrollbar-gutter: stable;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-sidebar {
+  transform: translateZ(0);
+  contain: layout;
+}
+
+/* -------- Circle feed -------- */
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell {
+  max-width: 1150px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell .social-feed-scope {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0;
+  margin-bottom: 22px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell .social-feed-scope button {
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 5px 9px;
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell .social-feed-scope button.active {
+  border-bottom-color: var(--wabi-sage);
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell .stories,
+:root[data-app-style="wabi-sabi"] .wabi-feed-shell .live-bar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer {
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 0 16px;
+  border: 0;
+  border-top: var(--wabi-rule-hard);
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer > div:first-child {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-input {
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font: 400 21px var(--font-serif);
+  padding: 6px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-input::placeholder {
+  color: var(--wabi-muted);
+  opacity: 1;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-composer-actions {
+  gap: 2px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-action-icon,
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-btn {
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 6px;
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-btn:hover:not(:disabled),
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-action-icon:hover {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-main .section-label {
+  display: flex;
+  justify-content: space-between;
+  margin: 20px 0 0;
+  padding: 0 0 12px;
+  border-bottom: var(--wabi-rule-hard);
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.18em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card {
+  display: grid;
+  grid-template-columns: 174px minmax(0, 1fr);
+  margin: 0;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head {
+  align-items: start;
+  padding: 28px 18px 24px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head > .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head > div {
+  gap: 5px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .social-name-button--strong {
+  color: var(--wabi-ink);
+  font: 500 19px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head span {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.07em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__body {
+  gap: 14px;
+  padding: 26px 0 14px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session {
+  order: 2;
+  gap: 10px;
+  border: 0;
+  border-left: 3px solid var(--line);
+  border-radius: 0;
+  padding: 4px 0 4px 16px;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session > span {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session strong,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session small {
+  color: var(--wabi-muted);
+  font: 400 12.5px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__body > p {
+  order: 1;
+  color: var(--wabi-ink);
+  font: 400 25px/1.45 var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__reactions,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__comments-shell {
+  grid-column: 2;
+  border: 0;
+  padding: 0 0 16px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__reactions {
+  gap: 14px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .reaction-btn,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-comments-toggle {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .reaction-btn:hover,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .reaction-btn--active,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-comments-toggle:hover {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .reaction-btn--add,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__comments-shell:has(.feed-card__comments) .feed-comments-toggle {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__comments {
+  margin-top: 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-end {
+  margin: 0;
+  padding: 24px 0 8px;
+  color: var(--wabi-faint);
+  font: 400 13px var(--font-sans);
+}
+
+/* -------- Circle ledger views -------- */
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root {
+  max-width: 1320px;
+  margin: 0 auto;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-hero-header {
+  display: block;
+  padding: 0 0 18px;
+  text-align: left;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-hero-title {
+  display: block;
+  background: none;
+  color: var(--wabi-ink);
+  font: 500 32px var(--font-serif);
+  letter-spacing: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-hero-sub {
+  display: block;
+  margin-top: 7px;
+  color: var(--wabi-muted);
+  font: 400 14px var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .wabi-competitive-toggle {
+  display: block;
+  margin: 18px auto 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav {
+  max-width: none;
+  margin: 0 0 24px;
+  gap: 22px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav-item {
+  margin: 0;
+  border: 0;
+  padding: 0 0 9px;
+  color: var(--wabi-faint);
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav-item.active {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav-request-badge {
+  min-width: 0;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wabi-vermilion);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .social-single-panel,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-leaderboard {
+  width: min(100%, 760px);
+  max-width: none;
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-player-card,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-panel,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-leaderboard {
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-player-card::before,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-leaderboard::before {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-kicker,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-social-section h4 {
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-btn,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-name-edit-button,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-icon-button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  padding: 3px 0;
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-btn--send,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-btn--accept {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-btn--decline,
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .squad-chat-delete {
+  color: var(--wabi-faint);
+}
+
+/* Profile */
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-player-card__inner {
+  padding: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-player-main {
+  display: block;
+  padding: 0 0 12px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-avatar-button {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-player-copy::before {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--wabi-muted);
+  content: "YOU";
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.2em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-name-row h2,
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-name-input {
+  color: var(--wabi-ink);
+  font: 500 28px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-name-edit-button {
+  color: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-player-tags {
+  margin-top: 8px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-code-plate {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 400 11.5px var(--font-sans);
+  letter-spacing: 0.1em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-code-plate:not(:first-child),
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-sync-pill,
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-code-key,
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-code-copy {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-player-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat {
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% / 3);
+  min-height: 126px;
+  border: 0;
+  border-right: var(--wabi-rule-soft);
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 18px 26px;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat:nth-child(3) { order: 4; }
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat:nth-child(4) { order: 3; }
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat:nth-child(5) { order: 6; }
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat:nth-child(6) { order: 5; }
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat__icon {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat strong {
+  color: var(--wabi-ink);
+  font: 500 27px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat div span {
+  margin-top: 8px;
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.14em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-sync-console {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 22px 0 0;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 0 0 12px;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-sync-console .arena-kicker,
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-sync-console .arena-error {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-sync-console p {
+  color: var(--wabi-muted);
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-options {
+  margin-top: 26px;
+  border-top: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  width: 100%;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 14px 0;
+  background: transparent;
+  text-align: left;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-toggle strong {
+  color: var(--wabi-ink);
+  font: 400 18px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-toggle span {
+  grid-column: 1;
+  color: var(--wabi-muted);
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-toggle::after {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  color: var(--wabi-faint);
+  content: "OFF";
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.14em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-profile-panel .profile-toggle.active::after {
+  color: var(--wabi-sage);
+  content: "ON";
+}
+
+/* Friends */
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friends-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-head {
+  order: 1;
+  display: block;
+  padding: 0 0 12px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-icon {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-head .arena-kicker::before {
+  content: "ADD A FRIEND";
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-head .arena-kicker {
+  font-size: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-head .arena-kicker::before {
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.2em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-panel-head h3 {
+  margin-top: 6px;
+  color: var(--wabi-ink);
+  font: 500 27px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-add-friend {
+  order: 2;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  margin-top: 16px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-add-friend::before {
+  color: var(--wabi-muted);
+  content: "TAG";
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.2em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-input {
+  border: 0;
+  border-radius: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font: 400 15px var(--font-sans);
+  letter-spacing: 0.06em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-invite-card {
+  order: 3;
+  grid-template-columns: 1fr auto;
+  margin-top: 16px;
+  border: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 14px 16px;
+  background: var(--wabi-paper-1);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-invite-card p {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-invite-card input {
+  grid-column: 1;
+  padding: 4px 0 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-social-section {
+  display: contents;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-social-section h4 {
+  margin-top: 30px;
+  padding-bottom: 7px;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-social-section h4 span {
+  margin-left: auto;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--wabi-faint);
+  font: 400 11px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-card,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px 90px;
+  gap: 14px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-card .arena-avatar,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-copy,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-copy strong,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card strong {
+  color: var(--wabi-ink);
+  font: 400 18px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-copy span,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card span,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-pending-badge {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.1em;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-actions,
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-pending-badge {
+  justify-self: end;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-grid {
+  display: block;
+}
+
+/* Squad and standings */
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel,
+:root[data-app-style="wabi-sabi"] .wabi-standings {
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-card {
+  padding: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-hq-head,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .arena-panel-head {
+  padding-bottom: 10px;
+  border-bottom: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .arena-title-icon,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .arena-panel-icon,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-summary .arena-avatar,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel h2,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel h3 {
+  color: var(--wabi-ink);
+  font: 500 27px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-hq-head p,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-main span,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message strong span {
+  color: var(--wabi-muted);
+  font: 400 11.5px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-stats-grid {
+  gap: 0;
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-stats-grid > div {
+  border: 0;
+  border-right: var(--wabi-rule-soft);
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 17px 18px;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-stats-grid strong {
+  color: var(--wabi-ink);
+  font: 500 26px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-stats-grid span,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-role-badge {
+  color: var(--wabi-muted);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-main-grid {
+  gap: 34px;
+  margin-top: 28px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-card,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-summary,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message {
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-summary {
+  grid-template-columns: 1fr auto;
+  padding: 12px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-member-main strong,
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message strong {
+  color: var(--wabi-ink);
+  font: 400 18px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-lb-rows .arena-lb-row,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+  border: 0;
+  border-bottom: var(--wabi-rule-soft);
+  border-radius: 0;
+  padding: 12px 6px;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-card {
+  margin-top: 34px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-list {
+  margin: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message {
+  grid-template-columns: 110px 1fr 60px;
+  padding: 13px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message p {
+  color: var(--wabi-ink);
+  font: 400 17px/1.5 var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-form {
+  border-bottom: var(--wabi-rule-soft);
+  padding: 12px 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-form .arena-input {
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font: 400 16px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings {
+  min-height: 0;
+  padding: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-leaderboard-head {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-scope-toggle,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-period-chips {
+  gap: 18px;
+  padding: 0 0 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-scope-btn,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-period-chip {
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  padding: 3px 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--wabi-faint);
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-scope-btn--active,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-period-chip--active {
+  border-bottom-color: var(--wabi-ink);
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  justify-content: stretch;
+  margin-top: 20px;
+  padding: 0;
+  border-top: var(--wabi-rule-hard);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col {
+  align-content: start;
+  justify-items: start;
+  gap: 7px;
+  min-height: 182px;
+  padding: 16px 26px 18px;
+  border-right: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(1) { order: 2; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(2) { order: 1; background: var(--wabi-paper-1); }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(3) { order: 3; }
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > strong {
+  order: 2;
+  color: var(--wabi-ink);
+  font: 400 22px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > span {
+  order: 3;
+  color: var(--wabi-muted);
+  font: 400 12px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-block {
+  order: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-rank-badge {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-muted);
+  font: 500 34px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(2) .arena-rank-badge {
+  color: var(--wabi-vermilion);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-block small {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings > .arena-lb-rows {
+  margin-top: 2px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 110px;
+  gap: 14px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-avatar {
+  display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-rank {
+  color: var(--wabi-faint);
+  font: 400 13px var(--font-sans);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-person strong,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-score strong {
+  color: var(--wabi-ink);
+  font: 400 18px var(--font-serif);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-person span,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-score span {
+  color: var(--wabi-faint);
+  font: 400 10.5px var(--font-sans);
+  letter-spacing: 0.08em;
+}
+
 @media (max-width: 960px) {
   :root[data-app-style="wabi-sabi"] .shell {
     width: 100%;
@@ -18061,5 +20275,226 @@ input[type="color"] {
   .wabi-xp-water-fill {
     width: auto;
     height: 100%;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-composer {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-composer-actions {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-composer > .arena-btn {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-card {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head {
+    padding-right: 12px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-card .social-name-button--strong {
+    font-size: 16px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__body > p {
+    font-size: 20px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-head,
+  :root[data-app-style="wabi-sabi"] .wabi-planner .planner-header {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .planner-calendar-head h2,
+  :root[data-app-style="wabi-sabi"] .wabi-planner .planner-header h2 {
+    font-size: 27px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .calendar-day-card {
+    min-height: 86px;
+    padding: 7px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .semester-header-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .semester-card.open .semester-header-row {
+    align-items: start;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .semester-card.open .semester-header-row .accordion-actions {
+    justify-content: flex-start;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .course-header-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .course-toggle-main {
+    grid-template-columns: 14px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .wabi-course-progress {
+    grid-column: 2;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .course-actions {
+    justify-content: flex-start;
+    padding-top: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form {
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-planner .course-edit-form .inline-form-grid-course {
+    grid-template-columns: 1fr;
+  }
+
+  :root[data-app-style="wabi-sabi"] .calendar-day-view {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    padding: 16px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .calendar-day-view-body {
+    grid-template-columns: 1fr;
+  }
+
+  :root[data-app-style="wabi-sabi"] .calendar-day-side-panel {
+    max-height: none;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel {
+    grid-template-columns: 1fr;
+    gap: 22px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-toolbar,
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .vault-document-wrap,
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel > .summaries-layout {
+    grid-column: 1;
+  }
+
+  .wabi-vault-shelf {
+    grid-column: 1;
+    grid-row: auto;
+    padding: 0;
+    border-right: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-document-wrap,
+  :root[data-app-style="wabi-sabi"] .wabi-vault .summaries-layout {
+    grid-template-columns: 1fr;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-document-wrap {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-daily-panel .vault-toolbar {
+    width: 100%;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-notes-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+    margin-top: 20px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-notes-shelf {
+    padding: 0;
+    border-right: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-note-reader {
+    padding: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-document,
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-list {
+    grid-column: 1;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-vault .vault-recent-list,
+  :root[data-app-style="wabi-sabi"] .wabi-vault .summary-file-list {
+    grid-row: auto;
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav {
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-circle-root .social-nav-item {
+    font-size: 10px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat {
+    width: 50%;
+    min-height: 108px;
+    padding: 16px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-profile-panel .arena-mini-stat strong {
+    font-size: 23px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-card,
+  :root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-request-card > :last-child,
+  :root[data-app-style="wabi-sabi"] .wabi-friends-panel .arena-friend-card > :last-child {
+    grid-column: 2;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-message {
+    grid-template-columns: 90px minmax(0, 1fr);
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-squad-panel .squad-chat-delete {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col {
+    min-height: 148px;
+    padding: 14px 12px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > strong {
+    font-size: 17px;
+  }
+
+  :root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 8px;
   }
 }

@@ -74,6 +74,14 @@ struct SummaryFile {
     size_bytes: u64,
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VaultNoteFile {
+    title: String,
+    path: String,
+    saved_at: u64,
+}
+
 fn tray_icon_for_phase(phase: &str) -> Image<'static> {
     const SIZE: usize = 32;
     let mut pixels = vec![0; SIZE * SIZE * 4];
@@ -446,11 +454,11 @@ fn create_obsidian_vault(base_path: String, vault_name: String) -> Result<String
     let vault_path = PathBuf::from(base_path).join(vault_name);
     fs::create_dir_all(&vault_path).map_err(|error| error.to_string())?;
 
-    for directory in [".obsidian", "Daily", "References", "Summaries"] {
+    for directory in [".obsidian", "Daily", "Notes", "References", "Summaries"] {
         fs::create_dir_all(vault_path.join(directory)).map_err(|error| error.to_string())?;
     }
 
-    let readme = "# Study Tracker Vault\n\nThis vault was created by Study Tracker.\n\nUse Daily for session notes, References for course links, and Summaries for PDFs, formula sheets, and cheatsheet images.\n";
+    let readme = "# Study Tracker Vault\n\nThis vault was created by Study Tracker.\n\nUse Notes for your own markdown notes, References for course links, and Summaries for PDFs, formula sheets, and cheatsheet images.\n";
     fs::write(vault_path.join("README.md"), readme).map_err(|error| error.to_string())?;
 
     Ok(vault_path.to_string_lossy().to_string())
@@ -460,6 +468,19 @@ fn daily_note_path(vault_path: &str, note_date: &str) -> PathBuf {
     Path::new(vault_path)
         .join("Daily")
         .join(format!("{}.md", sanitize_segment(note_date)))
+}
+
+fn notes_dir_path(vault_path: &str) -> PathBuf {
+    Path::new(vault_path).join("Notes")
+}
+
+fn note_path(vault_path: &str, note_title: &str) -> Result<PathBuf, String> {
+    let note_title = sanitize_segment(note_title);
+    if note_title.is_empty() {
+        return Err("Note title cannot be empty.".into());
+    }
+
+    Ok(notes_dir_path(vault_path).join(format!("{note_title}.md")))
 }
 
 fn reference_note_path(
@@ -550,7 +571,7 @@ fn link_obsidian_vault(vault_path: String) -> Result<String, String> {
         return Err("Selected path is not a folder.".into());
     }
 
-    for directory in [".obsidian", "Daily", "References", "Summaries"] {
+    for directory in [".obsidian", "Daily", "Notes", "References", "Summaries"] {
         fs::create_dir_all(root.join(directory)).map_err(|error| error.to_string())?;
     }
 
@@ -586,6 +607,81 @@ fn write_daily_note(
     fs::write(&note_path, content).map_err(|error| error.to_string())?;
 
     Ok(note_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn list_notes(vault_path: String) -> Result<Vec<VaultNoteFile>, String> {
+    let root = PathBuf::from(&vault_path);
+    let notes_dir = notes_dir_path(&vault_path);
+    fs::create_dir_all(&notes_dir).map_err(|error| error.to_string())?;
+    ensure_path_inside(&root, &notes_dir)?;
+
+    let mut notes = fs::read_dir(notes_dir)
+        .map_err(|error| error.to_string())?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|extension| extension.to_str()) != Some("md") {
+                return None;
+            }
+
+            let title = path.file_stem()?.to_string_lossy().to_string();
+            let saved_at = entry
+                .metadata()
+                .ok()?
+                .modified()
+                .ok()?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_millis() as u64;
+            Some(VaultNoteFile {
+                title,
+                path: path.to_string_lossy().to_string(),
+                saved_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    notes.sort_by(|left, right| right.saved_at.cmp(&left.saved_at));
+
+    Ok(notes)
+}
+
+#[tauri::command]
+fn read_note(vault_path: String, note_title: String) -> Result<Option<String>, String> {
+    let root = PathBuf::from(&vault_path);
+    let note_path = note_path(&vault_path, &note_title)?;
+    ensure_path_inside(&root, &note_path)?;
+    if !note_path.exists() {
+        return Ok(None);
+    }
+
+    fs::read_to_string(note_path)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn write_note(vault_path: String, note_title: String, content: String) -> Result<String, String> {
+    let root = PathBuf::from(&vault_path);
+    let notes_dir = notes_dir_path(&vault_path);
+    fs::create_dir_all(&notes_dir).map_err(|error| error.to_string())?;
+    let note_path = note_path(&vault_path, &note_title)?;
+    ensure_path_inside(&root, &note_path)?;
+    fs::write(&note_path, content).map_err(|error| error.to_string())?;
+
+    Ok(note_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn delete_note(vault_path: String, note_title: String) -> Result<(), String> {
+    let root = PathBuf::from(&vault_path);
+    let note_path = note_path(&vault_path, &note_title)?;
+    ensure_path_inside(&root, &note_path)?;
+    if note_path.exists() {
+        fs::remove_file(note_path).map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -996,6 +1092,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            #[cfg(not(target_os = "macos"))]
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_decorations(false)?;
+            }
             setup_timer_tray(app.handle())?;
             #[cfg(target_os = "macos")]
             if let Some(window) = app.get_webview_window("main") {
@@ -1008,6 +1108,10 @@ pub fn run() {
             link_obsidian_vault,
             read_daily_note,
             write_daily_note,
+            list_notes,
+            read_note,
+            write_note,
+            delete_note,
             read_reference_note,
             write_reference_note,
             list_summary_files,

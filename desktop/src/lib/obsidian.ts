@@ -69,6 +69,28 @@ export async function writeDailyNote(vaultPath: string, noteDate: string, conten
   });
 }
 
+export type VaultNoteFile = {
+  title: string;
+  path: string;
+  savedAt: number;
+};
+
+export async function listNotes(vaultPath: string) {
+  return invoke<VaultNoteFile[]>("list_notes", { vaultPath });
+}
+
+export async function readNote(vaultPath: string, noteTitle: string) {
+  return invoke<string | null>("read_note", { vaultPath, noteTitle });
+}
+
+export async function writeNote(vaultPath: string, noteTitle: string, content: string) {
+  return invoke<string>("write_note", { vaultPath, noteTitle, content });
+}
+
+export async function deleteNote(vaultPath: string, noteTitle: string) {
+  return invoke<void>("delete_note", { vaultPath, noteTitle });
+}
+
 export async function readReferenceNote(vaultPath: string, semesterName: string, courseName: string) {
   return invoke<string | null>("read_reference_note", {
     vaultPath,

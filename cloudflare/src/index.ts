@@ -22,6 +22,7 @@ interface SyncPayload {
     displayName: string;
     avatar?: unknown;
     isPrivate?: boolean;
+    showHoursToFriends?: boolean;
     lifetimeStudyMinutes?: number;
     lifetimeStudySessions?: number;
     device?: {
@@ -279,6 +280,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const displayName = cleanName(payload.displayName);
   const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
+  const showHoursToFriends = payload.showHoursToFriends === false ? 0 : 1;
   const lifetimeStudyMinutes = Math.min(10_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudyMinutes ?? 0))));
   const lifetimeStudySessions = Math.min(1_000_000, Math.max(0, Math.round(Number(payload.lifetimeStudySessions ?? 0))));
   const deviceFingerprintHash = cleanText(payload.device?.fingerprintHash, 120);
@@ -295,7 +297,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   if (existing) {
     await env.DB.prepare(`
       UPDATE users
-      SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?,
+      SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, show_hours_to_friends = ?,
         lifetime_study_minutes = MAX(lifetime_study_minutes, ?),
         lifetime_study_sessions = MAX(lifetime_study_sessions, ?),
         device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
@@ -308,14 +310,14 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
         updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `)
-      .bind(friendCode, displayName, avatar, isPrivate, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
+      .bind(friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
       .run();
   } else {
     await env.DB.prepare(`
-      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
+      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, show_hours_to_friends, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
     `)
-      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
+      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
       .run();
   }
 }
@@ -1180,6 +1182,10 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
       clauses.push(`u.id IN (${allowedIds.map(() => "?").join(",")})`);
       params.push(...allowedIds);
     }
+    if (scope === "friends") {
+      clauses.push("(u.id = ? OR u.show_hours_to_friends = 1)");
+      params.push(userId);
+    }
     const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = await env.DB.prepare(`
       SELECT ranked.*,
@@ -1222,6 +1228,10 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
   if (allowedIds.length) {
     clauses.push(`u.id IN (${allowedIds.map(() => "?").join(",")})`);
     params.push(...allowedIds);
+  }
+  if (scope === "friends") {
+    clauses.push("(u.id = ? OR u.show_hours_to_friends = 1)");
+    params.push(userId);
   }
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = await env.DB.prepare(`
@@ -2006,8 +2016,8 @@ async function handlePlayerStats(request: Request, env: Env) {
   const targetUserId = cleanUserId(payload.targetUserId);
   await verifyUser(env, userId, deviceSecret);
 
-  const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, avatar_json AS avatarJson, last_seen_at AS lastSeenAt FROM users WHERE id = ?")
-    .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; avatarJson: string; lastSeenAt: string | null }>();
+  const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, avatar_json AS avatarJson, last_seen_at AS lastSeenAt, show_hours_to_friends AS showHoursToFriends FROM users WHERE id = ?")
+    .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; avatarJson: string; lastSeenAt: string | null; showHoursToFriends: number }>();
   if (!targetUser) return text("User not found.", 404);
 
   const [userLow, userHigh] = friendPair(userId, targetUserId);
@@ -2016,6 +2026,7 @@ async function handlePlayerStats(request: Request, env: Env) {
     const isPublic = await env.DB.prepare("SELECT is_private FROM users WHERE id = ?").bind(targetUserId).first<{ is_private: number }>();
     if (!isPublic || isPublic.is_private) return text("User is private.", 403);
   }
+  const hoursVisible = targetUserId === userId || !areFriends || Boolean(targetUser.showHoursToFriends);
 
   async function getStats(period: LeaderboardPeriod) {
     if (period === "overall") {
@@ -2046,9 +2057,10 @@ async function handlePlayerStats(request: Request, env: Env) {
     friendCode: targetUser.friendCode,
     avatar: parseAvatar(targetUser.avatarJson, targetUser.displayName),
     lastSeenAt: targetUser.lastSeenAt,
-    daily: await getStats("daily"),
-    weekly: await getStats("weekly"),
-    overall: await getStats("overall"),
+    hoursVisible,
+    daily: hoursVisible ? await getStats("daily") : null,
+    weekly: hoursVisible ? await getStats("weekly") : null,
+    overall: hoursVisible ? await getStats("overall") : null,
   });
 }
 

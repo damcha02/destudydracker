@@ -12,6 +12,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
 import {
   buildDailyNoteMarkdown,
+  calculateAggregateWorkload,
   calculateDailyWork,
   clamp,
   daysUntil,
@@ -34,8 +35,8 @@ import {
   getWeeklyActivity,
   isoDate,
 } from "./lib/metrics";
-import { createVault, importSummaryFiles, isTauriApp, linkVault, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeReferenceNote } from "./lib/obsidian";
-import type { SummaryFile } from "./lib/obsidian";
+import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
+import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
@@ -1309,8 +1310,7 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
   { id: "modern", name: "Modern", desc: "Current rounded study dashboard with palette themes.", swatch: "linear-gradient(135deg, #8fb4ff, #98c379)" },
   { id: "field-notebook", name: "Field Notebook", desc: "Paper, ink, course tabs, ruled ledgers, and study-circle social styling.", swatch: "linear-gradient(135deg, #fbf8f0 0 45%, #23211d 45% 55%, #9c5a34 55%)" },
-  // Wabi-Sabi not ready yet — hidden from the picker until it ships. Re-add this entry to bring it back:
-  // { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
+  { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
 ];
 
 function isAppStyle(value: string | null): value is AppStyle {
@@ -1462,7 +1462,7 @@ type ExamDraft = {
 };
 
 function formatClock(totalSeconds: number) {
-  const seconds = Math.max(0, totalSeconds);
+  const seconds = Math.max(0, Math.floor(totalSeconds));
   const minutes = String(Math.floor(seconds / 60)).padStart(2, "0");
   const remaining = String(seconds % 60).padStart(2, "0");
   return `${minutes}:${remaining}`;
@@ -2007,6 +2007,8 @@ function formatFeedPostedAt(value: string) {
     minute: "2-digit",
   }).format(new Date(timestamp));
 }
+
+const WABI_ATTENDANCE_WINDOW_MS = 48 * 60 * 60 * 1000;
 
 function isRecentlyActive(value: string | null | undefined, maxAgeMs = 45 * 60 * 1000) {
   const timestamp = parseSocialTimestamp(value);
@@ -2787,6 +2789,10 @@ function App() {
   const [vaultNoteDate, setVaultNoteDate] = useState(localIsoDate);
   const [vaultNoteContent, setVaultNoteContent] = useState("");
   const [vaultNotePath, setVaultNotePath] = useState<string | null>(null);
+  const [vaultNotes, setVaultNotes] = useState<VaultNoteFile[]>([]);
+  const [vaultNoteTitle, setVaultNoteTitle] = useState("");
+  const [vaultNoteSavedAt, setVaultNoteSavedAt] = useState<number | null>(null);
+  const [vaultNotesLoading, setVaultNotesLoading] = useState(false);
   const [vaultNoteDirty, setVaultNoteDirty] = useState(false);
   const [vaultNoteLoading, setVaultNoteLoading] = useState(false);
   const [vaultSetupOpen, setVaultSetupOpen] = useState(() => !state.settings.vaultPath);
@@ -3519,55 +3525,22 @@ function App() {
     if (vaultSpace !== "summaries" || !state.settings.vaultPath || !selectedSummarySemester || !selectedSummaryCourse) return;
     void loadSummaryFileList(state.settings.vaultPath, selectedSummarySemester, selectedSummaryCourse, { silent: true });
   }, [selectedSummaryCourse, selectedSummarySemester, state.settings.vaultPath, vaultSpace]);
+
+  useEffect(() => {
+    if (appStyle !== "wabi-sabi" || state.activeTab !== "vault" || !state.settings.vaultPath) return;
+    void loadVaultNotes(state.settings.vaultPath);
+  }, [appStyle, state.activeTab, state.settings.vaultPath]);
+
+  useEffect(() => {
+    if (appStyle !== "wabi-sabi" || vaultNoteTitle || !vaultNotes.length) return;
+    void openVaultNote(vaultNotes[0]);
+  }, [appStyle, vaultNoteTitle, vaultNotes]);
   const selectedTask = useMemo(
     () => state.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, state.tasks],
   );
   const totalWorkload = useMemo(() => {
-    const totalUnits = state.tasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
-    const completedUnits = state.tasks.reduce(
-      (sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits),
-      0,
-    );
-    const unfinishedTasks = state.tasks.filter((task) => getRemainingUnits(task) > 0);
-    const datedTasks = unfinishedTasks.filter((task) => task.dueDate);
-    const nearestDueDate = datedTasks.length
-      ? [...datedTasks].sort((a, b) => daysUntil(a.dueDate ?? "") - daysUntil(b.dueDate ?? ""))[0]?.dueDate ?? null
-      : null;
-    const remainingUnits = Math.max(0, totalUnits - completedUnits);
-
-    let daysLeft: number | null = null;
-    let unitsPerDay = remainingUnits;
-    let message = "Add due dates to get a realistic overall pace.";
-
-    if (remainingUnits <= 0) {
-      unitsPerDay = 0;
-      daysLeft = 0;
-      message = "Everything tracked is complete. Use the timer for revision or new work.";
-    } else if (nearestDueDate) {
-      const dueIn = daysUntil(nearestDueDate);
-      daysLeft = dueIn;
-      if (dueIn <= 0) {
-        unitsPerDay = remainingUnits;
-        message = `Nearest deadline is now. You need ${remainingUnits} units today to stay on top.`;
-      } else {
-        unitsPerDay = remainingUnits / dueIn;
-        message = `${unitsPerDay.toFixed(1)} units/day keeps total workload ahead of the nearest deadline (${formatDate(nearestDueDate)}).`;
-      }
-    }
-
-    const progress = totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0;
-
-    return {
-      totalUnits,
-      completedUnits,
-      remainingUnits,
-      progress,
-      unitsPerDay,
-      daysLeft,
-      nearestDueDate,
-      message,
-    };
+    return calculateAggregateWorkload(state.tasks);
   }, [state.tasks]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
   const fieldPlannerWorkload = useMemo(() => {
@@ -3575,44 +3548,15 @@ function App() {
 
     const course = state.courses.find((item) => item.id === fieldPlannerWorkloadId) ?? null;
     const courseTasks = course ? state.tasks.filter((task) => task.courseId === course.id) : [];
-    const totalUnits = courseTasks.reduce((sum, task) => sum + Math.max(task.totalUnits, 1), 0);
-    const completedUnits = courseTasks.reduce((sum, task) => sum + clamp(task.completedUnits, 0, task.totalUnits), 0);
-    const remainingUnits = Math.max(0, totalUnits - completedUnits);
-    const unfinishedTasks = courseTasks.filter((task) => getRemainingUnits(task) > 0);
-    const datedTasks = unfinishedTasks.filter((task) => task.dueDate);
-    const nearestDueDate = datedTasks.length
-      ? [...datedTasks].sort((a, b) => daysUntil(a.dueDate ?? "") - daysUntil(b.dueDate ?? ""))[0]?.dueDate ?? null
-      : null;
-    let daysLeft: number | null = null;
-    let unitsPerDay = remainingUnits;
-    let message = course ? "Add due dates to this course for a realistic pace." : "Choose a course.";
-
     if (!course) {
-      unitsPerDay = 0;
-    } else if (remainingUnits <= 0) {
-      unitsPerDay = 0;
-      daysLeft = 0;
-      message = "This course workload is complete.";
-    } else if (nearestDueDate) {
-      const dueIn = daysUntil(nearestDueDate);
-      daysLeft = dueIn;
-      unitsPerDay = dueIn <= 0 ? remainingUnits : remainingUnits / dueIn;
-      message = dueIn <= 0
-        ? `${remainingUnits} units need attention today.`
-        : `${unitsPerDay.toFixed(1)} units/day keeps this course ahead of ${formatDate(nearestDueDate)}.`;
+      return {
+        ...calculateAggregateWorkload([]),
+        label: "Course workload",
+        message: "Choose a course.",
+      };
     }
 
-    return {
-      label: course?.name ?? "Course workload",
-      totalUnits,
-      completedUnits,
-      remainingUnits,
-      progress: totalUnits ? Math.round((completedUnits / totalUnits) * 100) : 0,
-      unitsPerDay,
-      daysLeft,
-      nearestDueDate,
-      message,
-    };
+    return { ...calculateAggregateWorkload(courseTasks), label: course.name };
   }, [fieldPlannerWorkloadId, state.courses, state.tasks, totalWorkload]);
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions, new Date(`${calendarToday}T00:00:00`)), [state.sessions, calendarToday]);
@@ -3679,6 +3623,7 @@ function App() {
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
+  const displayedSocialFeed = socialFeed;
   const feedImagesVisible = !state.settings.hideFeedImages;
   const feedPollsVisible = !state.settings.hideFeedPolls;
   const expandedFeedImage = feedImagesVisible && expandedFeedImageId ? socialFeed.find((post) => post.id === expandedFeedImageId && post.imageUrl) : null;
@@ -3692,6 +3637,9 @@ function App() {
   const liveFriends = state.social.friends.filter((friend) => {
     return isRecentlyActive(friend.lastSeenAt);
   });
+  const wabiAttendanceFriends = state.social.friends
+    .filter((friend) => isRecentlyActive(friend.lastSeenAt, WABI_ATTENDANCE_WINDOW_MS))
+    .sort((a, b) => (parseSocialTimestamp(b.lastSeenAt) ?? 0) - (parseSocialTimestamp(a.lastSeenAt) ?? 0));
   const weekCompareEntries = socialFriendsWeekly.slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
@@ -4809,6 +4757,19 @@ function App() {
     setMessage(state.social.autoPostSessions ? "Auto-post disabled." : "Auto-post enabled.");
   }
 
+  function toggleShowHoursToFriends() {
+    const nextState = {
+      ...state,
+      social: {
+        ...state.social,
+        showHoursToFriends: !state.social.showHoursToFriends,
+      },
+    };
+    setState(nextState);
+    setMessage(nextState.social.showHoursToFriends ? "Friends can see your study hours." : "Your study hours are hidden from friends.");
+    if (socialConfigured) void runSocialSync({ silent: true, stateOverride: nextState });
+  }
+
   async function toggleLocalFeedReaction(postId: string, emoji: string) {
     setState((current) => {
       const myName = current.social.displayName;
@@ -5570,6 +5531,7 @@ function App() {
         friendCode: state.social.friendCode,
         avatar: state.social.avatar,
         lastSeenAt: state.social.lastSyncedAt,
+        hoursVisible: true,
         daily: { minutes: daily.minutes, sessions: daily.sessions, lastActiveDate: daily.lastActiveDate },
         weekly: { minutes: weekly.minutes, sessions: weekly.sessions, lastActiveDate: weekly.lastActiveDate },
         overall: { minutes: overall.minutes, sessions: overall.sessions, lastActiveDate: overall.lastActiveDate },
@@ -7444,6 +7406,96 @@ function App() {
     }
   }
 
+  async function loadVaultNotes(vaultPath = state.settings.vaultPath) {
+    if (!vaultPath) return;
+
+    setVaultNotesLoading(true);
+    try {
+      setVaultNotes(await listNotes(vaultPath));
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not load notes."));
+    } finally {
+      setVaultNotesLoading(false);
+    }
+  }
+
+  async function openVaultNote(note: VaultNoteFile) {
+    if (!state.settings.vaultPath) return;
+
+    setVaultNotesLoading(true);
+    try {
+      const content = await readNote(state.settings.vaultPath, note.title);
+      setVaultNoteTitle(note.title);
+      setVaultNoteContent(stripMarkdownFrontmatter(content ?? ""));
+      setVaultNotePath(note.path);
+      setVaultNoteSavedAt(note.savedAt);
+      setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not open note."));
+    } finally {
+      setVaultNotesLoading(false);
+    }
+  }
+
+  function startNewVaultNote() {
+    setVaultNoteTitle("Untitled note");
+    setVaultNoteContent("");
+    setVaultNotePath(null);
+    setVaultNoteSavedAt(null);
+    setVaultNoteDirty(false);
+    setVaultDailyEditing(true);
+  }
+
+  async function handleSaveWabiVaultNote() {
+    if (!state.settings.vaultPath) return;
+    const title = vaultNoteTitle.trim();
+    if (!title) {
+      setMessage("Give the note a title before saving.");
+      return;
+    }
+
+    setVaultNotesLoading(true);
+    try {
+      const notePath = await writeNote(state.settings.vaultPath, title, vaultNoteContent);
+      const savedAt = Date.now();
+      setVaultNotePath(notePath);
+      setVaultNoteSavedAt(savedAt);
+      setVaultNoteDirty(false);
+      setVaultDailyEditing(false);
+      await loadVaultNotes(state.settings.vaultPath);
+      setMessage(`Saved ${title}.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not save note."));
+    } finally {
+      setVaultNotesLoading(false);
+    }
+  }
+
+  async function handleDeleteWabiVaultNote() {
+    if (!state.settings.vaultPath || !vaultNotePath || !vaultNoteTitle) return;
+    if (!window.confirm(`Delete "${vaultNoteTitle}"? This cannot be undone.`)) return;
+
+    setVaultNotesLoading(true);
+    try {
+      await deleteNote(state.settings.vaultPath, vaultNoteTitle);
+      const remaining = (await listNotes(state.settings.vaultPath)).filter((note) => note.title !== vaultNoteTitle);
+      setVaultNotes(remaining);
+      const nextNote = remaining[0];
+      if (nextNote) {
+        await openVaultNote(nextNote);
+      } else {
+        startNewVaultNote();
+        setVaultDailyEditing(false);
+      }
+      setMessage(`Deleted ${vaultNoteTitle}.`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not delete note."));
+    } finally {
+      setVaultNotesLoading(false);
+    }
+  }
+
   async function loadVaultNote(vaultPath = state.settings.vaultPath, noteDate = vaultNoteDate) {
     if (!vaultPath) {
       setMessage("Create or link an Obsidian vault first.");
@@ -7668,6 +7720,21 @@ function App() {
       },
     }));
     setMessage(`"${task.title}" sent to timer.`);
+  }
+
+  function selectTaskForNow(task: Task) {
+    setSelectedTaskId(task.id);
+    setState((current) => ({
+      ...current,
+      timer: {
+        ...current.timer,
+        semesterId: task.semesterId,
+        courseId: task.courseId,
+        taskId: task.id,
+        goal: task.title,
+      },
+    }));
+    setMessage(`"${task.title}" selected for now.`);
   }
 
   function focusTaskInQuietMode(task: Task) {
@@ -8135,9 +8202,10 @@ function App() {
             const isSelected = selectedCalendarDate === day.iso;
             const isToday = day.iso === calendarToday;
             const fieldNotebookWeek = appStyle === "field-notebook" && calendarView === "week";
-            const visibleEntryLimit = fieldNotebookWeek ? 8 : 3;
-            const visibleExamLimit = fieldNotebookWeek ? 4 : 2;
-            const visibleDeadlineLimit = fieldNotebookWeek ? 4 : 2;
+            const wabiWeek = appStyle === "wabi-sabi" && calendarView === "week";
+            const visibleEntryLimit = wabiWeek ? entries.length : fieldNotebookWeek ? 8 : 3;
+            const visibleExamLimit = wabiWeek ? exams.length : fieldNotebookWeek ? 4 : 2;
+            const visibleDeadlineLimit = wabiWeek ? deadlines.length : fieldNotebookWeek ? 4 : 2;
             const visibleItemCount = Math.min(entries.length, visibleEntryLimit) + Math.min(exams.length, visibleExamLimit) + Math.min(deadlines.length, visibleDeadlineLimit);
             const hiddenItemCount = entries.length + exams.length + deadlines.length - visibleItemCount;
 
@@ -8834,7 +8902,8 @@ function App() {
     const dailyGoalMinutes = Math.max(1, state.settings.dailyGoalMinutes ?? 120);
     const goalProgress = clamp(Math.round((todayMinutes / dailyGoalMinutes) * 100), 0, 100);
     const totalUnitsLeft = state.tasks.reduce((sum, task) => sum + getRemainingUnits(task), 0);
-    const nextEntry = todayCalendarEntries.find((entry) => !entry.completed) ?? todayCalendarEntries[0] ?? null;
+    const selectedEntry = selectedTaskId ? todayCalendarEntries.find((entry) => entry.taskId === selectedTaskId) ?? null : null;
+    const nextEntry = selectedEntry ?? todayCalendarEntries.find((entry) => !entry.completed) ?? todayCalendarEntries[0] ?? null;
     const nextTask = nextEntry?.taskId ? taskLookup.get(nextEntry.taskId) ?? null : null;
     const nextCourse = nextTask ? courseLookup.get(nextTask.courseId) ?? null : nextEntry?.adHocCourseId ? courseLookup.get(nextEntry.adHocCourseId) ?? null : null;
     const nextTitle = nextTask?.title ?? nextEntry?.adHocTitle ?? "Plan the next study block";
@@ -9118,6 +9187,8 @@ function App() {
             onChange={(event) => {
               const taskId = event.target.value || null;
               const task = taskId ? taskLookup.get(taskId) : null;
+              setSelectedTaskId(taskId);
+              setWabiQuietTaskId(taskId);
               setState((current) => ({
                 ...current,
                 timer: {
@@ -9215,11 +9286,13 @@ function App() {
               <label className="field">
                 <span>Task</span>
                 <select
-                  value={state.timer.taskId ?? ""}
-                  onChange={(event) => {
-                    const taskId = event.target.value || null;
-                    const task = taskId ? taskLookup.get(taskId) : null;
-                    setState((current) => ({
+            value={state.timer.taskId ?? ""}
+            onChange={(event) => {
+              const taskId = event.target.value || null;
+              const task = taskId ? taskLookup.get(taskId) : null;
+              setSelectedTaskId(taskId);
+              setWabiQuietTaskId(taskId);
+              setState((current) => ({
                       ...current,
                       timer: {
                         ...current.timer,
@@ -9673,12 +9746,14 @@ function App() {
 
   function renderWabiQuietMode() {
     const { nextTask, nextEntry, nextTitle, nextMeta } = getFieldDashboardData();
-    const quietTask = wabiQuietTaskId ? taskLookup.get(wabiQuietTaskId) ?? null : null;
+    // The active Timer task is authoritative; a quiet-mode pick is only a fallback.
+    const quietTask = timerTask ?? (wabiQuietTaskId ? taskLookup.get(wabiQuietTaskId) ?? null : null);
     const quietEntry = quietTask ? todayCalendarEntries.find((entry) => entry.taskId === quietTask.id) ?? null : null;
-    const focusTask = quietTask && !quietEntry?.completed ? quietTask : nextTask;
-    const focusEntry = quietTask && !quietEntry?.completed ? quietEntry : nextEntry;
-    const focusTitle = quietTask && !quietEntry?.completed ? quietTask.title : nextTitle;
-    const focusMeta = quietTask && !quietEntry?.completed
+    const useQuietTask = quietTask !== null && (quietTask.id === timerTask?.id || !quietEntry?.completed);
+    const focusTask = useQuietTask ? quietTask : nextTask;
+    const focusEntry = useQuietTask ? quietEntry : nextEntry;
+    const focusTitle = useQuietTask && quietTask ? quietTask.title : nextTitle;
+    const focusMeta = useQuietTask && quietTask
       ? `${focusEntry ? getCalendarEntryUnitLabel(focusEntry) + " · " : ""}${courseLookup.get(quietTask.courseId)?.name ?? "General focus"}${quietTask.dueDate ? ` · due ${formatDate(quietTask.dueDate)}` : ""}`
       : nextMeta;
     const otherOpenTasks = todayCalendarEntries
@@ -9710,7 +9785,9 @@ function App() {
           <p className="wabi-quiet-meta">{focusMeta}</p>
           <div className="wabi-quiet-clock">{formatClock(state.timer.remainingSeconds)}</div>
           <div className="wabi-quiet-actions">
-            <button type="button" className="wabi-btn-solid" onClick={() => (state.timer.running ? pauseTimer() : startTimer())}>{state.timer.running ? "PAUSE" : "START"}</button>
+            <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
+              {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
+            </button>
             <button type="button" className="wabi-btn-outline" onClick={completeSessionManually}>DONE, LOG IT</button>
           </div>
           <button type="button" className="wabi-quiet-leave" onClick={() => setWabiQuietMode(false)}>LEAVE QUIET MODE</button>
@@ -9835,7 +9912,13 @@ function App() {
           <div className="wabi-eyebrow">TENDED TODAY</div>
           <div className="wabi-foot-time">{formatMinutes(todayMinutes)}</div>
           <div className="wabi-foot-track"><div style={{ width: `${goalProgress}%` }} /></div>
-          <button type="button" className="wabi-quiet-link" onClick={() => setWabiQuietMode((current) => !current)}>
+          <button type="button" className="wabi-quiet-link" onClick={() => {
+            if (!wabiQuietMode) {
+              setWabiQuietTaskId(state.timer.taskId);
+              setWabiQuietTaskMenuOpen(false);
+            }
+            setWabiQuietMode((current) => !current);
+          }}>
             {wabiQuietMode ? "← BACK TO THE APP" : "QUIET MODE →"}
           </button>
         </div>
@@ -9883,7 +9966,7 @@ function App() {
               const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
               const title = task?.title ?? entry.adHocTitle ?? "Calendar task";
               return (
-                <div className="wabi-task-row" key={entry.id}>
+                <div className={`wabi-task-row ${task?.id === selectedTaskId ? "selected" : ""}`} key={entry.id}>
                   <button
                     type="button"
                     className={`wabi-task-dot ${entry.completed ? "done" : ""}`}
@@ -9893,7 +9976,7 @@ function App() {
                   <button
                     type="button"
                     className={`wabi-task-title ${entry.completed ? "done" : ""}`}
-                    onClick={() => (task ? startEditingTask(task) : openCalendarDrawer(entry.date))}
+                    onClick={() => (task ? selectTaskForNow(task) : openCalendarDrawer(entry.date))}
                   >
                     {title}
                   </button>
@@ -9907,8 +9990,56 @@ function App() {
             <p className="wabi-empty">Nothing planned today. Add tasks from the planner calendar.</p>
           )}
         </div>
-        <p className="wabi-hint">Click a title to edit it. Click the mark to close it out. Nothing here asks for confirmation.</p>
+        <p className="wabi-hint">Click a title to make it the current task. Click the mark to close it out.</p>
       </section>
+    );
+  }
+
+  function renderWabiVaultCourseShelf(space: "references" | "summaries") {
+    const selectedCourseId = space === "references" ? referenceCourseId : summaryCourseId;
+    return (
+      <aside className="wabi-vault-shelf" aria-label={`${space} by semester`}>
+        {state.semesters.map((semester) => {
+          const courses = getSemesterCourses(state, semester.id);
+          const expanded = expandedSemesterIds.includes(semester.id);
+          return (
+            <div key={semester.id} className={`wabi-vault-semester ${expanded ? "open" : ""}`}>
+              <button type="button" className="wabi-vault-semester-toggle" onClick={() => toggleSemester(semester.id)}>
+                <span>{semester.name}</span>
+                <small>{courses.length} courses</small>
+              </button>
+              {expanded ? (
+                <div className="wabi-vault-course-list">
+                  {courses.map((course) => (
+                    <button
+                      key={course.id}
+                      type="button"
+                      className={course.id === selectedCourseId ? "active" : ""}
+                      onClick={() => {
+                        if (space === "references") {
+                          if (referenceDirty) {
+                            setMessage("Save the current reference note before switching courses.");
+                            return;
+                          }
+                          setReferenceSemesterId(semester.id);
+                          setReferenceCourseId(course.id);
+                          setReferenceEditing(false);
+                        } else {
+                          setSummarySemesterId(semester.id);
+                          setSummaryCourseId(course.id);
+                          setSelectedSummaryPath(null);
+                        }
+                      }}
+                    >
+                      <span style={{ background: course.color }} />{course.name}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </aside>
     );
   }
 
@@ -10389,7 +10520,8 @@ function App() {
     );
   }
 
-  const showWindowTitlebar = false;
+  // Keep macOS traffic lights native; Linux and Windows use the compact app bar.
+  const showWindowTitlebar = isTauriApp() && !/Macintosh|Mac OS X/.test(navigator.userAgent);
   const openHelp = helpTab ? pageHelp[helpTab] : null;
   const activeTourHelp = tourState ? pageHelp[tourState.tab] : null;
 
@@ -11022,12 +11154,13 @@ function App() {
               </div>
             </aside>
           ) : null}
+          {appStyle === "wabi-sabi" ? renderPlannerCalendar() : null}
           <article className="panel-card planner-board-panel" data-tour="planner-semesters">
             <div className="section-head planner-header">
               <div>
-                <p className="eyebrow">Planner</p>
-                <h2>Semesters, courses, and tasks</h2>
-                <p className="section-note">Click a semester or course to expand it. Click it again to collapse.</p>
+                <p className="eyebrow">{appStyle === "wabi-sabi" ? "Plan" : "Planner"}</p>
+                <h2>{appStyle === "wabi-sabi" ? `${openTaskCount} thing${openTaskCount === 1 ? "" : "s"} growing` : "Semesters, courses, and tasks"}</h2>
+                <p className="section-note">{appStyle === "wabi-sabi" ? "Open a semester to manage its courses. Select a course to edit it." : "Click a semester or course to expand it. Click it again to collapse."}</p>
               </div>
               <div className="page-head-actions">
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
@@ -11152,6 +11285,10 @@ function App() {
                                 const courseTasks = getCourseTasks(state, course.id);
                                 const health = getCourseHealth(state, course);
                                 const courseExpanded = expandedCourseIds.includes(course.id);
+                                const completedCourseTasks = courseTasks.filter((task) => getRemainingUnits(task) === 0).length;
+                                const courseTotalUnits = courseTasks.reduce((sum, task) => sum + Math.max(1, task.totalUnits), 0);
+                                const courseCompletedUnits = courseTasks.reduce((sum, task) => sum + Math.min(Math.max(0, task.completedUnits), Math.max(1, task.totalUnits)), 0);
+                                const courseProgress = courseTotalUnits ? Math.round((courseCompletedUnits / courseTotalUnits) * 100) : 0;
 
                                 return (
                                   <article key={course.id} className={`course-sheet ${courseExpanded ? "open" : ""}`} data-tour={course.id === TUTORIAL_COURSE_ID ? "planner-tutorial-course" : undefined}>
@@ -11159,13 +11296,14 @@ function App() {
                                       <button type="button" className="accordion-toggle course-toggle" onClick={() => toggleCourse(course.id)}>
                                         <div className="course-toggle-main">
                                           <div className="course-chip" style={{ background: course.color }} />
-                                          <span className="accordion-title-group">
-                                            <strong>{course.name}</strong>
-                                            <small>
-                                              Target {formatSwissGrade(course.targetGrade)} • {courseTasks.length} tasks • {health.label}
-                                            </small>
-                                          </span>
-                                        </div>
+                                           <span className="accordion-title-group">
+                                             <strong>{course.name}</strong>
+                                             <small>
+                                              {appStyle === "wabi-sabi" ? `${completedCourseTasks} of ${courseTasks.length} done` : `Target ${formatSwissGrade(course.targetGrade)} • ${courseTasks.length} tasks • ${health.label}`}
+                                             </small>
+                                           </span>
+                                           {appStyle === "wabi-sabi" ? <span className="wabi-course-progress" aria-label={`${courseProgress}% complete`}><i style={{ width: `${courseProgress}%`, background: course.color }} /></span> : null}
+                                         </div>
                                       </button>
 
                                       <div className="accordion-actions course-actions">
@@ -11342,7 +11480,7 @@ function App() {
                                               const progress = getTaskProgress(task);
                                               return (
                                                 <div key={task.id}>
-                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""}`} data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task" : "planner-task-row"}>
+                                                  <div className={`task-row-card ${selectedTaskId === task.id ? "selected" : ""} ${getRemainingUnits(task) === 0 ? "complete" : ""}`} data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task" : "planner-task-row"}>
                                                     <div className="task-row-main">
                                                       <button type="button" className="link-button task-title-button" onClick={() => setSelectedTaskId(task.id)}>
                                                         <strong>{task.title}</strong>
@@ -11513,7 +11651,7 @@ function App() {
             </div>
           </article>
 
-          {renderPlannerCalendar()}
+          {appStyle !== "wabi-sabi" ? renderPlannerCalendar() : null}
 
           <div className="planner-support-grid">
             <article className="panel-card calculator-card">
@@ -12121,24 +12259,86 @@ function App() {
 
           {state.settings.vaultPath ? (
             <>
-              <nav className="vault-nav" aria-label="Vault spaces" data-tour="vault-spaces">
-                {vaultSpaces.map((space) => {
-                  const active = space.id === vaultSpace;
-                  return (
-                    <button
-                      key={space.id}
-                      type="button"
-                      className={`vault-nav-item ${active ? "active" : ""}`}
-                      onClick={() => setVaultSpace(space.id)}
-                    >
-                      {space.label}
+              {appStyle !== "wabi-sabi" ? (
+                <nav className="vault-nav" aria-label="Vault spaces" data-tour="vault-spaces">
+                  {vaultSpaces.map((space) => {
+                    const active = space.id === vaultSpace;
+                    return (
+                      <button
+                        key={space.id}
+                        type="button"
+                        className={`vault-nav-item ${active ? "active" : ""}`}
+                        onClick={() => setVaultSpace(space.id)}
+                      >
+                        {space.label}
+                      </button>
+                    );
+                  })}
+                </nav>
+              ) : null}
+
+              {appStyle === "wabi-sabi" ? (
+                <nav className="wabi-notes-nav wabi-vault-space-nav" aria-label="Vault spaces" data-tour="vault-spaces">
+                  {vaultSpaces.map((space) => (
+                    <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>
+                      {space.id === "daily" ? "Notes" : space.label}
                     </button>
-                  );
-                })}
-              </nav>
+                  ))}
+                </nav>
+              ) : null}
 
               {vaultSpace === "daily" ? (
-                <div className="vault-space-panel" data-tour="vault-editor">
+                appStyle === "wabi-sabi" ? (
+                  <div className="wabi-notes-layout" data-tour="vault-editor">
+                    <aside className="wabi-notes-shelf">
+                      <div className="wabi-notes-shelf-head">
+                        <p className="wabi-notes-count">{vaultNotes.length} in this shelf</p>
+                        <button type="button" onClick={startNewVaultNote}>New note</button>
+                      </div>
+                      {vaultNotes.map((note) => (
+                        <button key={note.path} type="button" className={`wabi-note-shelf-row ${vaultNotePath === note.path ? "active" : ""}`} onClick={() => void openVaultNote(note)}>
+                          <strong>{note.title}</strong>
+                          <span>{new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(new Date(note.savedAt))}</span>
+                        </button>
+                      ))}
+                      {!vaultNotes.length && !vaultNotesLoading ? <p className="wabi-notes-empty">Create your first note.</p> : null}
+                      <div className="wabi-notes-actions">
+                        <button type="button" onClick={() => void loadVaultNotes()} disabled={vaultNotesLoading}>{vaultNotesLoading ? "Loading..." : "Refresh"}</button>
+                        {vaultDailyEditing ? <button type="button" onClick={() => void handleSaveWabiVaultNote()} disabled={vaultNotesLoading}>Save</button> : <button type="button" onClick={() => setVaultDailyEditing(true)} disabled={!vaultNoteTitle}>Edit</button>}
+                        <button type="button" className="wabi-note-delete" onClick={() => void handleDeleteWabiVaultNote()} disabled={!vaultNotePath || vaultNotesLoading}>Delete</button>
+                      </div>
+                    </aside>
+                    <article className="wabi-note-reader">
+                      <header>
+                        {vaultDailyEditing ? (
+                          <input
+                            className="wabi-note-title-input"
+                            value={vaultNoteTitle}
+                            onChange={(event) => {
+                              setVaultNoteTitle(event.target.value);
+                              setVaultNoteDirty(true);
+                            }}
+                            placeholder="Note title"
+                          />
+                        ) : <h2>{vaultNoteTitle || "Untitled note"}</h2>}
+                        <p>{vaultNoteDirty ? "unsaved changes" : vaultNoteSavedAt ? new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" }).format(new Date(vaultNoteSavedAt)) : "not saved"}</p>
+                      </header>
+                      {vaultDailyEditing ? (
+                        <textarea
+                          className="wabi-note-editor"
+                          value={vaultNoteContent}
+                          onChange={(event) => {
+                            setVaultNoteContent(event.target.value);
+                            setVaultNoteDirty(true);
+                          }}
+                          placeholder="Write your note."
+                        />
+                      ) : (
+                        <div className="markdown-preview wabi-note-prose">{renderMarkdownPreview(vaultNoteContent)}</div>
+                      )}
+                    </article>
+                  </div>
+                ) : <div className="vault-space-panel" data-tour="vault-editor">
                   <div className="vault-toolbar">
                     <div className="vault-toolbar-main">
                       <label className="vault-compact-field">
@@ -12213,6 +12413,7 @@ function App() {
                 </div>
               ) : vaultSpace === "references" ? (
                 <div className="vault-space-panel">
+                  {appStyle === "wabi-sabi" ? renderWabiVaultCourseShelf("references") : null}
                   <div className="vault-toolbar">
                     {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">
                       <label className="vault-compact-field">
@@ -12306,6 +12507,7 @@ function App() {
                 </div>
               ) : (
                 <div className="vault-space-panel">
+                  {appStyle === "wabi-sabi" ? renderWabiVaultCourseShelf("summaries") : null}
                   <div className="vault-toolbar">
                     {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">
                       <label className="vault-compact-field">
@@ -12344,7 +12546,7 @@ function App() {
 
                   {selectedSummarySemester && selectedSummaryCourse ? (
                     <div className="summaries-layout">
-                      {appStyle !== "field-notebook" ? <aside className="panel-card summary-file-list">
+                      {appStyle !== "field-notebook" && (appStyle !== "wabi-sabi" || summaryFiles.length > 1) ? <aside className="panel-card summary-file-list">
                         <div className="summary-file-list-head">
                           <div>
                             <p className="eyebrow">Summaries</p>
@@ -12433,30 +12635,12 @@ function App() {
             ) : null}
           </div>
 
-          {appStyle === "wabi-sabi" ? (
-            <div className="wabi-attendance" data-tour="social-live">
-              {state.social.friends.length ? (
-                state.social.friends.slice(0, 8).map((friend) => {
-                  const sitting = isRecentlyActive(friend.lastSeenAt);
-                  return (
-                    <div key={friend.userId} className="wabi-attendance-row" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openFriendProfile(friend); } }}>
-                      <span className="wabi-attendance-name">{friend.displayName}</span>
-                      <span className={`wabi-attendance-state ${sitting ? "sitting" : "resting"}`}>{sitting ? "sitting" : "resting"}</span>
-                    </div>
-                  );
-                })
-              ) : (
-                <p className="wabi-empty">No friends yet. Add one from the Friends tab below.</p>
-              )}
-            </div>
-          ) : null}
-
           <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
             {socialSubtabs.filter((space) => appStyle !== "wabi-sabi" || space.id !== "leaderboard" || wabiCircleCompetitive).map((space) => {
               const active = space.id === socialSubtab;
               return (
                 <button key={space.id} type="button" data-tour={`social-${space.id}-tab`} className={`social-nav-item ${active ? "active" : ""}`} onClick={() => setSocialSubtab(space.id)}>
-                  {space.label}
+                  {appStyle === "wabi-sabi" && space.id === "leaderboard" ? "Standings" : space.label}
                   {space.id === "friends" && incomingFriendRequestCount > 0 ? (
                     <span className="social-nav-request-badge" aria-label={`${incomingFriendRequestCount} incoming friend request${incomingFriendRequestCount === 1 ? "" : "s"}`}>
                       {incomingFriendRequestCount > 9 ? "9+" : incomingFriendRequestCount}
@@ -12468,8 +12652,26 @@ function App() {
             })}
           </nav>
 
+          {appStyle === "wabi-sabi" && socialSubtab === "feed" ? (
+            <div className="wabi-attendance" data-tour="social-live">
+              {wabiAttendanceFriends.length ? (
+                wabiAttendanceFriends.map((friend) => {
+                  const sitting = isRecentlyActive(friend.lastSeenAt);
+                  return (
+                    <div key={friend.userId} className="wabi-attendance-row" onClick={() => void openFriendProfile(friend)} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openFriendProfile(friend); } }}>
+                      <span className="wabi-attendance-name">{friend.displayName}</span>
+                      <span className={`wabi-attendance-state ${sitting ? "sitting" : "resting"}`}>{sitting ? "sitting" : "resting"}</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <p className="wabi-empty">No friends seen in the last 48 hours. Add friends from the Friends tab below.</p>
+              )}
+            </div>
+          ) : null}
+
           {socialSubtab === "feed" ? (
-            <div className="social-feed-shell">
+            <div className={`social-feed-shell ${appStyle === "wabi-sabi" ? "wabi-feed-shell" : ""}`}>
               <div className="social-feed-sidebar">
                 <div className="arena-scope-toggle social-feed-scope" aria-label="Feed scope" data-tour="social-feed-scope">
                   {(["friends", "global"] as SocialFeedScope[]).map((scope) => (
@@ -12512,13 +12714,13 @@ function App() {
                   </div>
                 ) : null}
 
-                <form className="feed-composer" data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
+                <form className={`feed-composer ${appStyle === "wabi-sabi" ? "wabi-feed-composer" : ""}`} data-tour="social-composer" onSubmit={postLatestSessionToFeed}>
                   <div>
-                    <span className="arena-kicker">{appStyle === "field-notebook" ? "Post your last block" : "Share latest session"}</span>
-                    <h3>{latestFeedSession ? `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
-                    <p>{latestFeedSession ? (appStyle === "field-notebook" ? "One line for the circle, or leave it blank." : "Write one sentence, or leave it blank for a chaotic default.") : "Finish a study or exam block, then publish it here."}</p>
+                    <span className="arena-kicker">{appStyle === "field-notebook" ? "Post your last block" : appStyle === "wabi-sabi" ? "Circle note" : "Share latest session"}</span>
+                    <h3>{latestFeedSession ? appStyle === "wabi-sabi" ? "Say something to the circle" : `${formatMinutes(latestFeedSession.minutes)} ${latestFeedSession.kind} block` : "No session ready"}</h3>
+                    <p>{latestFeedSession ? (appStyle === "field-notebook" ? "One line for the circle, or leave it blank." : appStyle === "wabi-sabi" ? "A note will accompany your latest study block." : "Write one sentence, or leave it blank for a chaotic default.") : "Finish a study or exam block, then publish it here."}</p>
                   </div>
-                  <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder={appStyle === "field-notebook" ? "one line, or leave it blank..." : "one sentence for the feed..."} disabled={!latestFeedSession || latestFeedSessionPosted} />
+                  <input className="arena-input" data-tour="social-note" value={feedNoteDraft} onChange={(event) => setFeedNoteDraft(event.target.value)} placeholder={appStyle === "field-notebook" ? "one line, or leave it blank..." : appStyle === "wabi-sabi" ? "say something to the circle, then Enter" : "one sentence for the feed..."} disabled={!latestFeedSession || latestFeedSessionPosted} />
                   <div className="feed-composer-actions">
                     <label className="feed-action-icon" data-tour="social-image" title={feedImageDraft ? "Change image" : "Add image"} aria-label={feedImageDraft ? "Change image" : "Add image"}>
                       <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={(event) => void handleFeedImageDraftChange(event)} disabled={!latestFeedSession || latestFeedSessionPosted || (canViewR2Usage && r2UsageStatus?.paused)} />
@@ -12562,9 +12764,9 @@ function App() {
                 </form>
               </div>
 
-              <div className="social-feed-main">
-              <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : "Activity"} {feedLoading ? "· Refreshing" : ""}</div>
-              {socialFeed.length ? socialFeed.map((item) => {
+              <div className={`social-feed-main ${appStyle === "wabi-sabi" ? "wabi-feed-main" : ""}`}>
+              <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : appStyle === "wabi-sabi" ? "Feed" : "Activity"} {appStyle === "wabi-sabi" ? "· oldest first · updates when synced" : ""} {feedLoading ? "· Refreshing" : ""}</div>
+              {displayedSocialFeed.length ? displayedSocialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
                 const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: isOwnPost ? state.social.avatar : item.avatar };
                 const comments = item.comments ?? [];
@@ -12578,7 +12780,7 @@ function App() {
                     </div>
                   </article>
                 ) : (
-                  <article key={item.id} className="feed-card">
+                  <article key={item.id} className={`feed-card ${appStyle === "wabi-sabi" ? "wabi-feed-card" : ""}`}>
                     <div className="feed-card__head">
                       <ArenaAvatar name={item.displayName} avatar={isOwnPost ? state.social.avatar : item.avatar} self={isOwnPost} />
                       <div>
@@ -12649,12 +12851,14 @@ function App() {
                     </div>
                     <div className="feed-card__reactions">
                       {(() => {
-                        const emojiKeys = ["fire", "brain", "clap", ...Object.keys(item.reactions ?? {}).filter((k) => k !== "fire" && k !== "brain" && k !== "clap" && (item.reactions?.[k] ?? 0) > 0)];
+                        const emojiKeys = appStyle === "wabi-sabi"
+                          ? ["fire"]
+                          : ["fire", "brain", "clap", ...Object.keys(item.reactions ?? {}).filter((k) => k !== "fire" && k !== "brain" && k !== "clap" && (item.reactions?.[k] ?? 0) > 0)];
                         const seen = new Set<string>();
                         return emojiKeys.filter((k) => { if (seen.has(k)) return false; seen.add(k); return true; }).map((emojiKey) => {
                           const count = item.reactions?.[emojiKey] ?? 0;
                           if (count === 0 && emojiKey !== "fire" && emojiKey !== "brain" && emojiKey !== "clap") return null;
-                          const display = emojiKey === "fire" ? "🔥" : emojiKey === "brain" ? "🧠" : emojiKey === "clap" ? "👏" : emojiKey;
+                          const display = appStyle === "wabi-sabi" ? "Nod" : emojiKey === "fire" ? "🔥" : emojiKey === "brain" ? "🧠" : emojiKey === "clap" ? "👏" : emojiKey;
                           const names = item.reactedBy?.[emojiKey];
                           const label = names?.length ? (names.length <= 3 ? names.join(", ") : `${names.slice(0, 3).join(", ")} +${names.length - 3} more`) : "";
                           return (
@@ -12676,7 +12880,7 @@ function App() {
                     </div>
                     <div className="feed-card__comments-shell">
                       <button type="button" className="feed-comments-toggle" onClick={() => toggleFeedComments(item.id)} aria-expanded={commentsOpen}>
-                        Comments ({comments.length}) {commentsOpen ? "↑" : "↓"}
+                        {appStyle === "wabi-sabi" ? `Reply${comments.length ? ` · ${comments.length}` : ""}` : `Comments (${comments.length}) ${commentsOpen ? "↑" : "↓"}`}
                       </button>
                       {commentsOpen ? (
                         <div className="feed-card__comments">
@@ -12715,7 +12919,7 @@ function App() {
                 <div className="arena-empty"><strong>No feed posts yet</strong><span>Post a session or sync to pull the latest arena activity.</span></div>
               )}
 
-              <div className="section-label">This Week</div>
+              {appStyle !== "wabi-sabi" ? <><div className="section-label">This Week</div>
               <article className="week-compare">
                 {weekCompareEntries.length ? weekCompareEntries.map((entry) => {
                   const max = Math.max(1, ...weekCompareEntries.map((item) => item.minutes));
@@ -12728,13 +12932,13 @@ function App() {
                     </div>
                   );
                 }) : <p className="empty-copy">Weekly comparison appears after you sync with friends.</p>}
-              </article>
+              </article></> : <p className="wabi-feed-end">That is the whole feed. No counts, no ranks, nothing new until someone shares again.</p>}
               </div>
             </div>
           ) : null}
 
           {socialSubtab === "profile" ? (
-            <div className="social-single-panel">
+            <div className={`social-single-panel ${appStyle === "wabi-sabi" ? "wabi-profile-panel" : ""}`}>
               <article className="arena-player-card">
                 <div className="arena-player-card__inner">
                   <div className="arena-player-main">
@@ -12805,17 +13009,21 @@ function App() {
                     <strong>{state.social.isPrivate ? "Private profile" : "Public profile"}</strong>
                     <span>{state.social.isPrivate ? "Hidden from global feed and leaderboard." : "Shown on global feed and leaderboard."}</span>
                   </button>
-                  <button type="button" className={`profile-toggle ${state.social.autoPostSessions ? "active" : ""}`} onClick={toggleAutoPostSessions}>
-                    <strong>{state.social.autoPostSessions ? "Auto-post on" : "Auto-post off"}</strong>
-                    <span>{state.social.autoPostSessions ? "Completed sessions queue feed posts automatically." : "You choose which sessions to post."}</span>
-                  </button>
+                    <button type="button" className={`profile-toggle ${state.social.autoPostSessions ? "active" : ""}`} onClick={toggleAutoPostSessions}>
+                      <strong>{state.social.autoPostSessions ? "Auto-post on" : "Auto-post off"}</strong>
+                      <span>{state.social.autoPostSessions ? "Completed sessions queue feed posts automatically." : "You choose which sessions to post."}</span>
+                    </button>
+                    <button type="button" className={`profile-toggle ${state.social.showHoursToFriends ? "active" : ""}`} onClick={toggleShowHoursToFriends}>
+                      <strong>Show hours to friends</strong>
+                      <span>Your totals in the friends standings.</span>
+                    </button>
                 </div>
               </article>
             </div>
           ) : null}
 
           {socialSubtab === "squad" ? (
-            <div className="social-single-panel squad-panel">
+            <div className={`social-single-panel squad-panel ${appStyle === "wabi-sabi" ? "wabi-squad-panel" : ""}`}>
               {!currentSquad ? (
                 <>
                   <article className="arena-panel squad-card">
@@ -13026,7 +13234,7 @@ function App() {
           ) : null}
 
           {socialSubtab === "friends" ? (
-            <div className="social-single-panel">
+            <div className={`social-single-panel ${appStyle === "wabi-sabi" ? "wabi-friends-panel" : ""}`}>
               <article className="arena-panel arena-friends-panel">
                 <div className="arena-panel-head">
                   <span className="arena-panel-icon">+</span>
@@ -13093,13 +13301,13 @@ function App() {
           ) : null}
 
           {socialSubtab === "leaderboard" ? (
-            <article className="arena-leaderboard">
+            <article className={`arena-leaderboard ${appStyle === "wabi-sabi" ? "wabi-standings" : ""}`}>
               <div className="arena-leaderboard-head">
                 <div className="arena-title-cluster">
                   <span className="arena-title-icon">⚔</span>
                   <div>
-                    <span className="arena-kicker">Arena standings</span>
-                    <h2>{socialArenaTitle}</h2>
+                    <span className="arena-kicker">{appStyle === "wabi-sabi" ? "Standings" : "Arena standings"}</span>
+                    <h2>{appStyle === "wabi-sabi" ? socialScope === "global" ? "World" : socialScope === "squad" ? "Squad" : "Friends" : socialArenaTitle}</h2>
                     <p>{socialArenaSubtitle}</p>
                   </div>
                 </div>
@@ -13262,13 +13470,15 @@ function App() {
               </div>
               {viewingFriendLoading ? (
                 <div className="arena-empty">Loading stats...</div>
-              ) : viewingFriendStats ? (
+              ) : viewingFriendStats?.hoursVisible && viewingFriendStats.daily && viewingFriendStats.weekly && viewingFriendStats.overall ? (
                 <div className="arena-player-stats" style={{ marginTop: 0 }}>
                   <div className="arena-mini-stat"><span className="arena-mini-stat__icon">↯</span><div><strong>{formatMinutes(viewingFriendStats.daily.minutes)}</strong><span>Today · {viewingFriendStats.daily.sessions} ses.</span></div></div>
                   <div className="arena-mini-stat"><span className="arena-mini-stat__icon">◆</span><div><strong>{formatMinutes(viewingFriendStats.weekly.minutes)}</strong><span>This Week · {viewingFriendStats.weekly.sessions} ses.</span></div></div>
                   <div className="arena-mini-stat"><span className="arena-mini-stat__icon">★</span><div><strong>{formatMinutes(viewingFriendStats.overall.minutes)}</strong><span>All Time · {viewingFriendStats.overall.sessions} ses.</span></div></div>
                   <div className="arena-mini-stat"><span className="arena-mini-stat__icon">📅</span><div><strong>{viewingFriendStats.daily.lastActiveDate || "—"}</strong><span>Last Active</span></div></div>
                 </div>
+              ) : viewingFriendStats ? (
+                <div className="arena-empty">This friend has chosen not to share their study hours.</div>
               ) : (
                 <div className="arena-error">Could not load stats.</div>
               )}
