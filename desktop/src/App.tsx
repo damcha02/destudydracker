@@ -38,7 +38,7 @@ import {
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
@@ -4404,13 +4404,13 @@ function App() {
 
     setSocialSyncing(true);
     try {
-      await syncSocialState(syncState, getAppMetadata());
+      const result = await syncSocialState(syncState, getAppMetadata());
       const syncedAt = new Date().toISOString();
       setState((current) => ({
         ...current,
         social: {
           ...current.social,
-          pendingFeedPosts: [],
+          pendingFeedPosts: current.social.pendingFeedPosts.filter((post) => !result.sentFeedPostIds.includes(post.id)),
           lastSyncedAt: syncedAt,
           lastSyncError: null,
           nextAutoSyncAt: getNextAutoSyncAt(),
@@ -4419,10 +4419,6 @@ function App() {
       void (async () => {
         try {
           const status = await getFriendStatus(syncState.social);
-          updateFeedCommentNoticeFromFeeds([
-            { scope: "global", feed: status.social.cachedFeeds.global },
-            { scope: "friends", feed: status.social.cachedFeeds.friends },
-          ]);
           setState((current) => ({
             ...current,
             social: {
@@ -5519,10 +5515,6 @@ function App() {
     if (!socialConfigured || state.activeTab !== "friends") return;
     try {
       const result = await getFriendStatus(state.social);
-      updateFeedCommentNoticeFromFeeds([
-        { scope: "global", feed: result.social.cachedFeeds.global },
-        { scope: "friends", feed: result.social.cachedFeeds.friends },
-      ]);
       setState((current) => ({
         ...current,
         social: {
@@ -5534,9 +5526,6 @@ function App() {
           incomingSquadRequests: result.social.incomingSquadRequests,
           outgoingSquadRequests: result.social.outgoingSquadRequests,
           squadMessages: result.social.squadMessages,
-          cachedSquadScoreLeaderboards: result.social.cachedSquadScoreLeaderboards,
-          cachedLeaderboards: result.social.cachedLeaderboards,
-          cachedFeeds: result.social.cachedFeeds,
           pendingFeedPosts: current.social.pendingFeedPosts,
           lastSyncError: null,
         },
@@ -5548,6 +5537,28 @@ function App() {
 
   const refreshFriendStatus = useEffectEvent(async () => {
     await refreshFriendStatusNow();
+  });
+
+  const refreshSocialLeaderboard = useEffectEvent(async () => {
+    if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "leaderboard") return;
+    try {
+      const result = await getSocialLeaderboard(state.social, socialScope, socialPeriod);
+      setState((current) => ({
+        ...current,
+        social: {
+          ...current.social,
+          cachedLeaderboards: {
+            ...current.social.cachedLeaderboards,
+            [socialScope]: {
+              ...current.social.cachedLeaderboards[socialScope],
+              [socialPeriod]: result.entries,
+            },
+          },
+        },
+      }));
+    } catch (error: unknown) {
+      console.warn("Could not refresh social leaderboard.", error);
+    }
   });
 
   async function openFriendProfile(friend: SocialProfileTarget) {
@@ -5710,6 +5721,10 @@ function App() {
   useEffect(() => {
     void refreshSocialFeed();
   }, [feedScope, socialSubtab, state.activeTab]);
+
+  useEffect(() => {
+    void refreshSocialLeaderboard();
+  }, [socialScope, socialPeriod, socialSubtab, state.activeTab]);
 
   useEffect(() => {
     if (!socialConfigured || state.activeTab !== "friends" || socialSubtab !== "feed") return undefined;

@@ -490,6 +490,17 @@ async function assertR2ClassBBudget(env: Env) {
 async function upsertFeedPosts(env: Env, userId: string, posts: SyncPayload["feedPosts"]) {
   if (!Array.isArray(posts) || !posts.length) return;
   const limitedPosts = posts.slice(0, 25);
+  const postIds = limitedPosts.map((post) => cleanText(post.id, 80)).filter(Boolean);
+  if (postIds.length) {
+    const existing = await env.DB.prepare(`
+      SELECT id, user_id AS userId
+      FROM feed_posts
+      WHERE id IN (${postIds.map(() => "?").join(",")})
+    `).bind(...postIds).all<{ id: string; userId: string }>();
+    if (existing.results.some((post) => post.userId !== userId)) {
+      throw new Response("A feed post belongs to another user.", { status: 409, headers: corsHeaders });
+    }
+  }
   const statements = limitedPosts.map((post) => env.DB.prepare(`
     INSERT INTO feed_posts (id, user_id, type, subject, detail, note, icon, minutes, preset_label, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1282,7 +1293,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
     JOIN users u ON u.id = p.user_id
     WHERE ${clauses.join(" AND ")}
     ORDER BY p.created_at DESC
-    LIMIT 80
+    LIMIT 40
   `).bind(...params).all<{
     id: string;
     userId: string;
@@ -1421,7 +1432,7 @@ async function getFeed(request: Request, env: Env, userId: string, scope: Leader
   }));
 }
 
-async function getSocialSnapshot(request: Request, env: Env, userId: string) {
+async function getSocialSnapshot(request: Request, env: Env, userId: string, includeCaches = true) {
   const friends = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson, f.created_at AS friendsSince, u.last_seen_at AS lastSeenAt
     FROM friendships f
@@ -1456,6 +1467,32 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
     ORDER BY r.created_at DESC
   `).bind(userId).all();
 
+  const socialBasics = {
+    friends: friends.results.map((friend) => ({
+      ...friend,
+      avatar: parseListAvatar((friend as { avatarJson?: string }).avatarJson, (friend as { displayName?: string }).displayName ?? "Student"),
+      avatarJson: undefined,
+    })),
+    incomingFriendRequests: incoming.results.map((request) => ({
+      ...request,
+      fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+      toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+      fromAvatarJson: undefined,
+      toAvatarJson: undefined,
+    })),
+    outgoingFriendRequests: outgoing.results.map((request) => ({
+      ...request,
+      fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
+      toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
+      fromAvatarJson: undefined,
+      toAvatarJson: undefined,
+    })),
+  };
+
+  if (!includeCaches) {
+    return { social: { ...socialBasics, ...await getSquadSnapshot(env, userId) } };
+  }
+
   const [globalDaily, globalWeekly, globalOverall, friendsDaily, friendsWeekly, friendsOverall, squadLeaderboards, squadScoreDaily, squadScoreSeason, squadScoreOverall, globalFeed, friendsFeed, squadSnapshot] = await Promise.all([
     getLeaderboard(env, userId, "global", "daily"),
     getLeaderboard(env, userId, "global", "weekly"),
@@ -1482,25 +1519,7 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
   };
   return {
     social: {
-      friends: friends.results.map((friend) => ({
-        ...friend,
-        avatar: parseListAvatar((friend as { avatarJson?: string }).avatarJson, (friend as { displayName?: string }).displayName ?? "Student"),
-        avatarJson: undefined,
-      })),
-      incomingFriendRequests: incoming.results.map((request) => ({
-        ...request,
-        fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
-        toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
-        fromAvatarJson: undefined,
-        toAvatarJson: undefined,
-      })),
-      outgoingFriendRequests: outgoing.results.map((request) => ({
-        ...request,
-        fromAvatar: parseListAvatar((request as { fromAvatarJson?: string }).fromAvatarJson, (request as { fromDisplayName?: string }).fromDisplayName ?? "Student"),
-        toAvatar: parseListAvatar((request as { toAvatarJson?: string }).toAvatarJson, (request as { toDisplayName?: string }).toDisplayName ?? "Student"),
-        fromAvatarJson: undefined,
-        toAvatarJson: undefined,
-      })),
+      ...socialBasics,
       cachedLeaderboards,
       cachedFeeds,
       cachedSquadScoreLeaderboards: { daily: squadScoreDaily, season: squadScoreSeason, overall: squadScoreOverall },
@@ -1509,21 +1528,23 @@ async function getSocialSnapshot(request: Request, env: Env, userId: string) {
   };
 }
 
-async function handleSync(request: Request, env: Env, ctx: ExecutionContext) {
+async function handleSync(request: Request, env: Env, lightweight = false) {
   const payload = await readJson<SyncPayload>(request);
   if (!payload.user || typeof payload.user !== "object") return text("Missing user identity.", 400);
+  if (!Array.isArray(payload.stats)) return text("Missing stats.", 400);
   await upsertUser(env, payload.user);
   const userId = cleanUserId(payload.user.userId);
-  const changedStatDates = await upsertStats(env, userId, Array.isArray(payload.stats) ? payload.stats : []);
+  const changedStatDates = await upsertStats(env, userId, payload.stats);
   await upsertFeedPosts(env, userId, payload.feedPosts);
   const today = todayIso();
   const datesToRescore = changedStatDates.filter((date) => date < today);
   if (datesToRescore.length) {
-    ctx.waitUntil(Promise.all(datesToRescore
-      .map((date) => scoreSquadDate(env, date).catch((error) => console.error("Squad rescoring failed.", date, error))))
-      .then(() => undefined));
+    await env.DB.batch(datesToRescore.map((date) => env.DB.prepare(
+      "INSERT INTO squad_score_jobs (date) VALUES (?) ON CONFLICT(date) DO NOTHING",
+    ).bind(date)));
   }
-  return json({ ok: true, syncedAt: new Date().toISOString() });
+  if (lightweight) return json({ ok: true, syncedAt: new Date().toISOString() });
+  return json(await getSocialSnapshot(request, env, userId));
 }
 
 async function handleFeed(request: Request, env: Env) {
@@ -2003,13 +2024,22 @@ async function handleTelemetryHeartbeat(request: Request, env: Env) {
   return json({ ok: true });
 }
 
-async function handleFriendStatus(request: Request, env: Env) {
+async function handleFriendStatus(request: Request, env: Env, includeCaches = true) {
   const payload = await readParamsOrJson<{ userId: string; deviceSecret: string }>(request);
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   await verifyUser(env, userId, deviceSecret);
   await env.DB.prepare("UPDATE users SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?").bind(userId).run();
-  return json(await getSocialSnapshot(request, env, userId));
+  return json(await getSocialSnapshot(request, env, userId, includeCaches));
+}
+
+async function handleLeaderboard(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; scope?: LeaderboardScope; period?: LeaderboardPeriod }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const scope = payload.scope === "friends" || payload.scope === "squad" ? payload.scope : "global";
+  const period = payload.period === "daily" || payload.period === "overall" ? payload.period : "weekly";
+  return json({ entries: await getLeaderboard(env, userId, scope, period) });
 }
 
 async function handlePlayerStats(request: Request, env: Env) {
@@ -2427,7 +2457,7 @@ async function handleAdminUsage(request: Request, env: Env) {
 }
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
     try {
@@ -2442,7 +2472,8 @@ export default {
       if (request.method === "POST" && url.pathname === "/profile/avatar") return await handleProfileAvatarUpload(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
-      if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env, ctx);
+      if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
+      if (request.method === "POST" && url.pathname === "/sync/v2") return await handleSync(request, env, true);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);
@@ -2453,6 +2484,8 @@ export default {
       if (request.method === "POST" && url.pathname === "/friends/request") return await handleFriendRequest(request, env);
       if (request.method === "POST" && url.pathname === "/friends/respond") return await handleFriendResponse(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status") return await handleFriendStatus(request, env);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/friends/status/v2") return await handleFriendStatus(request, env, false);
+      if ((request.method === "GET" || request.method === "POST") && url.pathname === "/leaderboard") return await handleLeaderboard(request, env);
       if (request.method === "POST" && url.pathname === "/squads/create") return await handleSquadCreate(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/search") return await handleSquadSearch(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/squads/details") return await handleSquadDetails(request, env);
@@ -2477,6 +2510,15 @@ export default {
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const now = new Date().toISOString();
     const yesterday = yesterdayIso();
+    const queued = await env.DB.prepare("SELECT date FROM squad_score_jobs ORDER BY created_at ASC LIMIT 7").all<{ date: string }>();
+    for (const row of queued.results) {
+      try {
+        await scoreSquadDate(env, row.date);
+        await env.DB.prepare("DELETE FROM squad_score_jobs WHERE date = ?").bind(row.date).run();
+      } catch (error) {
+        console.error("Queued squad scoring failed.", row.date, error);
+      }
+    }
     await scoreSquadDate(env, yesterday).catch((error) => console.error("Squad scoring failed.", error));
     await scoreMissingCompletedSquadDates(env);
     const usage = await getR2Usage(env);

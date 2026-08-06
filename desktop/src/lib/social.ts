@@ -22,6 +22,7 @@ interface SocialSyncResponse {
 interface SocialWriteResponse {
   ok: boolean;
   syncedAt?: string;
+  sentFeedPostIds: string[];
 }
 
 interface DeviceIdentity {
@@ -41,7 +42,7 @@ export interface AppMetadata {
 }
 
 interface SocialStatusResponse {
-  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "cachedLeaderboards" | "cachedSquadScoreLeaderboards" | "cachedFeeds" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
+  social: Pick<SocialState, "friends" | "incomingFriendRequests" | "outgoingFriendRequests" | "squad" | "incomingSquadRequests" | "outgoingSquadRequests" | "squadMessages">;
 }
 
 export interface SquadSearchResult {
@@ -306,7 +307,7 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
   };
 
   const body = JSON.stringify(payload);
-  const endpoint = `${SOCIAL_API_URL}/sync`;
+  const endpoint = `${SOCIAL_API_URL}/sync/v2`;
   const payloadBytes = new TextEncoder().encode(body).length;
 
   if (payloadBytes > MAX_SYNC_BODY_BYTES) {
@@ -342,7 +343,10 @@ export async function syncSocialState(state: AppState, app?: AppMetadata) {
   if (!responseOk) {
     throw new Error(responseText || `Social sync failed with HTTP ${responseStatus}.`);
   }
-  return JSON.parse(responseText) as SocialWriteResponse;
+  return {
+    ...(JSON.parse(responseText) as Omit<SocialWriteResponse, "sentFeedPostIds">),
+    sentFeedPostIds: payload.feedPosts.map((post) => post.id),
+  };
 }
 
 export async function getSocialFeed(social: SocialState, scope: SocialFeedScope) {
@@ -485,12 +489,19 @@ export async function respondToFriendRequest(social: SocialState, requestId: str
 }
 
 export async function getFriendStatus(social: SocialState) {
-  return requestSocialApi<SocialStatusResponse>("/friends/status", {
+  return requestSocialApi<SocialStatusResponse>("/friends/status/v2", {
     method: "POST",
     body: JSON.stringify({
       userId: social.userId,
       deviceSecret: social.deviceSecret,
     }),
+  });
+}
+
+export async function getSocialLeaderboard(social: SocialState, scope: SocialLeaderboardScope, period: SocialLeaderboardPeriod) {
+  return requestSocialApi<{ entries: SocialLeaderboardEntry[] }>("/leaderboard", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, scope, period }),
   });
 }
 
