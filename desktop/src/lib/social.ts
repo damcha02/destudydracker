@@ -96,6 +96,7 @@ export interface AdminUsageResponse {
     active24h: number;
     active7d: number;
     usersWithAppVersion: number;
+    flaggedCount: number;
   } | null;
   users: Array<{
     displayName: string;
@@ -107,6 +108,30 @@ export interface AdminUsageResponse {
     appPlatform: string | null;
     appRuntimeChannel: string | null;
     appSeenAt: string | null;
+    isFlagged: number;
+    flaggedReason: string | null;
+    signupCountry: string | null;
+    signupAsn: number | null;
+    signupAsOrganization: string | null;
+  }>;
+  flaggedUsers: Array<{
+    displayName: string;
+    friendCode: string;
+    lastSeenAt: string;
+    flaggedReason: string | null;
+    signupCountry: string | null;
+    signupAsn: number | null;
+    signupAsOrganization: string | null;
+  }>;
+  abuseEvents: Array<{
+    eventType: string;
+    country: string | null;
+    asOrganization: string | null;
+    path: string | null;
+    userAgent: string | null;
+    userId: string | null;
+    detail: string;
+    createdAt: string;
   }>;
   telemetry: Array<{
     installId: string;
@@ -140,16 +165,6 @@ function nextDayStart(date = new Date()) {
   const next = new Date(date);
   next.setHours(24, 0, 0, 0);
   return next;
-}
-
-function isCurrentDayEntry(entry: SocialLeaderboardEntry, today: string) {
-  return entry.lastActiveDate === today;
-}
-
-function isCurrentWeekEntry(entry: SocialLeaderboardEntry, weekStart: Date) {
-  if (!entry.lastActiveDate) return false;
-  const activeAt = new Date(`${entry.lastActiveDate}T00:00:00`);
-  return activeAt >= weekStart;
 }
 
 export function getLocalSocialStats(sessions: StudySession[]) {
@@ -196,15 +211,7 @@ export function getLocalLeaderboardEntry(state: AppState, period: SocialLeaderbo
 }
 
 export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeaderboardScope, period: SocialLeaderboardPeriod) {
-  const self = getLocalLeaderboardEntry(state, period);
-  const includeSelf = scope !== "global" || !state.social.isPrivate;
-  const today = isoDate();
-  const weekStart = startOfWeek(new Date());
-  const remote = state.social.cachedLeaderboards[scope][period]
-    .filter((entry) => entry.userId !== self.userId)
-    .filter((entry) => period !== "daily" || isCurrentDayEntry(entry, today))
-    .filter((entry) => period !== "weekly" || isCurrentWeekEntry(entry, weekStart));
-  const combined = [...(includeSelf ? [self] : []), ...remote]
+  const combined = state.social.cachedLeaderboards[scope][period]
     .filter((entry) => {
       if (scope === "global") return true;
       if (entry.isSelf) return true;
@@ -213,7 +220,7 @@ export function getLeaderboardWithLocalSelf(state: AppState, scope: SocialLeader
     })
     .sort((a, b) => b.minutes - a.minutes || a.displayName.localeCompare(b.displayName));
 
-  return combined.map((entry, index) => ({ ...entry, rank: index + 1, isSelf: entry.userId === self.userId }));
+  return combined.map((entry, index) => ({ ...entry, rank: index + 1, isSelf: entry.userId === state.social.userId }));
 }
 
 export function isSocialApiConfigured() {
@@ -366,8 +373,9 @@ export async function getSquadScoreboard(social: SocialState, period: SocialSqua
   const now = Date.now();
   const fetchedAt = squadScoreboardFetchedAt.get(period) ?? 0;
   if (!force && now - fetchedAt < SQUAD_SCOREBOARD_CACHE_TTL_MS) return null;
-  const result = await requestSocialApi<{ entries: SocialSquadScoreEntry[] }>(`/squads/scoreboard?period=${period}&userId=${encodeURIComponent(social.userId)}&deviceSecret=${encodeURIComponent(social.deviceSecret)}`, {
-    method: "GET",
+  const result = await requestSocialApi<{ entries: SocialSquadScoreEntry[] }>("/squads/scoreboard", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, period }),
   });
   squadScoreboardFetchedAt.set(period, now);
   return result;
@@ -515,6 +523,27 @@ export async function getSocialLeaderboard(social: SocialState, scope: SocialLea
   return requestSocialApi<{ entries: SocialLeaderboardEntry[] }>("/leaderboard", {
     method: "POST",
     body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, scope, period }),
+  });
+}
+
+export async function startVerifiedSession(social: SocialState) {
+  return requestSocialApi<{ sessionId: string; startedAt: string; resumed: boolean }>("/verified-session/start", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret }),
+  });
+}
+
+export async function heartbeatVerifiedSession(social: SocialState, sessionId: string) {
+  return requestSocialApi<{ ok: boolean }>("/verified-session/heartbeat", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, sessionId }),
+  });
+}
+
+export async function finishVerifiedSession(social: SocialState, sessionId: string) {
+  return requestSocialApi<{ ok: boolean; creditedMinutes: number; finishedAt: string }>("/verified-session/finish", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, sessionId }),
   });
 }
 

@@ -11,5 +11,9 @@ database_id = "5f4c597d-4347-41d7-96c6-73bf43c2254d"
 binding = "FEED_IMAGES"
 bucket_name = "study-tracker-feed-images"
 
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "8f66bc85ebc74e57a59dda73ef45d6e2"
+
 [triggers]
 crons = ["0 3 * * *"]

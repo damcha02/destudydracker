@@ -262,6 +262,22 @@
   border: 1px solid var(--border);
 }
 
+.privacy-policy-text {
+  margin: 0;
+  padding: 16px;
+  border-radius: 20px;
+  background: color-mix(in oklch, var(--surface-2) 82%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
 .help-section ol {
   margin: 12px 0 0;
   padding-left: 22px;
@@ -6365,6 +6381,29 @@ button[type="submit"],
   overflow-wrap: anywhere;
 }
 
+.admin-usage-stat-alert {
+  border-color: color-mix(in oklch, var(--danger) 30%, var(--line-soft));
+}
+
+.admin-usage-stat-alert strong {
+  color: var(--danger);
+}
+
+.admin-usage-flag-badge {
+  display: inline-flex !important;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in oklch, var(--danger) 40%, var(--line-soft));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--danger) 14%, transparent);
+  color: var(--danger) !important;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 @media (max-width: 760px) {
   .admin-usage-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7872,8 +7911,8 @@ input[type="color"] {
   gap: 7px;
   padding: 4px 10px 4px 8px;
   border-radius: var(--r-sm);
-  background: color-mix(in oklab, var(--surface), transparent 30%);
-  backdrop-filter: blur(3px);
+  background: color-mix(in oklab, var(--surface), transparent 15%);
+  backdrop-filter: blur(4px);
 }
 
 .gk-stats .serif {
@@ -7986,6 +8025,81 @@ input[type="color"] {
 @keyframes gkFlapR {
   from { transform: scaleX(1); }
   to { transform: scaleX(0.45); }
+}
+
+.design-garden-card .garden-stage.jg-stage {
+  position: relative;
+  min-height: 220px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  background:
+    radial-gradient(circle at 82% 14%, color-mix(in oklab, var(--warn) 16%, transparent), transparent 15%),
+    radial-gradient(circle at 18% 8%, color-mix(in oklab, var(--garden) 18%, transparent), transparent 22%),
+    linear-gradient(180deg, var(--garden-sky), color-mix(in oklab, var(--garden-sky), var(--garden-soil) 30%));
+}
+
+.design-garden-card .garden-stage.jg-stage::before,
+.design-garden-card .garden-stage.jg-stage::after {
+  display: none;
+}
+
+.jg-ground::after {
+  opacity: 0.3;
+  background-image: repeating-linear-gradient(100deg, color-mix(in oklab, var(--ink-4), transparent 45%) 0px, transparent 1.4px 26px);
+  background-size: auto;
+  background-position: 0 0;
+}
+
+.jg-ground-moss::after {
+  opacity: 0.4;
+  background-image:
+    repeating-linear-gradient(100deg, color-mix(in oklab, var(--ink-4), transparent 55%) 0px, transparent 1.4px 26px),
+    radial-gradient(ellipse at 30% 60%, color-mix(in oklab, var(--garden), transparent 45%), transparent 65%);
+}
+
+.jg-river {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.85;
+}
+
+.jg-river svg {
+  width: 100%;
+  height: 100%;
+}
+
+.jg-river path {
+  fill: none;
+  stroke: color-mix(in oklab, var(--accent), var(--garden-sky) 35%);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+}
+
+.jg-petal {
+  position: absolute;
+  top: -6%;
+  width: 6px;
+  height: 6px;
+  border-radius: 60% 10% 60% 10%;
+  background: color-mix(in oklab, oklch(0.85 0.07 350), white 20%);
+  opacity: 0.85;
+  z-index: 44;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .jg-petal {
+    animation: jgPetalFall var(--jg-dur, 8s) linear var(--jg-del, 0s) infinite;
+  }
+}
+
+@keyframes jgPetalFall {
+  0% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.85; }
+  90% { opacity: 0.7; }
+  100% { transform: translate(var(--jg-drift, 20px), 128%) rotate(220deg); opacity: 0; }
 }
 
 .planner-stack {

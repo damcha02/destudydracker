@@ -39,7 +39,7 @@ import {
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
@@ -51,6 +51,7 @@ import { filterCountries, findCountryByName, GEODLE_COUNTRY_COUNT, GEODLE_MAX_GU
 import { TRAVLE_MAP_COUNTRIES } from "./lib/travleMapData";
 import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTravleGuessStates, getTravlePuzzleForDate, getTravlePuzzleId, getTravleShortestPath, getTravleSolvedPath, isTravleRouteSolved, makeTravleSeedSalt, TRAVLE_COUNTRY_COUNT, TRAVLE_MAX_GUESSES } from "./lib/travle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
+import privacyPolicyText from "../../PRIVACY.md?raw";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -462,6 +463,7 @@ const PALETTE_STORAGE_KEY = "study-tracker-palette";
 const APP_STYLE_STORAGE_KEY = "study-tracker-style";
 const FIELD_DASHBOARD_LAYOUT_KEY = "study-tracker-field-dashboard-layout";
 const WABI_CIRCLE_COMPETITIVE_KEY = "study-tracker-wabi-circle-competitive";
+const GARDEN_VARIANT_KEY = "study-tracker-garden-variant";
 const DISMISSED_ANNOUNCEMENTS_KEY = "study-tracker-dismissed-announcements";
 const TELEMETRY_INSTALL_ID_KEY = "study-tracker-telemetry-install-id";
 const SESSION_HISTORY_DAYS = 365;
@@ -957,7 +959,7 @@ type CalendarMovePreview = {
   time: string;
 };
 
-type GardenPlantKind = "grass" | "sprout" | "leafy" | "flower" | "herb" | "mushroom" | "bush" | "fern" | "glow" | "tree";
+type GardenPlantKind = "grass" | "sprout" | "leafy" | "flower" | "herb" | "mushroom" | "bush" | "fern" | "glow" | "tree" | "vine" | "crystal";
 
 type GardenItem = {
   id: string;
@@ -980,6 +982,41 @@ type GardenSpeciesProps = {
   maturity?: number;
   wise?: boolean;
 };
+
+type JapaneseGardenPlantKind =
+  | "shoot"
+  | "susuki"
+  | "moss"
+  | "fern"
+  | "bamboo"
+  | "momiji"
+  | "sakura"
+  | "pine"
+  | "azalea"
+  | "stone"
+  | "teahouse"
+  | "lantern"
+  | "pond"
+  | "bridge"
+  | "kiku";
+
+type JapaneseGardenItem = {
+  id: string;
+  kind: JapaneseGardenPlantKind;
+  color?: string;
+  maturity: number;
+  label?: string;
+  sub?: string;
+  ambient?: boolean;
+  fresh?: boolean;
+  fixed?: boolean;
+  wise?: boolean;
+  anchor?: { row: number; frac: number };
+  growthBonus?: number;
+  count?: number;
+};
+
+type PlacedJapaneseGardenItem = JapaneseGardenItem & { x: number; t: number };
 
 const calendarTimelineHours = Array.from({ length: 18 }, (_, index) => index + 6);
 const calendarDurationOptions = [15, 30, 45, 60, 90, 120, 180];
@@ -1011,6 +1048,10 @@ function gardenRng(seed: number) {
 
 function gardenGreen(rng: () => number) {
   return `color-mix(in oklab, var(--garden), var(--garden-deep) ${Math.round(15 + rng() * 65)}%)`;
+}
+
+function gardenWater(rng: () => number) {
+  return `color-mix(in oklab, var(--accent), var(--garden-sky) ${Math.round(20 + rng() * 40)}%)`;
 }
 
 function gardenMix(a: string, b: string, pct: number) {
@@ -1111,6 +1152,30 @@ function GardenTree({ rng, wise }: GardenSpeciesProps) {
   return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 C 22.5 48 25.5 42 24 32" stroke={trunk} strokeWidth="3.4" fill="none" strokeLinecap="round" /><path d="M24 44 Q 30 40 33 36" stroke={trunk} strokeWidth="1.8" fill="none" strokeLinecap="round" /><path d="M24 40 Q 18 36 15.5 33" stroke={trunk} strokeWidth="1.8" fill="none" strokeLinecap="round" /><circle cx="24" cy="21" r="12.5" fill={gardenGreen(rng)} /><circle cx="13.5" cy="28" r="8" fill={gardenGreen(rng)} /><circle cx="34.5" cy="27" r="8.5" fill={gardenGreen(rng)} /><circle cx="24" cy="30" r="9" fill={gardenMix(gardenGreen(rng), "var(--garden)", 35)} />{wise ? Array.from({ length: 5 }).map((_, index) => <circle key={index} cx={12 + rng() * 24} cy={16 + rng() * 14} r="1.25" fill="var(--warn)" />) : null}</g>;
 }
 
+function GardenVine({ rng, color = "var(--accent)" }: GardenSpeciesProps) {
+  const sway = 4 + rng() * 3;
+  const buds = [0.32, 0.52, 0.72, 0.9];
+  const hues = [color, gardenGreen(rng), gardenMix(color, "var(--garden)", 45)];
+  return <g><path d={`M24 58 Q ${24 + sway} 40 ${24 - sway * 0.6} 24 Q ${24 + sway * 0.4} 12 24 4`} stroke="var(--garden-deep)" strokeWidth="1.6" fill="none" strokeLinecap="round" />{buds.map((f, index) => {
+    const x = 24 + Math.sin(f * 6) * sway * (1 - f * 0.3);
+    const y = 58 - f * 54;
+    const dir = index % 2 === 0 ? -1 : 1;
+    return <g key={index}><path d={gardenLeaf(x, y, 6 + rng() * 3, dir)} fill={gardenGreen(rng)} /><circle cx={x + dir * 4} cy={y - 1.5} r="2.1" fill={hues[index % hues.length]} opacity="0.92" /></g>;
+  })}</g>;
+}
+
+function GardenCrystal({ rng }: GardenSpeciesProps) {
+  const cx = 24;
+  const cy = 30;
+  const h = 20 + rng() * 8;
+  return <g style={{ filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--accent), transparent 35%))" }}><path d={`M24 58 Q 25.5 46 24 ${cy + 10}`} stroke="var(--garden-deep)" strokeWidth="1.7" fill="none" strokeLinecap="round" />{Array.from({ length: 5 }).map((_, index) => {
+    const fx = cx + (index - 2) * 3.4;
+    const fy = cy + 6 - Math.abs(index - 2) * 2.2;
+    const fh = h * (0.55 + (1 - Math.abs(index - 2) / 3) * 0.5);
+    return <path key={index} d={`M${fx} ${fy} L ${fx - 3.1} ${fy - fh * 0.42} L ${fx} ${fy - fh} L ${fx + 3.1} ${fy - fh * 0.42} Z`} fill={gardenMix("var(--accent)", index % 2 === 0 ? "white" : "var(--garden)", 20 + rng() * 20)} opacity="0.9" stroke="color-mix(in oklab, var(--accent), white 40%)" strokeWidth="0.4" />;
+  })}<circle cx={cx} cy={cy - h * 0.55} r="1.6" fill="white" opacity="0.85" /></g>;
+}
+
 const gardenSpecies: Record<GardenPlantKind, (props: GardenSpeciesProps) => ReactNode> = {
   grass: GardenGrass,
   sprout: GardenSprout,
@@ -1122,9 +1187,11 @@ const gardenSpecies: Record<GardenPlantKind, (props: GardenSpeciesProps) => Reac
   fern: GardenFern,
   glow: GardenGlowFlower,
   tree: GardenTree,
+  vine: GardenVine,
+  crystal: GardenCrystal,
 };
 
-const gardenBaseWidth: Record<GardenPlantKind, number> = { grass: 0.82, sprout: 0.52, leafy: 0.95, flower: 0.92, herb: 0.9, mushroom: 0.58, bush: 1.12, fern: 0.95, glow: 1.05, tree: 1.95 };
+const gardenBaseWidth: Record<GardenPlantKind, number> = { grass: 0.82, sprout: 0.52, leafy: 0.95, flower: 0.92, herb: 0.9, mushroom: 0.58, bush: 1.12, fern: 0.95, glow: 1.05, tree: 1.95, vine: 1.1, crystal: 0.85 };
 
 function gardenPickSpecies(rng: () => number, maturity: number): GardenPlantKind {
   if (maturity < 0.35) return rng() < 0.5 ? "sprout" : "grass";
@@ -1132,10 +1199,11 @@ function gardenPickSpecies(rng: () => number, maturity: number): GardenPlantKind
   return ["leafy", "bush", "flower", "fern"][Math.floor(rng() * 4)] as GardenPlantKind;
 }
 
-function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number, weeklyMinutes: number, wide: boolean): GardenItem[] {
+function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number, weeklyMinutes: number, densityFactor: number): GardenItem[] {
   const courseMap = new Map(courses.map((course) => [course.id, course]));
   const items: GardenItem[] = [];
   const streak = getStreakDays({ sessions } as AppState);
+  const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
 
   if (stage >= 5 || streak >= 10) {
     items.push({ id: "gk-tree", kind: "tree", wise: true, maturity: 1, label: "The Wise Tree", sub: "A flourishing stretch of study", fixed: true });
@@ -1145,7 +1213,26 @@ function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Ta
     items.push({ id: "gk-streak", kind: "glow", maturity: 1, label: `${streak}-day streak`, sub: "Rare bloom. Keep it alive." });
   }
 
-  const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
+  if (stage >= 4) {
+    items.push({ id: "gk-full-bloom", kind: "crystal", maturity: 1, label: "Full Bloom", sub: "The garden is blooming brilliantly" });
+  }
+
+  const weekCutoff = todayTime - 6 * 86400000;
+  const weeklyCourseIds = new Set(
+    sessions
+      .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId)
+      .filter((session) => new Date(`${(session.endedAt || session.startedAt).slice(0, 10)}T00:00:00`).getTime() >= weekCutoff)
+      .map((session) => session.courseId),
+  );
+  if (weeklyCourseIds.size >= 3) {
+    items.push({ id: "gk-cross-pollinator", kind: "vine", maturity: 1, label: "Cross-Pollinator", sub: `${weeklyCourseIds.size} courses growing this week` });
+  }
+
+  const studySessionCount = sessions.filter((session) => session.kind === "study" || session.kind === "exam").length;
+  if (studySessionCount >= 20) {
+    items.push({ id: "gk-mushroom-ring", kind: "mushroom", maturity: 1, label: "Mushroom Ring", sub: `${studySessionCount} sessions logged and counting` });
+  }
+
   sessions
     .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
     .slice(-90)
@@ -1175,7 +1262,7 @@ function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Ta
   });
 
   const ambientBase = [4, 8, 12, 16, 21, 25][stage] ?? 4;
-  const ambient = Math.round((ambientBase + Math.min(8, Math.floor(weeklyMinutes / 90))) * (wide ? 1 : 0.55));
+  const ambient = Math.round((ambientBase + Math.min(8, Math.floor(weeklyMinutes / 90))) * densityFactor);
   for (let index = 0; index < ambient; index += 1) {
     const rng = gardenRng(gardenHash(`ambient-${stage}-${index}`));
     items.push({ id: `ambient-${stage}-${index}`, kind: rng() < 0.6 ? "grass" : rng() < 0.5 ? "sprout" : "fern", maturity: 0.25 + rng() * 0.3, ambient: true });
@@ -1184,28 +1271,45 @@ function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Ta
   return items;
 }
 
-function placeGardenItems(items: GardenItem[]): PlacedGardenItem[] {
+function placeGardenItems(items: GardenItem[], labelClearanceFraction: number): PlacedGardenItem[] {
   const placed: PlacedGardenItem[] = [];
+  let leftCount = 0;
+  let rightCount = 0;
   for (const item of items) {
     const rng = gardenRng(gardenHash(`${item.id}-pos`));
     if (item.fixed) {
-      placed.push({ ...item, x: 0.68 + rng() * 0.16, t: 0.42 + rng() * 0.16 });
+      const x = 0.16 + rng() * 0.68;
+      const t = 0.42 + rng() * 0.16;
+      placed.push({ ...item, x, t });
+      if (x < 0.5) leftCount += 1; else rightCount += 1;
       continue;
     }
     let best: { x: number; t: number } | null = null;
-    let bestDistance = -1;
+    let bestScore = -1;
     for (let attempt = 0; attempt < 9; attempt += 1) {
       const x = 0.03 + 0.94 * rng();
       const t = Math.pow(rng(), 0.82);
-      if (x < 0.46 && t > 0.66) continue;
+      // Keep the frontmost plants from growing directly behind the stats label — its
+      // translucent backdrop only lightly diffuses whatever's behind it, it doesn't hide it.
+      // Taper the exclusion by depth (a wedge, not a rectangle): only plants right at the
+      // label's own height need the full measured width of clearance, so plants a little
+      // further back — which render higher up, clear of the label — aren't banned from the
+      // left edge too. labelClearanceFraction is sized from the label's actual rendered
+      // pixel width, not a guess, so it scales correctly on both narrow and very wide cards.
+      const labelClearance = labelClearanceFraction * Math.max(0, (t - 0.72) / 0.28);
+      if (x < labelClearance) continue;
       let distance = Infinity;
       for (const plant of placed) distance = Math.min(distance, Math.hypot((x - plant.x) * 1.7, t - plant.t));
-      if (distance > bestDistance) {
-        bestDistance = distance;
+      const onLighterSide = x < 0.5 ? leftCount <= rightCount : rightCount <= leftCount;
+      const score = distance + (onLighterSide ? 0.15 : 0);
+      if (score > bestScore) {
+        bestScore = score;
         best = { x, t };
       }
     }
-    placed.push({ ...item, ...(best ?? { x: 0.45 + rng() * 0.3, t: 0.3 + rng() * 0.25 }) });
+    const placement = best ?? { x: 0.45 + rng() * 0.3, t: 0.3 + rng() * 0.25 };
+    placed.push({ ...item, ...placement });
+    if (placement.x < 0.5) leftCount += 1; else rightCount += 1;
   }
   return placed.sort((a, b) => a.t - b.t);
 }
@@ -1215,16 +1319,40 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
   const gardenStageThresholds = [0, 30, 90, 210, 420, 720];
   const stage = Math.max(0, gardenStageThresholds.filter((threshold) => weeklyMinutes >= threshold).length - 1);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [wide, setWide] = useState(true);
+  const statsRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(380);
+  const [statsWidth, setStatsWidth] = useState(0);
   const [tip, setTip] = useState<{ x: number; y: number; label?: string; sub?: string } | null>(null);
   const streak = useMemo(() => getStreakDays({ sessions: appState.sessions } as AppState), [appState.sessions]);
-  const plants = useMemo(() => placeGardenItems(buildGardenItems(appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, wide)), [appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, wide]);
+  const densityFactor = Math.max(0.55, Math.min(2.2, containerWidth / 380));
+  // The label's own rendered width (it's fixed-pixel, driven by font-size and text length, not
+  // container size) sized as a fraction of the container — so the placement keep-out below stays
+  // accurate whether this widget is a ~300px cockpit column or a full-width hero row.
+  const labelClearanceFraction = statsWidth > 0 ? Math.max(0.12, Math.min(0.55, (statsWidth + 24) / containerWidth)) : 0.46;
+  const plants = useMemo(
+    () => placeGardenItems(buildGardenItems(appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, densityFactor), labelClearanceFraction),
+    [appState.courses, appState.sessions, appState.tasks, stage, weeklyMinutes, densityFactor, labelClearanceFraction],
+  );
   const fireflies = streak >= 5 ? Math.min(6, 2 + Math.floor(streak / 3)) : 0;
 
   useLayoutEffect(() => {
     const element = wrapRef.current;
     if (!element || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => setWide(element.clientWidth > 430));
+    const observer = new ResizeObserver(() => {
+      const width = Math.round(element.clientWidth / 12) * 12;
+      setContainerWidth((prev) => (prev === width ? prev : width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = statsRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      const width = Math.round(element.clientWidth);
+      setStatsWidth((prev) => (prev === width ? prev : width));
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -1283,12 +1411,383 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
       {stage >= 4 ? <div className="gk-butterfly" aria-hidden="true"><svg viewBox="0 0 20 16"><ellipse className="gk-wing-l" cx="6" cy="7" rx="5" ry="4" /><ellipse className="gk-wing-r" cx="14" cy="7" rx="5" ry="4" /><rect x="9.3" y="3.5" width="1.4" height="9" rx="0.7" /></svg></div> : null}
 
       <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 5 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
-      <div className="gk-stats"><span className="serif">{gardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
+      <div ref={statsRef} className="gk-stats"><span className="serif">{gardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
       {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to plant your first sprout</p> : null}
       {tip ? <div className="gk-tooltip" style={{ left: tip.x, top: tip.y - 14 }}><strong>{tip.label}</strong>{tip.sub ? <span>{tip.sub}</span> : null}</div> : null}
     </div>
   );
 }
+function GardenShoot({ rng }: GardenSpeciesProps) {
+  const green = gardenMix(gardenGreen(rng), "var(--garden-soil)", 20);
+  return <g><path d="M24 58 Q 24.3 53 24 49" stroke="var(--garden-deep)" strokeWidth="1.6" fill="none" strokeLinecap="round" /><path d={gardenLeaf(24, 50, 6 + rng() * 2, -1)} fill={green} /><path d={gardenLeaf(24, 50, 5 + rng() * 2, 1)} fill={gardenMix(green, "var(--garden)", 30)} /></g>;
+}
+
+function GardenSusuki({ rng }: GardenSpeciesProps) {
+  const count = 3 + Math.floor(rng() * 3);
+  return <g>{Array.from({ length: count }).map((_, index) => {
+    const dx = (rng() - 0.5) * 20;
+    const h = 30 + rng() * 22;
+    const tx = 24 + dx * 1.4;
+    const ty = 58 - h;
+    return <g key={index}><path d={`M24 58 Q ${24 + dx * 0.3} ${58 - h * 0.6} ${tx} ${ty}`} stroke={gardenMix("var(--garden-soil)", "var(--garden)", 40)} strokeWidth={1.1 + rng() * 0.5} fill="none" strokeLinecap="round" /><ellipse cx={tx} cy={ty} rx="2.6" ry="5.5" fill={gardenMix(gardenGreen(rng), "oklch(0.92 0.03 90)", 55 + rng() * 30)} opacity="0.9" transform={`rotate(${(rng() - 0.5) * 30} ${tx} ${ty})`} /></g>;
+  })}</g>;
+}
+
+function GardenMossClump({ rng }: GardenSpeciesProps) {
+  const green = gardenGreen(rng);
+  return <g><ellipse cx="24" cy="55" rx={11 + rng() * 3} ry={5 + rng() * 1.5} fill={green} opacity="0.9" /><ellipse cx={20 + rng() * 3} cy="53" rx={5 + rng() * 2} ry={3 + rng()} fill={gardenMix(green, "var(--garden)", 35)} opacity="0.85" /><ellipse cx={28 - rng() * 3} cy="54" rx={4.5 + rng() * 2} ry={2.6 + rng()} fill={gardenMix(green, "var(--garden-deep)", 25)} opacity="0.85" /></g>;
+}
+
+function GardenBamboo({ rng }: GardenSpeciesProps) {
+  const stalks = 2 + Math.floor(rng() * 3);
+  return <g>{Array.from({ length: stalks }).map((_, index) => {
+    const dx = (index - (stalks - 1) / 2) * (6 + rng() * 3);
+    const h = 34 + rng() * 18;
+    const x = 24 + dx;
+    const nodes = 3 + Math.floor(rng() * 2);
+    const stalk = gardenMix("var(--garden)", "oklch(0.85 0.05 120)", 20 + rng() * 20);
+    return <g key={index}><path d={`M${x} 58 L ${x} ${58 - h}`} stroke={stalk} strokeWidth="2.6" fill="none" strokeLinecap="round" />{Array.from({ length: nodes }).map((__, nodeIndex) => <path key={nodeIndex} d={`M${x - 1.6} ${58 - h * ((nodeIndex + 1) / (nodes + 1))} L ${x + 1.6} ${58 - h * ((nodeIndex + 1) / (nodes + 1))}`} stroke="var(--garden-deep)" strokeWidth="1" opacity="0.6" />)}<path d={gardenLeaf(x, 58 - h + 4, 8 + rng() * 3, index % 2 === 0 ? 1 : -1)} fill={gardenGreen(rng)} /><path d={gardenLeaf(x, 58 - h + 9, 6 + rng() * 3, index % 2 === 0 ? -1 : 1)} fill={gardenMix(gardenGreen(rng), "var(--garden)", 30)} /></g>;
+  })}</g>;
+}
+
+function GardenMomiji({ rng, wise, color }: GardenSpeciesProps) {
+  const trunk = gardenMix("var(--garden-soil)", "black", 22);
+  const autumn = color || "oklch(0.62 0.16 35)";
+  const scale = wise ? 1.25 : 1;
+  return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 C 23 49 25 43 24 34" stroke={trunk} strokeWidth={3 * scale} fill="none" strokeLinecap="round" /><path d="M24 42 Q 30 38 34 35" stroke={trunk} strokeWidth="1.6" fill="none" strokeLinecap="round" /><path d="M24 38 Q 18 34 15 32" stroke={trunk} strokeWidth="1.6" fill="none" strokeLinecap="round" /><circle cx="24" cy={22 - (scale - 1) * 4} r={11 * scale} fill={autumn} /><circle cx={14 * scale} cy="27" r={7 * scale} fill={gardenMix(autumn, "var(--warn)", 30)} /><circle cx={48 - 14 * scale} cy="26" r={7.5 * scale} fill={gardenMix(autumn, "oklch(0.7 0.15 70)", 30)} /><circle cx="24" cy="29" r={8 * scale} fill={gardenMix(autumn, "var(--garden-deep)", 20)} />{wise ? Array.from({ length: 4 }).map((_, index) => <circle key={index} cx={12 + rng() * 24} cy={16 + rng() * 14} r="1.2" fill="var(--warn)" />) : null}</g>;
+}
+
+function GardenSakura({ rng, color }: GardenSpeciesProps) {
+  const trunk = gardenMix("var(--garden-soil)", "black", 22);
+  const pink = color || "oklch(0.85 0.07 350)";
+  return <g><path d="M24 58 C 22.5 48 25.5 42 24 32" stroke={trunk} strokeWidth="3.2" fill="none" strokeLinecap="round" /><path d="M24 44 Q 30 40 33 36" stroke={trunk} strokeWidth="1.7" fill="none" strokeLinecap="round" /><path d="M24 40 Q 18 36 15.5 33" stroke={trunk} strokeWidth="1.7" fill="none" strokeLinecap="round" /><circle cx="24" cy="21" r="12" fill={gardenMix(pink, "white", 15)} /><circle cx="13.5" cy="28" r="7.5" fill={pink} /><circle cx="34.5" cy="27" r="8" fill={gardenMix(pink, "white", 10)} /><circle cx="24" cy="30" r="8.5" fill={gardenMix(pink, "var(--accent)", 20)} />{Array.from({ length: 4 }).map((_, index) => <circle key={index} cx={10 + rng() * 28} cy={38 + rng() * 16} r="1.1" fill={gardenMix(pink, "white", 30)} opacity="0.85" />)}</g>;
+}
+
+function GardenPine({ rng, wise }: GardenSpeciesProps) {
+  const trunk = gardenMix("var(--garden-soil)", "black", 25);
+  const scale = wise ? 1.3 : 1;
+  const green = gardenGreen(rng);
+  const tiers = [0, 1, 2, 3].map((tier) => {
+    const y = 50 - tier * 11 * scale;
+    const w = (16 - tier * 2.6) * scale;
+    return <path key={tier} d={`M24 ${y - 12 * scale} L ${24 - w} ${y} L ${24 + w} ${y} Z`} fill={gardenMix(green, "var(--garden-deep)", tier * 8)} />;
+  });
+  return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 L 24 20" stroke={trunk} strokeWidth={2.6 * scale} fill="none" strokeLinecap="round" />{tiers}</g>;
+}
+
+function GardenAzalea({ rng, color = "var(--accent)" }: GardenSpeciesProps) {
+  return <g><ellipse cx="15" cy="51" rx={7 + rng() * 2} ry={6 + rng() * 1.5} fill={gardenGreen(rng)} /><ellipse cx="31" cy="49" rx={8 + rng() * 2} ry={7 + rng() * 2} fill={gardenGreen(rng)} /><ellipse cx="24" cy="53" rx={8 + rng()} ry={5 + rng()} fill={gardenMix(gardenGreen(rng), "var(--garden)", 25)} />{Array.from({ length: 9 }).map((_, index) => <circle key={index} cx={14 + rng() * 20} cy={44 + rng() * 12} r="1.4" fill={color} opacity="0.92" />)}</g>;
+}
+
+function GardenStone({ rng }: GardenSpeciesProps) {
+  const grey = gardenMix("oklch(0.55 0.01 250)", "var(--garden-soil)", 20 + rng() * 20);
+  return <g><ellipse cx="24" cy="56" rx="12" ry="2.5" fill="var(--garden-soil)" opacity="0.4" /><path d="M13 56 Q 11 44 20 40 Q 28 36 35 44 Q 38 52 30 56 Z" fill={grey} /><path d="M17 46 Q 22 43 27 45" stroke={gardenMix(grey, "white", 25)} strokeWidth="1" fill="none" opacity="0.6" /></g>;
+}
+
+function GardenTeaHouse({ rng }: GardenSpeciesProps) {
+  const wood = gardenMix("var(--garden-soil)", "black", 12 + rng() * 8);
+  const roof = gardenMix("var(--garden-deep)", "black", 30);
+  return <g><rect x="10" y="40" width="28" height="16" fill={wood} opacity="0.9" /><rect x="21" y="46" width="6" height="10" fill="var(--garden-soil)" opacity="0.7" /><path d="M6 40 L 24 24 L 42 40 Z" fill={roof} /><path d="M6 40 L 24 24 L 42 40" stroke={gardenMix(roof, "black", 20)} strokeWidth="1" fill="none" /><rect x="12" y="36" width="6" height="4" fill="oklch(0.85 0.06 90)" opacity="0.8" /><rect x="30" y="36" width="6" height="4" fill="oklch(0.85 0.06 90)" opacity="0.8" /></g>;
+}
+
+function GardenStoneLantern({ rng }: GardenSpeciesProps) {
+  const stone = gardenMix("oklch(0.6 0.015 250)", "var(--garden-soil)", 20 + rng() * 12);
+  return <g><ellipse cx="24" cy="57" rx="7" ry="1.6" fill="var(--garden-soil)" opacity="0.4" /><rect x="21" y="52" width="6" height="4" rx="1" fill={stone} /><rect x="19.5" y="34" width="9" height="18" rx="1.5" fill={stone} /><rect x="17" y="27" width="14" height="7" rx="1.5" fill={gardenMix(stone, "var(--warn)", 12)} /><circle cx="24" cy="30.5" r="1.6" fill="var(--warn)" opacity="0.85" /><path d="M14 27 L 24 19 L 34 27 Z" fill={gardenMix(stone, "black", 12)} /></g>;
+}
+
+function GardenKoiPond({ rng }: GardenSpeciesProps) {
+  const water = gardenWater(rng);
+  return <g><ellipse cx="24" cy="52" rx="21" ry="7.5" fill={water} opacity="0.92" /><ellipse cx="24" cy="52" rx="21" ry="7.5" fill="none" stroke={gardenMix("var(--garden-soil)", "black", 15)} strokeWidth="1.2" opacity="0.5" /><path d="M15 51 Q 17 49 19 51 Q 17 53 15 51 Z" fill="oklch(0.65 0.18 30)" opacity="0.85" /><path d="M29 54 Q 31 52 33 54 Q 31 56 29 54 Z" fill="oklch(0.75 0.05 60)" opacity="0.85" /><path d="M24 49 Q 20 47 16 48" stroke="white" strokeWidth="0.6" fill="none" opacity="0.35" /></g>;
+}
+
+function GardenBridge({ rng }: GardenSpeciesProps) {
+  const water = gardenWater(rng);
+  const wood = gardenMix("var(--garden-deep)", "black", 15);
+  return <g><ellipse cx="24" cy="54" rx="22" ry="5.5" fill={water} opacity="0.85" /><path d="M4 52 Q 24 28 44 52" stroke={wood} strokeWidth="3" fill="none" strokeLinecap="round" /><path d="M4 52 Q 24 34 44 52" stroke={gardenMix(wood, "white", 15)} strokeWidth="1.4" fill="none" opacity="0.7" /><path d="M9 48 L 8 53 M 39 48 L 40 53" stroke={wood} strokeWidth="1.6" strokeLinecap="round" /></g>;
+}
+
+const japaneseGardenSpecies: Record<JapaneseGardenPlantKind, (props: GardenSpeciesProps) => ReactNode> = {
+  shoot: GardenShoot,
+  susuki: GardenSusuki,
+  moss: GardenMossClump,
+  fern: GardenFern,
+  bamboo: GardenBamboo,
+  momiji: GardenMomiji,
+  sakura: GardenSakura,
+  pine: GardenPine,
+  azalea: GardenAzalea,
+  stone: GardenStone,
+  teahouse: GardenTeaHouse,
+  lantern: GardenStoneLantern,
+  pond: GardenKoiPond,
+  bridge: GardenBridge,
+  kiku: GardenGlowFlower,
+};
+
+const japaneseGardenBaseWidth: Record<JapaneseGardenPlantKind, number> = {
+  shoot: 0.52,
+  susuki: 0.85,
+  moss: 0.9,
+  fern: 0.95,
+  bamboo: 1.1,
+  momiji: 1.6,
+  sakura: 1.7,
+  pine: 1.9,
+  azalea: 1.05,
+  stone: 0.6,
+  teahouse: 1.8,
+  lantern: 0.8,
+  pond: 2.1,
+  bridge: 1.6,
+  kiku: 1.05,
+};
+
+function japanesePickSpecies(rng: () => number, maturity: number): JapaneseGardenPlantKind {
+  if (maturity < 0.35) return rng() < 0.5 ? "shoot" : "susuki";
+  if (maturity < 0.7) return ["susuki", "fern", "moss", "bamboo"][Math.floor(rng() * 4)] as JapaneseGardenPlantKind;
+  return ["bamboo", "momiji", "sakura", "pine"][Math.floor(rng() * 4)] as JapaneseGardenPlantKind;
+}
+
+function buildJapaneseGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number): JapaneseGardenItem[] {
+  const courseMap = new Map(courses.map((course) => [course.id, course]));
+  const items: JapaneseGardenItem[] = [];
+  const streak = getStreakDays({ sessions } as AppState);
+  const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
+
+  if (stage >= 3) {
+    items.push({ id: "jg-teahouse", kind: "teahouse", fixed: true, maturity: 1, anchor: { row: 0, frac: 0.86 }, label: "Tea House", sub: "Raised at the back of the garden" });
+  }
+  if (stage >= 4) {
+    items.push({ id: "jg-lantern", kind: "lantern", fixed: true, maturity: 1, anchor: { row: 1, frac: 0.62 }, label: "Stone Lantern", sub: "Lights the mid-ground" });
+  }
+  if (stage >= 5) {
+    items.push({ id: "jg-pond-upper", kind: "pond", fixed: true, maturity: 1, anchor: { row: 0, frac: 0.14 }, label: "Upper Koi Pond", sub: "Dug at the back of the garden" });
+    items.push({ id: "jg-old-maple", kind: "momiji", wise: true, fixed: true, maturity: 1, anchor: { row: 0, frac: 0.34 }, label: "The Old Maple", sub: "Anchors the left of the garden" });
+  }
+  if (stage >= 6) {
+    items.push({ id: "jg-pond-lower", kind: "pond", fixed: true, maturity: 1, anchor: { row: 3, frac: 0.58 }, label: "Lower Koi Pond", sub: "Fed by the river" });
+    items.push({ id: "jg-bridge", kind: "bridge", fixed: true, maturity: 1, anchor: { row: 3, frac: 0.74 }, label: "Arched Bridge", sub: "Crosses the river" });
+  }
+  if (stage >= 7 || streak >= 14) {
+    items.push({ id: "jg-great-pine", kind: "pine", wise: true, fixed: true, maturity: 1, anchor: { row: 0, frac: 0.5 }, label: "The Great Pine", sub: "Long tended, standing tall" });
+  }
+  if (streak >= 5) {
+    items.push({ id: "jg-kiku", kind: "kiku", fixed: true, maturity: 1, anchor: { row: 2, frac: 0.5 }, label: `${streak}-day streak`, sub: "Golden kiku. Keep it alive." });
+  }
+
+  sessions
+    .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
+    .slice(-90)
+    .forEach((session) => {
+      const course = courseMap.get(session.courseId ?? "");
+      if (!course) return;
+      const rng = gardenRng(gardenHash(`${session.id}-jspecies`));
+      const maturity = Math.min(1, session.minutes / 90);
+      const sessionDate = (session.endedAt || session.startedAt).slice(0, 10);
+      const ageDays = (todayTime - new Date(`${sessionDate}T00:00:00`).getTime()) / 86400000;
+      items.push({
+        id: session.id,
+        kind: japanesePickSpecies(rng, maturity),
+        color: course.color,
+        maturity,
+        fresh: ageDays <= 1.5,
+        label: course.name,
+        sub: `${session.presetLabel || session.kind} · ${formatMinutes(session.minutes)}${ageDays <= 1.5 ? " · freshly grown" : ""}`,
+      });
+    });
+
+  tasks.forEach((task) => {
+    if (task.totalUnits <= 0 || task.completedUnits < task.totalUnits) return;
+    const course = courseMap.get(task.courseId);
+    if (!course) return;
+    items.push({ id: `task-${task.id}`, kind: gardenHash(task.id) % 2 === 0 ? "sakura" : "azalea", color: course.color, maturity: 1, label: course.name, sub: `Milestone · ${task.title}` });
+  });
+
+  return items;
+}
+
+function placeJapaneseGardenItems(items: JapaneseGardenItem[], columns: number, labelClearanceFraction: number, rows = 4): PlacedJapaneseGardenItem[] {
+  const rowT = (row: number) => (row + 0.5) / rows;
+  const colX = (row: number, col: number) => {
+    const jitter = gardenRng(gardenHash(`bed-${row}-${col}`))();
+    const spread = 0.35 / columns;
+    return Math.min(0.98, Math.max(0.02, (col + 0.5) / columns + (jitter - 0.5) * spread));
+  };
+
+  const reserved = new Set<string>();
+  const fixedPlaced: PlacedJapaneseGardenItem[] = [];
+  const nonFixed: JapaneseGardenItem[] = [];
+
+  for (const item of items) {
+    if (item.fixed && item.anchor) {
+      const row = Math.min(rows - 1, Math.max(0, item.anchor.row));
+      const col = Math.min(columns - 1, Math.max(0, Math.round(item.anchor.frac * (columns - 1))));
+      reserved.add(`${row}-${col}`);
+      fixedPlaced.push({ ...item, x: colX(row, col), t: rowT(row) });
+    } else {
+      nonFixed.push(item);
+    }
+  }
+
+  const available: { row: number; col: number }[] = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < columns; col += 1) {
+      const key = `${row}-${col}`;
+      if (reserved.has(key)) continue;
+      if (row === rows - 1 && colX(row, col) < labelClearanceFraction) continue;
+      available.push({ row, col });
+    }
+  }
+
+  const buckets = new Map<string, JapaneseGardenItem[]>();
+  if (available.length > 0) {
+    for (const item of nonFixed) {
+      const bed = available[gardenHash(`${item.id}-bed`) % available.length];
+      const key = `${bed.row}-${bed.col}`;
+      const bucket = buckets.get(key);
+      if (bucket) bucket.push(item);
+      else buckets.set(key, [item]);
+    }
+  }
+
+  const resolved: PlacedJapaneseGardenItem[] = [];
+  for (const bed of available) {
+    const key = `${bed.row}-${bed.col}`;
+    const bucket = buckets.get(key);
+    const x = colX(bed.row, bed.col);
+    const t = rowT(bed.row);
+    if (!bucket || bucket.length === 0) {
+      const rng = gardenRng(gardenHash(`bed-${bed.row}-${bed.col}-ambient`));
+      const kind: JapaneseGardenPlantKind = rng() < 0.5 ? "moss" : "stone";
+      resolved.push({ id: `bed-${bed.row}-${bed.col}-ambient`, kind, maturity: 0.2 + rng() * 0.2, ambient: true, x, t });
+      continue;
+    }
+    let winner = bucket[0];
+    for (const candidate of bucket) if (candidate.maturity >= winner.maturity) winner = candidate;
+    const growthBonus = Math.min(0.6, (bucket.length - 1) * 0.12);
+    const sub = bucket.length > 1 ? `${winner.sub ?? ""}${winner.sub ? " · " : ""}${bucket.length} sessions grown here` : winner.sub;
+    resolved.push({ ...winner, sub, growthBonus, count: bucket.length, x, t });
+  }
+
+  return [...resolved, ...fixedPlaced].sort((a, b) => a.t - b.t);
+}
+
+function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState; weeklyMinutes: number }) {
+  const japaneseGardenStageNames = ["Bare Ground", "First Shoots", "Moss & Bloom", "Susuki Fields", "Bamboo Grove", "Upper Pond", "River & Bridge", "Every Bed Planted", "Long-Tended"];
+  const japaneseGardenStageThresholds = [0, 45, 120, 240, 400, 600, 850, 1150, 1500];
+  const stage = Math.max(0, japaneseGardenStageThresholds.filter((threshold) => weeklyMinutes >= threshold).length - 1);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const statsRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(380);
+  const [statsWidth, setStatsWidth] = useState(0);
+  const [tip, setTip] = useState<{ x: number; y: number; label?: string; sub?: string } | null>(null);
+  const streak = useMemo(() => getStreakDays({ sessions: appState.sessions } as AppState), [appState.sessions]);
+  const columns = Math.max(5, Math.min(11, Math.round(containerWidth / 70)));
+  const labelClearanceFraction = statsWidth > 0 ? Math.max(0.12, Math.min(0.55, (statsWidth + 24) / containerWidth)) : 0.46;
+  const plants = useMemo(
+    () => placeJapaneseGardenItems(buildJapaneseGardenItems(appState.courses, appState.sessions, appState.tasks, stage), columns, labelClearanceFraction),
+    [appState.courses, appState.sessions, appState.tasks, stage, columns, labelClearanceFraction],
+  );
+  const fireflies = streak >= 5 ? Math.min(6, 2 + Math.floor(streak / 3)) : 0;
+  const petals = stage >= 5 ? 6 : 0;
+
+  useLayoutEffect(() => {
+    const element = wrapRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      const width = Math.round(element.clientWidth / 12) * 12;
+      setContainerWidth((prev) => (prev === width ? prev : width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    const element = statsRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      const width = Math.round(element.clientWidth);
+      setStatsWidth((prev) => (prev === width ? prev : width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const showTip = (event: MouseEvent<HTMLDivElement>, plant: PlacedJapaneseGardenItem) => {
+    const rect = wrapRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setTip({ x: Math.max(10, Math.min(rect.width - 10, event.clientX - rect.left)), y: Math.max(28, event.clientY - rect.top), label: plant.label, sub: plant.sub });
+  };
+
+  return (
+    <div ref={wrapRef} className="garden-stage jg-stage" aria-label={`Japanese Garden of Knowledge: ${japaneseGardenStageNames[stage]}, ${formatMinutes(weeklyMinutes)} last 7 days`}>
+      <div className="gk-sun" aria-hidden="true" />
+      <div className={`gk-ground jg-ground${stage >= 2 ? " jg-ground-moss" : ""}`} aria-hidden="true">
+        <svg preserveAspectRatio="none" viewBox="0 0 100 8"><path d="M0 8 Q 14 2.5 32 4.8 T 64 3.6 T 100 5.2 L 100 8 Z" /></svg>
+      </div>
+      {stage >= 6 ? (
+        <div className="jg-river" aria-hidden="true">
+          <svg preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M14 12 Q 30 30 40 45 Q 52 62 58 82" /></svg>
+        </div>
+      ) : null}
+
+      {plants.map((plant, index) => {
+        const Species = japaneseGardenSpecies[plant.kind];
+        const rng = gardenRng(gardenHash(`${plant.id}-draw`));
+        const depth = 0.45 + 0.55 * plant.t;
+        const width = 76 * (japaneseGardenBaseWidth[plant.kind] || 1) * depth * (0.72 + 0.38 * (plant.maturity || 0.5)) * (1 + (plant.growthBonus || 0));
+        const bottomPct = 2 + (1 - plant.t) * 52;
+        const interactive = !plant.ambient;
+        return (
+          <div
+            key={plant.id}
+            className={`gk-plant-in${plant.fresh ? " gk-fresh" : ""}`}
+            onMouseEnter={interactive ? (event) => showTip(event, plant) : undefined}
+            onMouseMove={interactive ? (event) => showTip(event, plant) : undefined}
+            onMouseLeave={interactive ? () => setTip(null) : undefined}
+            style={{
+              position: "absolute",
+              left: `${plant.x * 100}%`,
+              bottom: `${bottomPct}%`,
+              width,
+              transform: "translateX(-50%)",
+              zIndex: Math.round(plant.t * 40) + 3,
+              opacity: plant.ambient ? 0.5 + 0.35 * plant.t : 0.72 + 0.28 * plant.t,
+              animationDelay: `${(index % 12) * 0.05}s`,
+              pointerEvents: interactive ? "auto" : "none",
+            }}
+          >
+            <span className="gk-sway" style={{ "--gk-dur": `${4.5 + (gardenHash(plant.id) % 40) / 10}s`, "--gk-del": `${-(gardenHash(plant.id) % 60) / 10}s` } as CSSProperties}>
+              <svg viewBox="0 0 48 58" aria-hidden="true"><Species rng={rng} color={plant.color} maturity={plant.maturity} wise={plant.wise} /></svg>
+            </span>
+          </div>
+        );
+      })}
+
+      {Array.from({ length: fireflies }).map((_, index) => {
+        const rng = gardenRng(gardenHash(`jg-fly-${index}`));
+        return <span key={index} className="gk-firefly" style={{ left: `${8 + rng() * 84}%`, top: `${12 + rng() * 38}%`, "--gk-dur": `${2.4 + rng() * 2.4}s`, "--gk-del": `${-rng() * 4}s` } as CSSProperties} />;
+      })}
+
+      {Array.from({ length: petals }).map((_, index) => {
+        const rng = gardenRng(gardenHash(`jg-petal-${index}`));
+        return (
+          <span
+            key={index}
+            className="jg-petal"
+            style={{ left: `${6 + rng() * 88}%`, "--jg-dur": `${6 + rng() * 5}s`, "--jg-del": `${-rng() * 8}s`, "--jg-drift": `${(rng() - 0.5) * 40}px` } as CSSProperties}
+          />
+        );
+      })}
+
+      <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 8 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
+      <div ref={statsRef} className="gk-stats"><span className="serif">{japaneseGardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
+      {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to break the gravel</p> : null}
+      {tip ? <div className="gk-tooltip" style={{ left: tip.x, top: tip.y - 14 }}><strong>{tip.label}</strong>{tip.sub ? <span>{tip.sub}</span> : null}</div> : null}
+    </div>
+  );
+}
+
 const calendarTimelineHeight = calendarTimelineHours.length * calendarTimelineHourHeight;
 
 const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: string }[] = [
@@ -1343,6 +1842,12 @@ function loadFieldDashboardLayout(): FieldDashboardLayout {
 
 function loadWabiCircleCompetitive(): boolean {
   return localStorage.getItem(WABI_CIRCLE_COMPETITIVE_KEY) === "true";
+}
+
+type GardenVariant = "western" | "japanese";
+
+function loadGardenVariant(): GardenVariant {
+  return localStorage.getItem(GARDEN_VARIANT_KEY) === "japanese" ? "japanese" : "western";
 }
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
@@ -2667,6 +3172,7 @@ function App() {
   const [wabiQuietTaskId, setWabiQuietTaskId] = useState<string | null>(null);
   const [wabiQuietTaskMenuOpen, setWabiQuietTaskMenuOpen] = useState(false);
   const [wabiCircleCompetitive, setWabiCircleCompetitive] = useState<boolean>(loadWabiCircleCompetitive);
+  const [gardenVariant, setGardenVariant] = useState<GardenVariant>(loadGardenVariant);
   const [breakTimerMinutes, setBreakTimerMinutes] = useState(5);
   const [breakTimerRemaining, setBreakTimerRemaining] = useState(5 * 60);
   const [breakTimerRunning, setBreakTimerRunning] = useState(false);
@@ -2825,6 +3331,9 @@ function App() {
   const latestStateRef = useRef(state);
   const saveStateTimeoutRef = useRef<number | null>(null);
   const sessionSavePendingRef = useRef(false);
+  const verifiedSessionRef = useRef<string | null>(null);
+  const timerRunningRef = useRef(state.timer.running);
+  timerRunningRef.current = state.timer.running;
   const pendingSaveRef = useRef<AppState | null>(null);
   const socialSyncInProgressRef = useRef(false);
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
@@ -2839,6 +3348,7 @@ function App() {
   const [adminUsage, setAdminUsage] = useState<AdminUsageResponse | null>(null);
   const [adminUsageLoading, setAdminUsageLoading] = useState(false);
   const [adminUsageOpen, setAdminUsageOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
   const [feedCommentNotice, setFeedCommentNotice] = useState<FeedCommentNotice | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({
@@ -3077,6 +3587,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(WABI_CIRCLE_COMPETITIVE_KEY, String(wabiCircleCompetitive));
   }, [wabiCircleCompetitive]);
+
+  useEffect(() => {
+    localStorage.setItem(GARDEN_VARIANT_KEY, gardenVariant);
+  }, [gardenVariant]);
 
   useEffect(() => {
     if (!breakTimerRunning) return;
@@ -3685,6 +4199,49 @@ function App() {
     .sort((a, b) => (parseSocialTimestamp(b.lastSeenAt) ?? 0) - (parseSocialTimestamp(a.lastSeenAt) ?? 0));
   const weekCompareEntries = socialFriendsWeekly.slice(0, 6);
   const socialConfigured = isSocialApiConfigured();
+  useEffect(() => {
+    const eligible = isTauriApp()
+      && socialConfigured
+      && state.timer.running
+      && state.timer.phase !== "idle"
+      && state.timer.phase !== "break";
+    let disposed = false;
+    let heartbeatInterval: number | undefined;
+    const social = state.social;
+
+    const scheduleHeartbeats = (sessionId: string) => {
+      heartbeatInterval = window.setInterval(() => {
+        void heartbeatVerifiedSession(social, sessionId).catch(() => undefined);
+      }, 15 * 60 * 1000);
+    };
+
+    if (!eligible) {
+      const sessionId = verifiedSessionRef.current;
+      verifiedSessionRef.current = null;
+      if (sessionId) void finishVerifiedSession(social, sessionId).catch(() => undefined);
+      return undefined;
+    }
+
+    if (verifiedSessionRef.current) {
+      scheduleHeartbeats(verifiedSessionRef.current);
+    } else {
+      void startVerifiedSession(social)
+        .then(({ sessionId }) => {
+          if (disposed || !timerRunningRef.current) {
+            return finishVerifiedSession(social, sessionId).catch(() => undefined);
+          }
+          verifiedSessionRef.current = sessionId;
+          scheduleHeartbeats(sessionId);
+          return undefined;
+        })
+        .catch(() => undefined);
+    }
+
+    return () => {
+      disposed = true;
+      if (heartbeatInterval !== undefined) window.clearInterval(heartbeatInterval);
+    };
+  }, [socialConfigured, state.social.deviceSecret, state.social.userId, state.timer.phase, state.timer.running]);
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const socialFriendIds = new Set(state.social.friends.map((friend) => friend.userId));
   const outgoingFriendRequestCodes = new Set(state.social.outgoingFriendRequests.map((request) => request.toFriendCode));
@@ -4052,6 +4609,19 @@ function App() {
     };
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
+  const studySessionCount = state.sessions.filter((session) => session.kind === "study" || session.kind === "exam").length;
+  const weeklyCourseCount = (() => {
+    const cutoff = new Date(`${calendarToday}T00:00:00`).getTime() - 6 * 86400000;
+    const ids = new Set(
+      state.sessions
+        .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId)
+        .filter((session) => new Date(`${(session.endedAt || session.startedAt).slice(0, 10)}T00:00:00`).getTime() >= cutoff)
+        .map((session) => session.courseId),
+    );
+    return ids.size;
+  })();
+  const completedTaskCount = state.tasks.filter((task) => task.totalUnits > 0 && task.completedUnits >= task.totalUnits).length;
+
   const profileBadgeGroups: ProfileBadgeGroup[] = [
     {
       category: "Break Room",
@@ -4084,11 +4654,46 @@ function App() {
       source: "Earn these by keeping your study garden alive.",
       badges: [
         {
+          id: "garden-first-sprout",
+          icon: "❀",
+          name: "First Sprout",
+          how: "Log your first study session.",
+          earned: studySessionCount >= 1,
+        },
+        {
           id: "garden-streak-bloom",
           icon: "✺",
           name: "Streak Bloom",
           how: "Maintain a 5-day study streak.",
           earned: streakDays >= 5,
+        },
+        {
+          id: "garden-mushroom-ring",
+          icon: "❁",
+          name: "Mushroom Ring",
+          how: "Log 20 study sessions.",
+          earned: studySessionCount >= 20,
+        },
+        {
+          id: "garden-cross-pollinator",
+          icon: "✤",
+          name: "Cross-Pollinator",
+          how: "Study 3 or more different courses in the last 7 days.",
+          earned: weeklyCourseCount >= 3,
+        },
+        {
+          id: "garden-full-bloom",
+          icon: "◇",
+          name: "Full Bloom",
+          how: "Reach the Blooming garden stage (420+ minutes in 7 days).",
+          earned: gardenStage >= 4,
+        },
+        {
+          id: "garden-harvest-season",
+          icon: "❋",
+          name: "Harvest Season",
+          how: "Fully complete 10 tasks.",
+          earned: completedTaskCount >= 10,
         },
         {
           id: "garden-wise-tree",
@@ -5757,6 +6362,12 @@ function App() {
   }, [state.settings.telemetryEnabled]);
 
   useEffect(() => {
+    // Hygiene fix, not a security control: this only stops the app's own accidental
+    // browser-preview/dev sessions from silently creating sync accounts. A script hitting
+    // the Worker's /sync endpoint directly bypasses the client entirely, so this check
+    // does nothing to prevent that — see PRIVACY.md and the abuse-detection changes on
+    // the server side for the actual anti-abuse controls.
+    if (!isTauriApp()) return undefined;
     presencePingEffect();
     runAutomaticSocialSync();
     const interval = window.setInterval(runAutomaticSocialSync, 60 * 60 * 1000);
@@ -8668,10 +9279,21 @@ function App() {
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Knowledge Garden</p>
-            <h3>Growth from focus</h3>
+            <h3>{gardenVariant === "japanese" ? "Japanese Garden of Knowledge" : "Growth from focus"}</h3>
           </div>
+          <button
+            type="button"
+            className="dashboard-todo-button"
+            onClick={() => setGardenVariant((variant) => (variant === "japanese" ? "western" : "japanese"))}
+          >
+            {gardenVariant === "japanese" ? "switch to Garden" : "switch to Japanese Garden"}
+          </button>
         </div>
-        <KnowledgeGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
+        {gardenVariant === "japanese" ? (
+          <JapaneseGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
+        ) : (
+          <KnowledgeGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
+        )}
       </article>
     );
   }
@@ -10509,6 +11131,15 @@ function App() {
                   <span className="ios-switch" aria-hidden="true" />
                 </label>
               </div>
+              <div className="linux-update-command-card">
+                <div>
+                  <strong>Privacy</strong>
+                  <span>What social sync collects for abuse prevention, and how long it's kept.</span>
+                </div>
+                <div className="update-actions">
+                  <button type="button" className="ghost-button" onClick={() => setPrivacyOpen(true)}>View privacy policy</button>
+                </div>
+              </div>
               <div className={`settings-update-card ${updateInfo.status}`}>
                 <div>
                   <strong>Updates</strong>
@@ -10927,6 +11558,10 @@ function App() {
                 <span>Opt-in installs</span>
                 <strong>{adminUsage.telemetry.length}</strong>
               </article>
+              <article className="admin-usage-stat admin-usage-stat-alert">
+                <span>Flagged</span>
+                <strong>{Number(adminUsage.summary?.flaggedCount ?? 0)}</strong>
+              </article>
             </div>
             <div className="admin-usage-section">
               <div className="admin-usage-section-head">
@@ -10950,6 +11585,7 @@ function App() {
                         <td data-label="User">
                           <strong>{user.displayName || "Unknown"}</strong>
                           <span>{user.friendCode}</span>
+                          {user.isFlagged ? <span className="admin-usage-flag-badge" title={user.flaggedReason ?? ""}>Flagged</span> : null}
                         </td>
                         <td data-label="Last Seen">{formatAdminTimestamp(user.lastSeenAt)}</td>
                         <td data-label="Version">{user.appVersion || "unknown"}</td>
@@ -10957,6 +11593,39 @@ function App() {
                           <span className="admin-usage-device-pill">{formatLatestDevice(user)}</span>
                         </td>
                         <td data-label="Channel">{user.appRuntimeChannel || "unknown"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="admin-usage-section">
+              <div className="admin-usage-section-head">
+                <h3>Flagged Accounts</h3>
+                <span>{adminUsage.flaggedUsers.length} rows</span>
+              </div>
+              <div className="admin-usage-table-wrap">
+                <table className="admin-usage-table">
+                  <thead>
+                    <tr>
+                      <th>User</th>
+                      <th>Reason</th>
+                      <th>Country</th>
+                      <th>Network</th>
+                      <th>Last Seen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminUsage.flaggedUsers.map((user) => (
+                      <tr key={user.friendCode}>
+                        <td data-label="User">
+                          <strong>{user.displayName || "Unknown"}</strong>
+                          <span>{user.friendCode}</span>
+                        </td>
+                        <td data-label="Reason">{user.flaggedReason || "—"}</td>
+                        <td data-label="Country">{user.signupCountry || "unknown"}</td>
+                        <td data-label="Network">{user.signupAsOrganization || "unknown"}</td>
+                        <td data-label="Last Seen">{formatAdminTimestamp(user.lastSeenAt)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -10995,9 +11664,59 @@ function App() {
                 </table>
               </div>
             </div>
+            <div className="admin-usage-section">
+              <div className="admin-usage-section-head">
+                <h3>Recent Abuse Events</h3>
+                <span>{adminUsage.abuseEvents.length} rows</span>
+              </div>
+              <div className="admin-usage-table-wrap">
+                <table className="admin-usage-table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Path</th>
+                      <th>Country</th>
+                      <th>Network</th>
+                      <th>User</th>
+                      <th>When</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminUsage.abuseEvents.map((event, index) => (
+                      <tr key={`${event.createdAt}-${index}`}>
+                        <td data-label="Type">{event.eventType}</td>
+                        <td data-label="Path">{event.path || "—"}</td>
+                        <td data-label="Country">{event.country || "unknown"}</td>
+                        <td data-label="Network">{event.asOrganization || "unknown"}</td>
+                        <td data-label="User">{event.userId || "—"}</td>
+                        <td data-label="When">{formatAdminTimestamp(event.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <div className="help-modal-actions">
               <button type="button" className="ghost-button" onClick={() => void loadAdminUsage()} disabled={adminUsageLoading}>{adminUsageLoading ? "Refreshing..." : "Refresh"}</button>
               <button type="button" onClick={() => setAdminUsageOpen(false)}>Close</button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {privacyOpen ? (
+        <div className="help-modal-backdrop" onMouseDown={() => setPrivacyOpen(false)}>
+          <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Privacy policy">
+            <div className="help-modal-head">
+              <div>
+                <p className="eyebrow">Social sync</p>
+                <h2>Privacy</h2>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => setPrivacyOpen(false)} aria-label="Close privacy policy">X</button>
+            </div>
+            <pre className="privacy-policy-text">{privacyPolicyText}</pre>
+            <div className="help-modal-actions">
+              <button type="button" onClick={() => setPrivacyOpen(false)}>Close</button>
             </div>
           </section>
         </div>

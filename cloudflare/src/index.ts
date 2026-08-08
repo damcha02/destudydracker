@@ -1,6 +1,9 @@
 export interface Env {
   DB: D1Database;
   FEED_IMAGES: R2Bucket;
+  RATE_LIMIT_KV: KVNamespace;
+  IP_HASH_SECRET?: string;
+  DEVICE_SECRET_HASH_SECRET?: string;
   R2_ALERT_WEBHOOK_URL?: string;
 }
 
@@ -30,6 +33,8 @@ interface SyncPayload {
       label?: string;
     };
     app?: AppMetadata;
+    /** Honeypot trap field. The real client never sends this — any non-empty value here is a strong abuse signal. */
+    referralCode?: unknown;
   };
   stats: Array<{
     date: string;
@@ -98,6 +103,26 @@ const R2_CLASS_A_HARD_MONTHLY = 50_000;
 const R2_CLASS_B_WARNING_MONTHLY = 200_000;
 const R2_CLASS_B_HARD_MONTHLY = 250_000;
 const R2_OWNER_FRIEND_CODE = "ZRWL-WKNF";
+
+// --- Abuse detection tuning (see PRIVACY.md for what this telemetry is and why) ---
+const NEW_ACCOUNT_RATE_LIMIT_WINDOW_SECONDS = 3600;
+const NEW_ACCOUNT_RATE_LIMIT_MAX_PER_IP = 5;
+const NEW_ACCOUNT_RATE_LIMIT_FLAG_THRESHOLD = 3;
+const ABUSE_DATA_RETENTION_DAYS = 90;
+const HONEYPOT_PATHS = new Set(["/admin", "/.env", "/wp-login.php", "/api/debug", "/.git/config"]);
+const FRIEND_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const FRIEND_CODE_PATTERN = new RegExp(`^[${FRIEND_CODE_ALPHABET}]{4}-[${FRIEND_CODE_ALPHABET}]{4}$`);
+const MAX_INITIAL_LIFETIME_MINUTES_FLAG = 20_000;
+const MAX_INITIAL_LIFETIME_SESSIONS_FLAG = 2_000;
+const MAX_PLAUSIBLE_STUDY_MINUTES_PER_DAY = 20 * 60;
+const STANDALONE_FLAG_REASONS = new Set(["honeypot_field", "bulk_backfill"]);
+const MAX_USER_AGENT_LENGTH = 300;
+const MAX_LOG_PATH_LENGTH = 200;
+const MAX_LOG_DETAIL_LENGTH = 300;
+const VERIFIED_SESSION_HEARTBEAT_MS = 15 * 60 * 1000;
+const VERIFIED_SESSION_GRACE_MS = 5 * 60 * 1000;
+const VERIFIED_SESSION_MAX_MS = 4 * 60 * 60 * 1000;
+
 const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
 const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐", "🚀", "🎯", "🏆", "🛡", "🦉", "🐢", "🐺", "🐱", "🍄", "🌙", "🌸", "🍀", "💎", "🎲", "🎧", "📝", "🔮", "🧩", "🕹", "📖", "🧪", "🛰", "🌌", "🦊"]);
 const feedImageTypes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
@@ -277,16 +302,285 @@ function friendPair(a: string, b: string) {
   return a < b ? [a, b] : [b, a];
 }
 
+// --- Abuse detection helpers (see PRIVACY.md for what's collected and why) ---
+
+function sqliteTimestamp(date: Date) {
+  return date.toISOString().slice(0, 19).replace("T", " ");
+}
+
+function getRequestIp(request: Request) {
+  const ip = request.headers.get("cf-connecting-ip");
+  if (!ip || ip === "127.0.0.1" || ip === "::1") return null;
+  return ip;
+}
+
+function getRequestGeo(request: Request) {
+  const cf = (request as Request & { cf?: { country?: string; asn?: number; asOrganization?: string } }).cf;
+  return {
+    country: typeof cf?.country === "string" ? cf.country : null,
+    asn: typeof cf?.asn === "number" ? cf.asn : null,
+    asOrganization: typeof cf?.asOrganization === "string" ? cf.asOrganization : null,
+  };
+}
+
+function toHex(buffer: ArrayBuffer) {
+  return Array.from(new Uint8Array(buffer)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function hmacHex(secret: string, value: string) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return toHex(signature);
+}
+
+/** Requires IP_HASH_SECRET — throws (fail closed) if it's not bound. Never falls back to an empty/default key. */
+async function hashIp(env: Env, ip: string) {
+  if (!env.IP_HASH_SECRET) throw new Response("Server misconfiguration: abuse-detection secret is not set.", { status: 500, headers: corsHeaders });
+  return (await hmacHex(env.IP_HASH_SECRET, ip)).slice(0, 32);
+}
+
+/**
+ * Best-effort variant for abuse-event logging paths (honeypots, flag events) that must never
+ * fail the response over a hashing problem — unlike new-account creation, these are detection
+ * paths, not an auth gate, so a missing secret or unusable IP just means no hash is recorded.
+ */
+async function tryHashIp(env: Env, request: Request) {
+  const ip = getRequestIp(request);
+  if (!ip || !env.IP_HASH_SECRET) return null;
+  try {
+    return await hashIp(env, ip);
+  } catch {
+    return null;
+  }
+}
+
+/** Strips Unicode control characters and truncates. Everything persisted into abuse_events is attacker-reachable input. */
+export function sanitizeForLog(value: unknown, maxLength: number) {
+  return String(value ?? "")
+    .replace(/\p{Cc}+/gu, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+async function logAbuseEvent(env: Env, params: { eventType: string; request: Request; ipHash?: string | null; userId?: string | null; detail?: string }) {
+  try {
+    const geo = getRequestGeo(params.request);
+    const userAgent = sanitizeForLog(params.request.headers.get("user-agent"), MAX_USER_AGENT_LENGTH);
+    const path = sanitizeForLog(new URL(params.request.url).pathname, MAX_LOG_PATH_LENGTH);
+    const detail = sanitizeForLog(params.detail, MAX_LOG_DETAIL_LENGTH);
+    await env.DB.prepare(`
+      INSERT INTO abuse_events (event_type, ip_hash, country, asn, as_organization, path, user_agent, user_id, detail)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(sanitizeForLog(params.eventType, 60), params.ipHash ?? null, geo.country, geo.asn, geo.asOrganization, path, userAgent, params.userId ?? null, detail).run();
+  } catch (error) {
+    console.error("Failed to log abuse event.", error);
+  }
+}
+
+/** Coarse, eventually-consistent KV counter — a throttle/friction signal, not a strict enforcement boundary. */
+async function checkAndIncrementNewAccountRateLimit(env: Env, ipHash: string) {
+  const bucket = Math.floor(Date.now() / (NEW_ACCOUNT_RATE_LIMIT_WINDOW_SECONDS * 1000));
+  const key = `newacct:${ipHash}:${bucket}`;
+  const current = Number((await env.RATE_LIMIT_KV.get(key)) ?? "0");
+  const count = current + 1;
+  await env.RATE_LIMIT_KV.put(key, String(count), { expirationTtl: NEW_ACCOUNT_RATE_LIMIT_WINDOW_SECONDS + 300 });
+  return { allowed: count <= NEW_ACCOUNT_RATE_LIMIT_MAX_PER_IP, count };
+}
+
+/** Structural check only. Never reject/flag purely for repeated characters — the real generator can legitimately produce e.g. AAAA-BBBB. One weak signal among several. */
+export function isFriendCodeAtypical(code: string) {
+  return !FRIEND_CODE_PATTERN.test(code);
+}
+
+function isHoneypotFieldFilled(payload: SyncPayload["user"]) {
+  return payload.referralCode !== undefined && payload.referralCode !== null && String(payload.referralCode).trim() !== "";
+}
+
+/** Atomic, additive signal storage — no read-modify-write race. */
+export async function recordFlagSignal(env: Env, userId: string, reason: string) {
+  await env.DB.prepare("INSERT OR IGNORE INTO user_flag_events (user_id, reason) VALUES (?, ?)").bind(userId, reason).run();
+}
+
+export async function maybeFlagUser(env: Env, userId: string, reasons: string[], request: Request) {
+  if (!reasons.length) return;
+  for (const reason of reasons) await recordFlagSignal(env, userId, reason);
+
+  const rows = await env.DB.prepare("SELECT reason FROM user_flag_events WHERE user_id = ?").bind(userId).all<{ reason: string }>();
+  const allReasons = rows.results.map((row) => row.reason);
+  const shouldFlag = allReasons.some((reason) => STANDALONE_FLAG_REASONS.has(reason)) || allReasons.length >= 2;
+  if (!shouldFlag) return;
+
+  // Guarded by is_flagged = 0: idempotent, so concurrent requests racing here is harmless.
+  await env.DB.prepare("UPDATE users SET is_flagged = 1 WHERE id = ? AND is_flagged = 0").bind(userId).run();
+  const ipHash = await tryHashIp(env, request);
+  for (const reason of reasons) {
+    await logAbuseEvent(env, { eventType: `flag:${reason}`, request, ipHash, userId, detail: reason });
+  }
+}
+
+async function handleHoneypot(request: Request, env: Env) {
+  const ipHash = await tryHashIp(env, request);
+  await logAbuseEvent(env, { eventType: "honeypot_route", request, ipHash, userId: null });
+  return text("Not found.", 404);
+}
+
+/** Purges/redacts everything older than the retention window. Takes `now` so it's deterministically testable. */
+export async function purgeExpiredAbuseData(env: Env, now: Date = new Date()) {
+  const cutoff = sqliteTimestamp(new Date(now.getTime() - ABUSE_DATA_RETENTION_DAYS * 24 * 60 * 60 * 1000));
+  await env.DB.prepare("DELETE FROM abuse_events WHERE created_at < ?").bind(cutoff).run();
+  await env.DB.prepare(`
+    DELETE FROM user_flag_events
+    WHERE created_at < ? AND user_id NOT IN (SELECT id FROM users WHERE is_flagged = 1)
+  `).bind(cutoff).run();
+  await env.DB.prepare(`
+    UPDATE users SET signup_ip_hash = NULL, signup_country = NULL, signup_asn = NULL, signup_as_organization = NULL
+    WHERE signup_ip_hash IS NOT NULL AND created_at < ?
+  `).bind(cutoff).run();
+}
+
+export async function hashDeviceSecret(env: Env, deviceSecret: string) {
+  if (!env.DEVICE_SECRET_HASH_SECRET) return null;
+  return (await hmacHex(env.DEVICE_SECRET_HASH_SECRET, deviceSecret)).slice(0, 32);
+}
+
+/**
+ * device_secret_hash is being migrated in lazily (see migrations/0018 + handleAdminMigrateDeviceSecrets).
+ * If a row is already migrated (device_secret_hash set), verification MUST use the hash and fails
+ * closed if DEVICE_SECRET_HASH_SECRET is missing — never falls back to a weaker comparison for an
+ * already-migrated credential. Rows still on the legacy plaintext path are entirely unaffected by
+ * that secret and keep working via plaintext comparison; a successful plaintext verification
+ * opportunistically backfills the hash so the row self-migrates on next use.
+ */
+export async function verifyDeviceSecret(env: Env, userId: string, user: { device_secret: string; device_secret_hash: string | null }, deviceSecret: string) {
+  if (user.device_secret_hash) {
+    if (!env.DEVICE_SECRET_HASH_SECRET) throw new Response("Server misconfiguration: credential verification secret is not set.", { status: 500, headers: corsHeaders });
+    const candidateHash = await hashDeviceSecret(env, deviceSecret);
+    if (candidateHash !== user.device_secret_hash) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
+    return;
+  }
+  if (user.device_secret !== deviceSecret) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
+  const hash = await hashDeviceSecret(env, deviceSecret);
+  if (hash) await env.DB.prepare("UPDATE users SET device_secret_hash = ? WHERE id = ?").bind(hash, userId).run();
+}
+
 async function verifyUser(env: Env, userId: string, deviceSecret: string) {
   userId = cleanUserId(userId);
   deviceSecret = cleanDeviceSecret(deviceSecret);
-  const user = await env.DB.prepare("SELECT id, device_secret, friend_code AS friendCode FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string; friendCode: string }>();
+  const user = await env.DB.prepare("SELECT id, device_secret, device_secret_hash, friend_code AS friendCode FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string; device_secret_hash: string | null; friendCode: string }>();
   if (!user) throw new Response("User has not synced a profile yet.", { status: 404, headers: corsHeaders });
-  if (user.device_secret !== deviceSecret) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
+  await verifyDeviceSecret(env, userId, user, deviceSecret);
   return user;
 }
 
-async function upsertUser(env: Env, payload: SyncPayload["user"]) {
+type VerifiedSessionRow = {
+  id: string;
+  userId: string;
+  startedAt: string;
+  lastHeartbeatAt: string;
+};
+
+function parseServerTimestamp(value: string) {
+  const parsed = new Date(value.endsWith("Z") ? value : `${value.replace(" ", "T")}Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function verifiedSessionCredits(startedAt: Date, creditedMinutes: number) {
+  const credits = new Map<string, number>();
+  for (let minute = 0; minute < creditedMinutes; minute += 1) {
+    const date = serverDateIso(new Date(startedAt.getTime() + minute * 60_000));
+    credits.set(date, (credits.get(date) ?? 0) + 1);
+  }
+  return credits;
+}
+
+async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now = new Date()) {
+  const startedAt = parseServerTimestamp(session.startedAt);
+  const lastHeartbeatAt = parseServerTimestamp(session.lastHeartbeatAt);
+  if (!startedAt || !lastHeartbeatAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
+
+  const creditedEnd = Math.min(
+    now.getTime(),
+    startedAt.getTime() + VERIFIED_SESSION_MAX_MS,
+    lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS,
+  );
+  const creditedMinutes = Math.max(0, Math.floor((creditedEnd - startedAt.getTime()) / 60_000));
+  const credits = verifiedSessionCredits(startedAt, creditedMinutes);
+  const finishedDate = serverDateIso(new Date(creditedEnd));
+  const finished = await env.DB.prepare(`
+    UPDATE verified_study_sessions
+    SET status = 'finished', finished_at = ?, credited_minutes = ?
+    WHERE id = ? AND status = 'active'
+  `).bind(now.toISOString(), creditedMinutes, session.id).run();
+  if (!finished.meta.changes) return { creditedMinutes: 0, finishedAt: now.toISOString() };
+
+  const statements: D1PreparedStatement[] = [];
+
+  for (const [date, minutes] of credits) {
+    statements.push(env.DB.prepare(`
+      INSERT INTO verified_daily_stats (user_id, date, minutes, sessions, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(user_id, date) DO UPDATE SET
+        minutes = verified_daily_stats.minutes + excluded.minutes,
+        sessions = verified_daily_stats.sessions + excluded.sessions,
+        updated_at = CURRENT_TIMESTAMP
+    `).bind(session.userId, date, minutes, date === finishedDate ? 1 : 0));
+  }
+  if (statements.length) await env.DB.batch(statements);
+  return { creditedMinutes, finishedAt: now.toISOString() };
+}
+
+async function handleVerifiedSessionStart(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const active = await env.DB.prepare(`
+    SELECT id, user_id AS userId, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt
+    FROM verified_study_sessions WHERE user_id = ? AND status = 'active'
+  `).bind(userId).first<VerifiedSessionRow>();
+  const now = new Date();
+  if (active) {
+    const startedAt = parseServerTimestamp(active.startedAt);
+    if (startedAt && now.getTime() - startedAt.getTime() < VERIFIED_SESSION_MAX_MS) {
+      return json({ sessionId: active.id, startedAt: active.startedAt, resumed: true });
+    }
+    await finishVerifiedSession(env, active, now);
+  }
+
+  const sessionId = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO verified_study_sessions (id, user_id, started_at, last_heartbeat_at, status)
+    VALUES (?, ?, ?, ?, 'active')
+  `).bind(sessionId, userId, now.toISOString(), now.toISOString()).run();
+  return json({ sessionId, startedAt: now.toISOString(), resumed: false });
+}
+
+async function handleVerifiedSessionHeartbeat(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; sessionId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const sessionId = requiredText(payload.sessionId, "sessionId", MAX_ID_LENGTH);
+  const result = await env.DB.prepare(`
+    UPDATE verified_study_sessions SET last_heartbeat_at = ?
+    WHERE id = ? AND user_id = ? AND status = 'active'
+  `).bind(new Date().toISOString(), sessionId, userId).run();
+  if (!result.meta.changes) return text("Verified session not found.", 404);
+  return json({ ok: true });
+}
+
+async function handleVerifiedSessionFinish(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; sessionId: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const sessionId = requiredText(payload.sessionId, "sessionId", MAX_ID_LENGTH);
+  const session = await env.DB.prepare(`
+    SELECT id, user_id AS userId, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt
+    FROM verified_study_sessions WHERE id = ? AND user_id = ? AND status = 'active'
+  `).bind(sessionId, userId).first<VerifiedSessionRow>();
+  if (!session) return text("Verified session not found.", 404);
+  return json({ ok: true, ...(await finishVerifiedSession(env, session)) });
+}
+
+async function upsertUser(env: Env, payload: SyncPayload["user"], request: Request) {
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const friendCode = cleanCode(payload.friendCode);
@@ -301,13 +595,53 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
   const app = cleanAppMetadata(payload.app);
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
-  const existing = await env.DB.prepare("SELECT id, device_secret FROM users WHERE id = ?").bind(userId).first<{ id: string; device_secret: string }>();
-  if (existing && existing.device_secret !== deviceSecret) throw new Response("Invalid device secret.", { status: 403, headers: corsHeaders });
+  const existing = await env.DB.prepare(
+    "SELECT id, device_secret, device_secret_hash, lifetime_study_minutes, lifetime_study_sessions, updated_at FROM users WHERE id = ?"
+  ).bind(userId).first<{ id: string; device_secret: string; device_secret_hash: string | null; lifetime_study_minutes: number; lifetime_study_sessions: number; updated_at: string }>();
+  if (existing) await verifyDeviceSecret(env, userId, existing, deviceSecret);
+
+  const flagReasons: string[] = [];
+  let signupIpHash: string | null = null;
+  let signupGeo: { country: string | null; asn: number | null; asOrganization: string | null } = { country: null, asn: null, asOrganization: null };
+
+  if (!existing) {
+    // Fail closed unconditionally, independent of IP availability — a missing secret is an
+    // operational misconfiguration, not an environmental reality like local dev's missing IP.
+    if (!env.IP_HASH_SECRET) throw new Response("Server misconfiguration: abuse-detection secret is not set.", { status: 500, headers: corsHeaders });
+
+    const ip = getRequestIp(request);
+    if (ip) {
+      signupIpHash = await hashIp(env, ip);
+      signupGeo = getRequestGeo(request);
+      const rate = await checkAndIncrementNewAccountRateLimit(env, signupIpHash);
+      if (!rate.allowed) {
+        await logAbuseEvent(env, { eventType: "rate_limit_blocked", request, ipHash: signupIpHash, userId, detail: `count=${rate.count}` });
+        throw new Response("Too many new accounts created from this network recently. Please try again later.", { status: 429, headers: corsHeaders });
+      }
+      if (rate.count >= NEW_ACCOUNT_RATE_LIMIT_FLAG_THRESHOLD) flagReasons.push("rapid_ip_signups");
+    }
+    // IP unusable (e.g. local dev): skip IP-specific work entirely — no throttle, no abuse_events noise.
+  }
 
   const codeOwner = await env.DB.prepare("SELECT id FROM users WHERE friend_code = ? AND id != ?").bind(friendCode, userId).first<{ id: string }>();
   if (codeOwner) throw new Response("Friend code is already in use.", { status: 409, headers: corsHeaders });
 
+  if (isFriendCodeAtypical(friendCode)) flagReasons.push("format_atypical");
+  if (isHoneypotFieldFilled(payload)) flagReasons.push("honeypot_field");
+
   if (existing) {
+    // Compute the growth signal from the PRE-update row, before the UPDATE below overwrites it.
+    const priorMinutes = existing.lifetime_study_minutes ?? 0;
+    const priorUpdatedAt = existing.updated_at ? new Date(`${existing.updated_at.replace(" ", "T")}Z`) : null;
+    if (priorUpdatedAt && !Number.isNaN(priorUpdatedAt.getTime())) {
+      const elapsedMinutes = Math.max(0, (Date.now() - priorUpdatedAt.getTime()) / 60_000);
+      const deltaMinutes = lifetimeStudyMinutes - priorMinutes;
+      const maxPlausibleDelta = (elapsedMinutes / (24 * 60)) * MAX_PLAUSIBLE_STUDY_MINUTES_PER_DAY;
+      const impossibleGrowth = deltaMinutes > elapsedMinutes + 5; // small grace buffer for clock skew/batched syncs
+      const sustainedUnrealisticRate = elapsedMinutes > 0 && deltaMinutes > maxPlausibleDelta;
+      if (impossibleGrowth || sustainedUnrealisticRate) flagReasons.push("implausible_stat_growth");
+    }
+
     await env.DB.prepare(`
       UPDATE users
       SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, show_hours_to_friends = ?,
@@ -326,13 +660,24 @@ async function upsertUser(env: Env, payload: SyncPayload["user"]) {
       .bind(friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
       .run();
   } else {
+    if (lifetimeStudyMinutes > MAX_INITIAL_LIFETIME_MINUTES_FLAG || lifetimeStudySessions > MAX_INITIAL_LIFETIME_SESSIONS_FLAG) {
+      flagReasons.push("bulk_backfill");
+    }
+
+    // New accounts are hashed immediately — no reason to wait for a "next" request when the
+    // plaintext secret is already in hand right here. Falls back to NULL (legacy path) only if
+    // DEVICE_SECRET_HASH_SECRET isn't configured; this never blocks account creation.
+    const deviceSecretHash = await hashDeviceSecret(env, deviceSecret);
+
     await env.DB.prepare(`
-      INSERT INTO users (id, device_secret, friend_code, display_name, avatar_json, is_private, show_hours_to_friends, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END)
+      INSERT INTO users (id, device_secret, device_secret_hash, friend_code, display_name, avatar_json, is_private, show_hours_to_friends, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at, signup_ip_hash, signup_country, signup_asn, signup_as_organization)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?, ?)
     `)
-      .bind(userId, deviceSecret, friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel)
+      .bind(userId, deviceSecret, deviceSecretHash, friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, signupIpHash, signupGeo.country, signupGeo.asn, signupGeo.asOrganization)
       .run();
   }
+
+  await maybeFlagUser(env, userId, flagReasons, request);
 }
 
 function cleanText(value: unknown, max = 180) {
@@ -747,13 +1092,14 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
   if (period === "overall") {
     const rows = await env.DB.prepare(`
       SELECT ranked.*,
-        (SELECT MAX(date) FROM daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
+        (SELECT MAX(date) FROM competitive_daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
       FROM (
         SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
           sm.role AS role,
-          u.lifetime_study_minutes AS minutes,
-          u.lifetime_study_sessions AS sessions
+          totals.minutes AS minutes,
+          totals.sessions AS sessions
         FROM users u
+        JOIN competitive_user_totals totals ON totals.user_id = u.id
         JOIN squad_members sm ON sm.user_id = u.id
         WHERE u.id IN (${memberIds.map(() => "?").join(",")})
         ORDER BY minutes DESC, displayName ASC
@@ -793,7 +1139,7 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
       MAX(ds.date) AS lastActiveDate
     FROM users u
     JOIN squad_members sm ON sm.user_id = u.id
-    LEFT JOIN daily_stats ds ON ds.user_id = u.id
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
     WHERE ${clauses.join(" AND ")}
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
@@ -833,7 +1179,7 @@ async function scoreSquadDate(env: Env, date: string) {
       COALESCE(SUM(ds.sessions), 0) AS totalSessions
     FROM squads s
     JOIN squad_member_history h ON h.squad_id = s.id AND h.joined_at <= ? AND (h.left_at IS NULL OR h.left_at >= ?)
-    LEFT JOIN daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
     GROUP BY s.id, s.name
     HAVING memberCount >= 2
   `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; activeMemberCount: number; totalMinutes: number; totalSessions: number }>();
@@ -877,7 +1223,7 @@ async function scoreMissingCompletedSquadDates(env: Env) {
   const since = backfillStart > SQUAD_SEASON_START ? backfillStart : SQUAD_SEASON_START;
   const rows = await env.DB.prepare(`
     SELECT ds.date
-    FROM daily_stats ds
+    FROM competitive_daily_stats ds
     WHERE ds.date >= ? AND ds.date < ?
     GROUP BY ds.date
     HAVING NOT EXISTS (
@@ -904,7 +1250,7 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
         COALESCE(SUM(ds.sessions), 0) AS totalSessions
       FROM squads s
       JOIN squad_members sm ON sm.squad_id = s.id
-      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+      LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
       GROUP BY s.id, s.name, s.is_private
       HAVING memberCount >= 2
       ORDER BY CASE WHEN activeMemberCount > 0 THEN CAST(totalMinutes AS REAL) / activeMemberCount ELSE 0 END DESC, totalMinutes DESC, s.name ASC
@@ -988,7 +1334,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
         COUNT(DISTINCT sm.user_id) AS memberCount
       FROM squads s
       LEFT JOIN squad_members sm ON sm.squad_id = s.id
-      LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+      LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
       WHERE s.id = ?
       GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
     `).bind(today, squadId).first<{
@@ -1014,7 +1360,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
       COUNT(DISTINCT sm.user_id) AS memberCount,
       COUNT(DISTINCT CASE WHEN ds.minutes > 0 THEN sm.user_id END) AS activeMemberCount
     FROM squad_members sm
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+      LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
     WHERE sm.squad_id = ?
   `).bind(yesterday, squadId).first<{ totalMinutes: number; totalSessions: number; memberCount: number; activeMemberCount: number }>();
 
@@ -1025,7 +1371,7 @@ async function getSquadDetails(env: Env, userId: string, squadId: string) {
       COALESCE(SUM(ds.sessions), 0) AS sessions
     FROM squad_members sm
     JOIN users u ON u.id = sm.user_id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
     WHERE sm.squad_id = ?
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, sm.joined_at, u.last_seen_at
     ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
@@ -1105,12 +1451,13 @@ async function getSquadSnapshot(env: Env, userId: string) {
 
   const squad = await env.DB.prepare(`
     SELECT s.id, s.name, s.is_private AS isPrivate, s.created_by_user_id AS createdByUserId, s.created_at AS createdAt,
-      COALESCE(SUM(u.lifetime_study_minutes), 0) AS totalMinutes,
-      COALESCE(SUM(u.lifetime_study_sessions), 0) AS totalSessions,
+      COALESCE(SUM(totals.minutes), 0) AS totalMinutes,
+      COALESCE(SUM(totals.sessions), 0) AS totalSessions,
       COUNT(DISTINCT sm.user_id) AS memberCount
     FROM squads s
     JOIN squad_members sm ON sm.squad_id = s.id
     JOIN users u ON u.id = sm.user_id
+    JOIN competitive_user_totals totals ON totals.user_id = u.id
     WHERE s.id = ?
     GROUP BY s.id, s.name, s.is_private, s.created_by_user_id, s.created_at
   `).bind(membership.squadId).first<{
@@ -1127,10 +1474,11 @@ async function getSquadSnapshot(env: Env, userId: string) {
   const members = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role, sm.joined_at AS joinedAt, u.last_seen_at AS lastSeenAt,
-      u.lifetime_study_minutes AS minutes,
-      u.lifetime_study_sessions AS sessions
+      totals.minutes AS minutes,
+      totals.sessions AS sessions
     FROM squad_members sm
     JOIN users u ON u.id = sm.user_id
+    JOIN competitive_user_totals totals ON totals.user_id = u.id
     WHERE sm.squad_id = ?
     ORDER BY CASE sm.role WHEN 'leader' THEN 1 WHEN 'co_leader' THEN 2 WHEN 'elder' THEN 3 ELSE 4 END, sm.joined_at ASC
   `).bind(membership.squadId).all<{
@@ -1235,12 +1583,13 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
     const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const rows = await env.DB.prepare(`
       SELECT ranked.*,
-        (SELECT MAX(date) FROM daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
+        (SELECT MAX(date) FROM competitive_daily_stats WHERE user_id = ranked.userId) AS lastActiveDate
       FROM (
         SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
-          u.lifetime_study_minutes AS minutes,
-          u.lifetime_study_sessions AS sessions
+          totals.minutes AS minutes,
+          totals.sessions AS sessions
         FROM users u
+        JOIN competitive_user_totals totals ON totals.user_id = u.id
         ${whereClause}
         ORDER BY minutes DESC, displayName ASC
         LIMIT 50
@@ -1286,7 +1635,7 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
       COALESCE(SUM(ds.sessions), 0) AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
-    LEFT JOIN daily_stats ds ON ds.user_id = u.id
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
     ${whereClause}
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
@@ -1567,7 +1916,7 @@ async function handleSync(request: Request, env: Env, lightweight = false) {
   const payload = await readJson<SyncPayload>(request);
   if (!payload.user || typeof payload.user !== "object") return text("Missing user identity.", 400);
   if (!Array.isArray(payload.stats)) return text("Missing stats.", 400);
-  await upsertUser(env, payload.user);
+  await upsertUser(env, payload.user, request);
   const userId = cleanUserId(payload.user.userId);
   const changedStatDates = await upsertStats(env, userId, payload.stats);
   await reconcileLifetimeTotals(env, userId);
@@ -1834,6 +2183,37 @@ async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
   }
 
   return json({ ok: true, scanned: rows.results.length, migrated, skipped });
+}
+
+/**
+ * Batch-hashes device_secret for rows that haven't synced recently and so never hit the lazy
+ * backfill in verifyDeviceSecret(). Safe to re-run: only ever touches device_secret_hash IS NULL
+ * rows, updated_at ordering means repeated calls make steady progress through the backlog.
+ */
+async function handleAdminMigrateDeviceSecrets(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; limit?: number }>(request);
+  const owner = await verifyUser(env, cleanUserId(payload.userId), String(payload.deviceSecret ?? ""));
+  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can migrate device secrets.", 403);
+  if (!env.DEVICE_SECRET_HASH_SECRET) return text("DEVICE_SECRET_HASH_SECRET is not configured.", 500);
+
+  const limit = Math.max(1, cleanFiniteNumber(payload.limit ?? 25, "limit", 500));
+  const rows = await env.DB.prepare(`
+    SELECT id AS userId, device_secret AS deviceSecret
+    FROM users
+    WHERE device_secret_hash IS NULL
+    ORDER BY updated_at ASC
+    LIMIT ?
+  `).bind(limit).all<{ userId: string; deviceSecret: string }>();
+
+  let migrated = 0;
+  for (const row of rows.results) {
+    const hash = await hashDeviceSecret(env, row.deviceSecret);
+    if (!hash) continue; // defensive only — guarded above by the DEVICE_SECRET_HASH_SECRET check
+    await env.DB.prepare("UPDATE users SET device_secret_hash = ? WHERE id = ?").bind(hash, row.userId).run();
+    migrated += 1;
+  }
+
+  return json({ ok: true, scanned: rows.results.length, migrated });
 }
 
 async function handleFeedReaction(request: Request, env: Env) {
@@ -2111,18 +2491,18 @@ async function handlePlayerStats(request: Request, env: Env) {
   const [userLow, userHigh] = friendPair(userId, targetUserId);
   const areFriends = await env.DB.prepare("SELECT 1 FROM friendships WHERE user_low = ? AND user_high = ?").bind(userLow, userHigh).first();
   if (!areFriends && targetUserId !== userId) {
-    const isPublic = await env.DB.prepare("SELECT is_private FROM users WHERE id = ?").bind(targetUserId).first<{ is_private: number }>();
-    if (!isPublic || isPublic.is_private) return text("User is private.", 403);
+    return text("User is private.", 403);
   }
   const hoursVisible = targetUserId === userId || !areFriends || Boolean(targetUser.showHoursToFriends);
 
   async function getStats(period: LeaderboardPeriod) {
     if (period === "overall") {
       const row = await env.DB.prepare(`
-        SELECT lifetime_study_minutes AS minutes, lifetime_study_sessions AS sessions,
-          (SELECT MAX(date) FROM daily_stats WHERE user_id = users.id) AS lastActiveDate
+        SELECT totals.minutes, totals.sessions,
+          (SELECT MAX(date) FROM competitive_daily_stats WHERE user_id = users.id) AS lastActiveDate
         FROM users
-        WHERE id = ?
+        JOIN competitive_user_totals totals ON totals.user_id = users.id
+        WHERE users.id = ?
       `).bind(targetUserId).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
       return row ?? { minutes: 0, sessions: 0, lastActiveDate: null };
     }
@@ -2133,7 +2513,7 @@ async function handlePlayerStats(request: Request, env: Env) {
     const row = await env.DB.prepare(`
       SELECT COALESCE(SUM(ds.minutes), 0) AS minutes, COALESCE(SUM(ds.sessions), 0) AS sessions, MAX(ds.date) AS lastActiveDate
       FROM users u
-      LEFT JOIN daily_stats ds ON ds.user_id = u.id
+      LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
       WHERE ${clauses.join(" AND ")}
       GROUP BY u.id
     `).bind(...params).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
@@ -2209,7 +2589,7 @@ async function handleSquadSearch(request: Request, env: Env) {
       COALESCE(SUM(ds.sessions), 0) AS totalSessions
     FROM squads s
     LEFT JOIN squad_members sm ON sm.squad_id = s.id
-    LEFT JOIN daily_stats ds ON ds.user_id = sm.user_id
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id
     WHERE s.name LIKE ?
     GROUP BY s.id, s.name, s.is_private, s.created_at
     ORDER BY memberCount DESC, totalMinutes DESC, s.name ASC
@@ -2482,21 +2862,25 @@ async function handleAdminUsage(request: Request, env: Env) {
   const owner = await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
   if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can view usage data.", 403);
 
-  const [summary, users, telemetry] = await Promise.all([
+  const [summary, users, telemetry, flaggedUsers, abuseEvents] = await Promise.all([
     env.DB.prepare(`
       SELECT COUNT(*) AS userCount,
         SUM(CASE WHEN last_seen_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS active24h,
         SUM(CASE WHEN last_seen_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS active7d,
-        SUM(CASE WHEN app_version IS NOT NULL AND app_version != '' THEN 1 ELSE 0 END) AS usersWithAppVersion
+        SUM(CASE WHEN app_version IS NOT NULL AND app_version != '' THEN 1 ELSE 0 END) AS usersWithAppVersion,
+        SUM(CASE WHEN is_flagged = 1 THEN 1 ELSE 0 END) AS flaggedCount
       FROM users
     `).first(),
     env.DB.prepare(`
-      SELECT display_name AS displayName, friend_code AS friendCode, last_seen_at AS lastSeenAt,
-        device_label AS deviceLabel, device_fingerprint_hash AS deviceFingerprintHash,
-        app_version AS appVersion, app_platform AS appPlatform,
-        app_runtime_channel AS appRuntimeChannel, app_seen_at AS appSeenAt
-      FROM users
-      ORDER BY last_seen_at DESC
+      SELECT u.display_name AS displayName, u.friend_code AS friendCode, u.last_seen_at AS lastSeenAt,
+        u.device_label AS deviceLabel, u.device_fingerprint_hash AS deviceFingerprintHash,
+        u.app_version AS appVersion, u.app_platform AS appPlatform,
+        u.app_runtime_channel AS appRuntimeChannel, u.app_seen_at AS appSeenAt,
+        u.is_flagged AS isFlagged, u.signup_country AS signupCountry, u.signup_asn AS signupAsn,
+        u.signup_as_organization AS signupAsOrganization,
+        (SELECT GROUP_CONCAT(reason) FROM user_flag_events WHERE user_id = u.id) AS flaggedReason
+      FROM users u
+      ORDER BY u.last_seen_at DESC
       LIMIT 100
     `).all(),
     env.DB.prepare(`
@@ -2506,9 +2890,27 @@ async function handleAdminUsage(request: Request, env: Env) {
       ORDER BY last_seen_at DESC
       LIMIT 100
     `).all(),
+    env.DB.prepare(`
+      SELECT u.display_name AS displayName, u.friend_code AS friendCode, u.last_seen_at AS lastSeenAt,
+        u.signup_country AS signupCountry, u.signup_asn AS signupAsn, u.signup_as_organization AS signupAsOrganization,
+        (SELECT GROUP_CONCAT(reason) FROM user_flag_events WHERE user_id = u.id) AS flaggedReason
+      FROM users u
+      WHERE u.is_flagged = 1
+      ORDER BY u.last_seen_at DESC
+      LIMIT 200
+    `).all(),
+    env.DB.prepare(`
+      SELECT event_type AS eventType, country, as_organization AS asOrganization, path, user_agent AS userAgent,
+        user_id AS userId, detail, created_at AS createdAt
+      FROM abuse_events
+      ORDER BY created_at DESC
+      LIMIT 100
+    `).all(),
   ]);
+  // Note: signup_ip_hash is intentionally never selected here — it's for internal
+  // rate-limit/flagging correlation only and must never leave the server.
 
-  return json({ summary, users: users.results, telemetry: telemetry.results });
+  return json({ summary, users: users.results, telemetry: telemetry.results, flaggedUsers: flaggedUsers.results, abuseEvents: abuseEvents.results });
 }
 
 export default {
@@ -2517,18 +2919,23 @@ export default {
 
     try {
       const url = new URL(request.url);
+      if (HONEYPOT_PATHS.has(url.pathname)) return await handleHoneypot(request, env);
       if (request.method === "GET" && url.pathname === "/health") return json({ ok: true });
       if (request.method === "GET" && url.pathname === "/announcements/current") return await handleCurrentAnnouncement(request, env);
       if (request.method === "POST" && url.pathname === "/announcements/update-notice") return await handleCreateUpdateNotice(request, env);
       if (request.method === "POST" && url.pathname === "/telemetry/heartbeat") return await handleTelemetryHeartbeat(request, env);
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/admin/usage") return await handleAdminUsage(request, env);
       if (request.method === "POST" && url.pathname === "/admin/migrate-profile-avatars") return await handleAdminMigrateProfileAvatars(request, env);
+      if (request.method === "POST" && url.pathname === "/admin/migrate-device-secrets") return await handleAdminMigrateDeviceSecrets(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/profile/avatar/")) return await handleProfileAvatarGet(env, decodeURIComponent(url.pathname.slice("/profile/avatar/".length)));
       if (request.method === "POST" && url.pathname === "/profile/avatar") return await handleProfileAvatarUpload(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/feed/image/")) return await handleFeedImageGet(request, env, decodeURIComponent(url.pathname.slice("/feed/image/".length)));
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/feed") return await handleFeed(request, env);
       if (request.method === "POST" && url.pathname === "/sync") return await handleSync(request, env);
       if (request.method === "POST" && url.pathname === "/sync/v2") return await handleSync(request, env, true);
+      if (request.method === "POST" && url.pathname === "/verified-session/start") return await handleVerifiedSessionStart(request, env);
+      if (request.method === "POST" && url.pathname === "/verified-session/heartbeat") return await handleVerifiedSessionHeartbeat(request, env);
+      if (request.method === "POST" && url.pathname === "/verified-session/finish") return await handleVerifiedSessionFinish(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);
@@ -2564,6 +2971,7 @@ export default {
     }
   },
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
+    await purgeExpiredAbuseData(env).catch((error) => console.error("Abuse-data retention purge failed.", error));
     const now = new Date().toISOString();
     const yesterday = yesterdayIso();
     const queued = await env.DB.prepare("SELECT date FROM squad_score_jobs ORDER BY created_at ASC LIMIT 7").all<{ date: string }>();
