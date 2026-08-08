@@ -293,6 +293,7 @@ function makeDefaultSocialState(): SocialState {
       squad: { daily: [], weekly: [], overall: [] },
     },
     cachedSquadScoreLeaderboards: { daily: [], season: [], overall: [] },
+    verifiedAnchor: null,
   };
 }
 
@@ -744,6 +745,10 @@ function normalizeSocialState(social: unknown): SocialState {
       season: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.season ?? (record.cachedSquadScoreLeaderboards as { weekly?: unknown } | undefined)?.weekly),
       overall: normalizeSquadScoreEntries(record.cachedSquadScoreLeaderboards?.overall),
     },
+    verifiedAnchor:
+      record.verifiedAnchor && typeof record.verifiedAnchor.sessionId === "string" && typeof record.verifiedAnchor.confirmedAt === "string"
+        ? { sessionId: record.verifiedAnchor.sessionId, confirmedAt: record.verifiedAnchor.confirmedAt }
+        : null,
   };
 }
 

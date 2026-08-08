@@ -39,11 +39,11 @@ import {
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
@@ -981,6 +981,7 @@ type GardenSpeciesProps = {
   color?: string;
   maturity?: number;
   wise?: boolean;
+  detail?: number;
 };
 
 type JapaneseGardenPlantKind =
@@ -993,11 +994,11 @@ type JapaneseGardenPlantKind =
   | "sakura"
   | "pine"
   | "azalea"
+  | "iris"
+  | "hagi"
   | "stone"
   | "teahouse"
   | "lantern"
-  | "pond"
-  | "bridge"
   | "kiku";
 
 type JapaneseGardenItem = {
@@ -1009,14 +1010,21 @@ type JapaneseGardenItem = {
   sub?: string;
   ambient?: boolean;
   fresh?: boolean;
-  fixed?: boolean;
   wise?: boolean;
-  anchor?: { row: number; frac: number };
-  growthBonus?: number;
-  count?: number;
+  anchor?: [number, number];
+  minutes?: number;
 };
 
-type PlacedJapaneseGardenItem = JapaneseGardenItem & { x: number; t: number };
+type JapaneseGardenBuildResult = {
+  heroes: JapaneseGardenItem[];
+  features: JapaneseGardenItem[];
+  sessions: JapaneseGardenItem[];
+  milestones: JapaneseGardenItem[];
+};
+
+type JapaneseGardenCell = { x: number; t: number; cw: number; low: boolean; key: string };
+
+type PlacedJapaneseGardenItem = JapaneseGardenItem & { x: number; t: number; cw: number; low?: boolean; growth: number };
 
 const calendarTimelineHours = Array.from({ length: 18 }, (_, index) => index + 6);
 const calendarDurationOptions = [15, 30, 45, 60, 90, 120, 180];
@@ -1050,10 +1058,6 @@ function gardenGreen(rng: () => number) {
   return `color-mix(in oklab, var(--garden), var(--garden-deep) ${Math.round(15 + rng() * 65)}%)`;
 }
 
-function gardenWater(rng: () => number) {
-  return `color-mix(in oklab, var(--accent), var(--garden-sky) ${Math.round(20 + rng() * 40)}%)`;
-}
-
 function gardenMix(a: string, b: string, pct: number) {
   return `color-mix(in oklab, ${a}, ${b} ${pct}%)`;
 }
@@ -1062,6 +1066,48 @@ function gardenLeaf(x: number, y: number, len: number, dir: number, lift = 0.7) 
   const tx = x + dir * len;
   const ty = y - len * lift;
   return `M${x} ${y} Q ${x + dir * len * 0.15} ${y - len * 0.8} ${tx} ${ty} Q ${x + dir * len * 0.72} ${y - len * 0.12} ${x} ${y} Z`;
+}
+
+const JG_LEAF = "oklch(0.60 0.10 148)";
+const JG_LEAF_DEEP = "oklch(0.42 0.075 158)";
+const JG_SOIL = "oklch(0.48 0.045 60)";
+const JG_GOLD = "oklch(0.80 0.13 85)";
+const JG_MOSS = "oklch(0.52 0.07 145)";
+const JG_PINE = "oklch(0.42 0.055 155)";
+const JG_MAPLE = "oklch(0.58 0.14 32)";
+const JG_MAPLE2 = "oklch(0.66 0.13 55)";
+const JG_SAKURA = "oklch(0.86 0.055 350)";
+const JG_BAMBOO = "oklch(0.72 0.09 120)";
+const JG_STONE = "oklch(0.62 0.012 250)";
+const JG_WATER = "oklch(0.44 0.045 225)";
+
+function jgGreen(rng: () => number) {
+  return gardenMix(JG_LEAF, JG_LEAF_DEEP, Math.round(20 + rng() * 60));
+}
+
+/* 5-lobe maple leaf, drawn around 0,0 then placed by transform */
+function gardenMapleLeaf(cx: number, cy: number, r: number, rot: number, fill: string, key: string | number, opacity?: number) {
+  const p = `M0 ${-r} Q ${r * 0.34} ${-r * 0.62} ${r * 0.34} ${-r * 0.34} Q ${r * 0.74} ${-r * 0.6} ${r * 0.86} ${-r * 0.38} Q ${r * 0.66} ${-r * 0.06} ${r * 0.46} ${r * 0.14} Q ${r * 0.74} ${r * 0.5} ${r * 0.56} ${r * 0.66} Q ${r * 0.22} ${r * 0.42} 0 ${r * 0.36} Q ${-r * 0.22} ${r * 0.42} ${-r * 0.56} ${r * 0.66} Q ${-r * 0.74} ${r * 0.5} ${-r * 0.46} ${r * 0.14} Q ${-r * 0.66} ${-r * 0.06} ${-r * 0.86} ${-r * 0.38} Q ${-r * 0.74} ${-r * 0.6} ${-r * 0.34} ${-r * 0.34} Q ${-r * 0.34} ${-r * 0.62} 0 ${-r} Z`;
+  return <path key={key} d={p} fill={fill} opacity={opacity == null ? 0.96 : opacity} transform={`translate(${cx} ${cy}) rotate(${rot})`} />;
+}
+
+/* one 5-petal blossom */
+function gardenBlossom(cx: number, cy: number, r: number, pink: string, rot: number, key: string | number) {
+  return (
+    <g key={key}>
+      {[0, 1, 2, 3, 4].map((index) => (
+        <ellipse key={index} cx={cx} cy={cy - r * 0.62} rx={r * 0.44} ry={r * 0.62} fill={pink} transform={`rotate(${rot + index * 72} ${cx} ${cy})`} />
+      ))}
+      <circle cx={cx} cy={cy} r={r * 0.26} fill={gardenMix(JG_GOLD, pink, 35)} />
+    </g>
+  );
+}
+
+/* lancet leaf (bamboo, iris blade, susuki, fern) */
+function gardenBlade(x: number, y: number, len: number, dir: number, droop: number, w = 0.22) {
+  const tx = x + dir * len;
+  const ty = y + droop;
+  return `M${x} ${y} Q ${x + dir * len * 0.5} ${y - len * w} ${tx} ${ty} Q ${x + dir * len * 0.5} ${y + len * w * 0.6} ${x} ${y} Z`;
 }
 
 function GardenGrass({ rng }: GardenSpeciesProps) {
@@ -1418,166 +1464,619 @@ function KnowledgeGardenWidget({ appState, weeklyMinutes }: { appState: AppState
   );
 }
 function GardenShoot({ rng }: GardenSpeciesProps) {
-  const green = gardenMix(gardenGreen(rng), "var(--garden-soil)", 20);
-  return <g><path d="M24 58 Q 24.3 53 24 49" stroke="var(--garden-deep)" strokeWidth="1.6" fill="none" strokeLinecap="round" /><path d={gardenLeaf(24, 50, 6 + rng() * 2, -1)} fill={green} /><path d={gardenLeaf(24, 50, 5 + rng() * 2, 1)} fill={gardenMix(green, "var(--garden)", 30)} /></g>;
+  const green = jgGreen(rng);
+  return (
+    <g>
+      <path d="M24 58 Q 24.6 51 24 45" stroke={JG_LEAF_DEEP} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+      <path d={gardenLeaf(24, 46, 7 + rng() * 3, -1)} fill={green} />
+      <path d={gardenLeaf(24, 47.5, 6 + rng() * 3, 1)} fill={gardenMix(green, JG_LEAF, 40)} />
+      <path d="M24 46 L 20 42.5" stroke={gardenMix(green, "white", 22)} strokeWidth="0.45" opacity="0.7" />
+      <path d="M24 47.5 L 28 44.5" stroke={gardenMix(green, "white", 22)} strokeWidth="0.45" opacity="0.7" />
+    </g>
+  );
 }
 
 function GardenSusuki({ rng }: GardenSpeciesProps) {
-  const count = 3 + Math.floor(rng() * 3);
-  return <g>{Array.from({ length: count }).map((_, index) => {
-    const dx = (rng() - 0.5) * 20;
-    const h = 30 + rng() * 22;
-    const tx = 24 + dx * 1.4;
-    const ty = 58 - h;
-    return <g key={index}><path d={`M24 58 Q ${24 + dx * 0.3} ${58 - h * 0.6} ${tx} ${ty}`} stroke={gardenMix("var(--garden-soil)", "var(--garden)", 40)} strokeWidth={1.1 + rng() * 0.5} fill="none" strokeLinecap="round" /><ellipse cx={tx} cy={ty} rx="2.6" ry="5.5" fill={gardenMix(gardenGreen(rng), "oklch(0.92 0.03 90)", 55 + rng() * 30)} opacity="0.9" transform={`rotate(${(rng() - 0.5) * 30} ${tx} ${ty})`} /></g>;
-  })}</g>;
+  const count = 5 + Math.floor(rng() * 4);
+  return (
+    <g>
+      {Array.from({ length: count }).map((_, index) => {
+        const dx = (rng() - 0.5) * 28;
+        const h = 18 + rng() * 26;
+        const green = jgGreen(rng);
+        const tipX = 24 + dx;
+        const tipY = 58 - h;
+        return (
+          <g key={index}>
+            <path d={`M23.4 58 Q ${24 + dx * 0.2} ${58 - h * 0.62} ${tipX} ${tipY} Q ${24 + dx * 0.3} ${58 - h * 0.6} 24.6 58 Z`} fill={green} opacity={0.55 + rng() * 0.35} />
+            <path d={`M24 58 Q ${24 + dx * 0.2} ${58 - h * 0.6} ${tipX} ${tipY}`} stroke={gardenMix(green, "white", 14)} strokeWidth="0.5" fill="none" opacity="0.5" />
+          </g>
+        );
+      })}
+      {rng() > 0.4
+        ? (() => {
+            const px = 24 + (rng() - 0.5) * 12;
+            const py = 22 + rng() * 6;
+            return (
+              <g>
+                <path d={`M24 58 Q ${px - 2} ${py + 14} ${px} ${py + 4}`} stroke={jgGreen(rng)} strokeWidth="0.9" fill="none" strokeLinecap="round" />
+                {Array.from({ length: 9 }).map((_, index) => (
+                  <path
+                    key={index}
+                    d={`M${px} ${py + 5} q ${(index % 2 ? 1 : -1) * (1.4 + rng() * 2)} -2.4 ${(index % 2 ? 1 : -1) * (2.4 + rng() * 3)} -${4 + rng() * 4}`}
+                    stroke={gardenMix(JG_GOLD, "white", 40)}
+                    strokeWidth="0.7"
+                    fill="none"
+                    strokeLinecap="round"
+                    opacity="0.7"
+                  />
+                ))}
+              </g>
+            );
+          })()
+        : null}
+    </g>
+  );
 }
 
-function GardenMossClump({ rng }: GardenSpeciesProps) {
-  const green = gardenGreen(rng);
-  return <g><ellipse cx="24" cy="55" rx={11 + rng() * 3} ry={5 + rng() * 1.5} fill={green} opacity="0.9" /><ellipse cx={20 + rng() * 3} cy="53" rx={5 + rng() * 2} ry={3 + rng()} fill={gardenMix(green, "var(--garden)", 35)} opacity="0.85" /><ellipse cx={28 - rng() * 3} cy="54" rx={4.5 + rng() * 2} ry={2.6 + rng()} fill={gardenMix(green, "var(--garden-deep)", 25)} opacity="0.85" /></g>;
+function GardenMossClump({ rng, detail }: GardenSpeciesProps) {
+  return (
+    <g>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <ellipse key={index} cx={12 + rng() * 24} cy={55 - rng() * 3} rx={7 + rng() * 7} ry={2.6 + rng() * 2} fill={gardenMix(JG_MOSS, JG_LEAF, Math.round(rng() * 45))} opacity="0.75" />
+      ))}
+      {detail !== 0
+        ? Array.from({ length: 7 }).map((_, index) => {
+            const x = 8 + rng() * 32;
+            const y = 51 + rng() * 6;
+            return <path key={`t${index}`} d={`M${x} ${y} q ${(rng() - 0.5) * 2} -1.6 ${(rng() - 0.5) * 3} -${1.8 + rng() * 2}`} stroke={gardenMix(JG_MOSS, JG_LEAF, 40)} strokeWidth="0.55" fill="none" strokeLinecap="round" opacity="0.75" />;
+          })
+        : null}
+    </g>
+  );
 }
 
-function GardenBamboo({ rng }: GardenSpeciesProps) {
+function GardenBamboo({ rng, maturity = 0.5 }: GardenSpeciesProps) {
   const stalks = 2 + Math.floor(rng() * 3);
-  return <g>{Array.from({ length: stalks }).map((_, index) => {
-    const dx = (index - (stalks - 1) / 2) * (6 + rng() * 3);
-    const h = 34 + rng() * 18;
-    const x = 24 + dx;
-    const nodes = 3 + Math.floor(rng() * 2);
-    const stalk = gardenMix("var(--garden)", "oklch(0.85 0.05 120)", 20 + rng() * 20);
-    return <g key={index}><path d={`M${x} 58 L ${x} ${58 - h}`} stroke={stalk} strokeWidth="2.6" fill="none" strokeLinecap="round" />{Array.from({ length: nodes }).map((__, nodeIndex) => <path key={nodeIndex} d={`M${x - 1.6} ${58 - h * ((nodeIndex + 1) / (nodes + 1))} L ${x + 1.6} ${58 - h * ((nodeIndex + 1) / (nodes + 1))}`} stroke="var(--garden-deep)" strokeWidth="1" opacity="0.6" />)}<path d={gardenLeaf(x, 58 - h + 4, 8 + rng() * 3, index % 2 === 0 ? 1 : -1)} fill={gardenGreen(rng)} /><path d={gardenLeaf(x, 58 - h + 9, 6 + rng() * 3, index % 2 === 0 ? -1 : 1)} fill={gardenMix(gardenGreen(rng), "var(--garden)", 30)} /></g>;
-  })}</g>;
+  return (
+    <g>
+      {Array.from({ length: stalks }).map((_, index) => {
+        const x = 24 + (index - (stalks - 1) / 2) * (5 + rng() * 3);
+        const h = 30 + rng() * 18 + maturity * 8;
+        const segments = 4 + Math.floor(rng() * 3);
+        const lean = (rng() - 0.5) * 5;
+        const cane = gardenMix(JG_BAMBOO, index % 2 ? JG_PINE : "white", 8 + Math.round(rng() * 16));
+        const top = x + lean;
+        return (
+          <g key={index}>
+            <path
+              d={`M${x - 1.1} 58 Q ${x + lean * 0.4 - 1.1} ${58 - h * 0.55} ${top - 0.85} ${58 - h} L ${top + 0.85} ${58 - h} Q ${x + lean * 0.4 + 1.1} ${58 - h * 0.55} ${x + 1.1} 58 Z`}
+              fill={cane}
+            />
+            <path d={`M${x - 0.5} 58 Q ${x + lean * 0.4 - 0.5} ${58 - h * 0.55} ${top - 0.35} ${58 - h}`} stroke={gardenMix(cane, "white", 30)} strokeWidth="0.6" fill="none" opacity="0.7" />
+            {Array.from({ length: segments }).map((_, seg) => {
+              const f = (seg + 1) / segments;
+              const y = 58 - h * f;
+              const sx = x + lean * f;
+              return (
+                <g key={seg}>
+                  <path d={`M${sx - 1.25} ${y} q 1.25 0.9 2.5 0`} stroke={gardenMix(cane, "black", 34)} strokeWidth="0.7" fill="none" />
+                  {seg > segments - 4
+                    ? Array.from({ length: 3 }).map((__, tuftIndex) => {
+                        const dir = (seg + tuftIndex) % 2 ? 1 : -1;
+                        const len = 7 + rng() * 6;
+                        return <path key={tuftIndex} d={gardenBlade(sx, y - tuftIndex * 1.6, len, dir, 3 + rng() * 3, 0.17)} fill={gardenMix(JG_PINE, JG_BAMBOO, 30 + Math.round(rng() * 45))} opacity="0.92" />;
+                      })
+                    : null}
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+    </g>
+  );
 }
 
-function GardenMomiji({ rng, wise, color }: GardenSpeciesProps) {
-  const trunk = gardenMix("var(--garden-soil)", "black", 22);
-  const autumn = color || "oklch(0.62 0.16 35)";
-  const scale = wise ? 1.25 : 1;
-  return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 C 23 49 25 43 24 34" stroke={trunk} strokeWidth={3 * scale} fill="none" strokeLinecap="round" /><path d="M24 42 Q 30 38 34 35" stroke={trunk} strokeWidth="1.6" fill="none" strokeLinecap="round" /><path d="M24 38 Q 18 34 15 32" stroke={trunk} strokeWidth="1.6" fill="none" strokeLinecap="round" /><circle cx="24" cy={22 - (scale - 1) * 4} r={11 * scale} fill={autumn} /><circle cx={14 * scale} cy="27" r={7 * scale} fill={gardenMix(autumn, "var(--warn)", 30)} /><circle cx={48 - 14 * scale} cy="26" r={7.5 * scale} fill={gardenMix(autumn, "oklch(0.7 0.15 70)", 30)} /><circle cx="24" cy="29" r={8 * scale} fill={gardenMix(autumn, "var(--garden-deep)", 20)} />{wise ? Array.from({ length: 4 }).map((_, index) => <circle key={index} cx={12 + rng() * 24} cy={16 + rng() * 14} r="1.2" fill="var(--warn)" />) : null}</g>;
+function GardenMomiji({ rng, color, maturity = 0.5, detail }: GardenSpeciesProps) {
+  const h = 26 + rng() * 12 + maturity * 10;
+  const red = rng() > 0.45 ? JG_MAPLE : JG_MAPLE2;
+  const bark = gardenMix(JG_SOIL, "black", 32);
+  const crown: number[][] = [
+    [24, 58 - h, 10.2],
+    [24 - 9, 58 - h * 0.84, 7.6],
+    [24 + 9.5, 58 - h * 0.81, 8],
+    [24, 58 - h * 0.66, 8.6],
+    [24 - 4.5, 58 - h * 1.03, 5.2],
+    [24 + 5, 58 - h * 1.0, 4.8],
+  ];
+  const leaves: ReactNode[] = [];
+  const leafCount = detail === 0 ? 10 : 16 + Math.round(maturity * 8);
+  for (let index = 0; index < leafCount; index += 1) {
+    const b = crown[Math.floor(rng() * crown.length)];
+    const angle = rng() * Math.PI * 2;
+    const radius = Math.sqrt(rng()) * b[2] * 0.95;
+    const tint = rng();
+    const fill = gardenMix(tint < 0.34 ? JG_MAPLE : tint < 0.7 ? JG_MAPLE2 : gardenMix(red, JG_MOSS, 30), tint < 0.5 ? "black" : "white", 6 + Math.round(rng() * 14));
+    leaves.push(gardenMapleLeaf(b[0] + Math.cos(angle) * radius, b[1] + Math.sin(angle) * radius * 0.8, 2 + rng() * 1.6, rng() * 360, fill, `l${index}`, 0.9 + rng() * 0.1));
+  }
+  return (
+    <g>
+      <path d={`M22.4 58 C 22.2 ${58 - h * 0.28} 24.6 ${58 - h * 0.44} 23.3 ${58 - h * 0.64} L 24.9 ${58 - h * 0.64} C 25.6 ${58 - h * 0.44} 25 ${58 - h * 0.28} 25.7 58 Z`} fill={bark} />
+      <path d={`M24 ${58 - h * 0.44} Q 30 ${58 - h * 0.58} 32.6 ${58 - h * 0.72}`} stroke={bark} strokeWidth="1.3" fill="none" strokeLinecap="round" />
+      <path d={`M24 ${58 - h * 0.5} Q 18 ${58 - h * 0.62} 15.4 ${58 - h * 0.76}`} stroke={bark} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      <path d={`M24 ${58 - h * 0.6} Q 26.5 ${58 - h * 0.74} 27.5 ${58 - h * 0.86}`} stroke={bark} strokeWidth="0.9" fill="none" strokeLinecap="round" />
+      {crown.map((b, index) => (
+        <ellipse key={index} cx={b[0]} cy={b[1]} rx={b[2]} ry={b[2] * 0.78} fill={gardenMix(red, "black", 16 + Math.round(rng() * 12))} opacity="0.5" />
+      ))}
+      {leaves}
+      {Array.from({ length: maturity > 0.7 ? 5 : 2 }).map((_, index) => gardenMapleLeaf(12 + rng() * 24, 53 - rng() * 4, 1.5 + rng(), rng() * 360, gardenMix(color || red, "black", 8), `g${index}`, 0.75))}
+    </g>
+  );
 }
 
-function GardenSakura({ rng, color }: GardenSpeciesProps) {
-  const trunk = gardenMix("var(--garden-soil)", "black", 22);
-  const pink = color || "oklch(0.85 0.07 350)";
-  return <g><path d="M24 58 C 22.5 48 25.5 42 24 32" stroke={trunk} strokeWidth="3.2" fill="none" strokeLinecap="round" /><path d="M24 44 Q 30 40 33 36" stroke={trunk} strokeWidth="1.7" fill="none" strokeLinecap="round" /><path d="M24 40 Q 18 36 15.5 33" stroke={trunk} strokeWidth="1.7" fill="none" strokeLinecap="round" /><circle cx="24" cy="21" r="12" fill={gardenMix(pink, "white", 15)} /><circle cx="13.5" cy="28" r="7.5" fill={pink} /><circle cx="34.5" cy="27" r="8" fill={gardenMix(pink, "white", 10)} /><circle cx="24" cy="30" r="8.5" fill={gardenMix(pink, "var(--accent)", 20)} />{Array.from({ length: 4 }).map((_, index) => <circle key={index} cx={10 + rng() * 28} cy={38 + rng() * 16} r="1.1" fill={gardenMix(pink, "white", 30)} opacity="0.85" />)}</g>;
+function GardenSakura({ rng, color, maturity = 0.5, detail }: GardenSpeciesProps) {
+  const h = 26 + rng() * 12 + maturity * 10;
+  const pink = color ? gardenMix(color, JG_SAKURA, 74) : JG_SAKURA;
+  const deep = gardenMix(pink, JG_MAPLE, 22);
+  const bark = gardenMix(JG_SOIL, "black", 34);
+  const canopy: number[][] = [
+    [24, 58 - h, 9.8],
+    [24 - 9, 58 - h * 0.86, 7.4],
+    [24 + 9.4, 58 - h * 0.83, 7.8],
+    [24, 58 - h * 0.68, 8.4],
+    [24 - 4, 58 - h * 1.04, 5.4],
+    [24 + 5, 58 - h * 1.02, 5],
+  ];
+  const flowers: ReactNode[] = [];
+  const flowerCount = detail === 0 ? 7 : 11 + Math.round(maturity * 7);
+  for (let index = 0; index < flowerCount; index += 1) {
+    const b = canopy[Math.floor(rng() * canopy.length)];
+    const angle = rng() * Math.PI * 2;
+    const radius = Math.sqrt(rng()) * b[2] * 0.92;
+    flowers.push(gardenBlossom(b[0] + Math.cos(angle) * radius, b[1] + Math.sin(angle) * radius * 0.78, 2.1 + rng() * 1.5, rng() < 0.35 ? deep : pink, rng() * 72, `f${index}`));
+  }
+  return (
+    <g>
+      <path d={`M24 58 C 22.6 ${58 - h * 0.24} 25.6 ${58 - h * 0.44} 24 ${58 - h * 0.6}`} stroke={bark} strokeWidth="2.8" fill="none" strokeLinecap="round" />
+      <path d={`M24 ${58 - h * 0.46} Q 29.5 ${58 - h * 0.6} 32 ${58 - h * 0.76}`} stroke={bark} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <path d={`M24 ${58 - h * 0.52} Q 18.5 ${58 - h * 0.66} 16 ${58 - h * 0.8}`} stroke={bark} strokeWidth="1.4" fill="none" strokeLinecap="round" />
+      {canopy.map((p, index) => (
+        <ellipse key={index} cx={p[0]} cy={p[1]} rx={p[2]} ry={p[2] * 0.74} fill={gardenMix(pink, index % 2 ? "white" : JG_MAPLE, 10 + Math.round(rng() * 10))} opacity="0.55" />
+      ))}
+      {flowers}
+      {Array.from({ length: 5 }).map((_, index) => (
+        <circle key={index} cx={10 + rng() * 28} cy={46 + rng() * 11} r="1" fill={pink} opacity="0.8" />
+      ))}
+    </g>
+  );
 }
 
-function GardenPine({ rng, wise }: GardenSpeciesProps) {
-  const trunk = gardenMix("var(--garden-soil)", "black", 25);
-  const scale = wise ? 1.3 : 1;
-  const green = gardenGreen(rng);
-  const tiers = [0, 1, 2, 3].map((tier) => {
-    const y = 50 - tier * 11 * scale;
-    const w = (16 - tier * 2.6) * scale;
-    return <path key={tier} d={`M24 ${y - 12 * scale} L ${24 - w} ${y} L ${24 + w} ${y} Z`} fill={gardenMix(green, "var(--garden-deep)", tier * 8)} />;
-  });
-  return <g style={wise ? { filter: "drop-shadow(0 0 6px color-mix(in oklab, var(--warn), transparent 45%))" } : undefined}><path d="M24 58 L 24 20" stroke={trunk} strokeWidth={2.6 * scale} fill="none" strokeLinecap="round" />{tiers}</g>;
+function GardenPine({ rng, wise, detail }: GardenSpeciesProps) {
+  const pads: number[][] = [
+    [24, 22, 13, 4.6],
+    [12, 31, 8.5, 3.4],
+    [36, 29, 9, 3.6],
+    [24, 36, 10, 3.6],
+    [30, 44, 7, 2.8],
+  ];
+  const bark = gardenMix(JG_SOIL, "black", 28);
+  return (
+    <g>
+      <path d="M22.2 58 C 18.6 48 25.6 42 21.6 34 C 19.8 30 22.6 27 22.8 24 L 25.2 24 C 25.4 27 22.4 30 24.4 34 C 28.4 42 21.6 48 25.8 58 Z" fill={bark} />
+      {[0, 1, 2].map((index) => (
+        <path key={index} d={`M${22.6 + index * 0.9} ${54 - index * 3} q 0.6 -6 -0.3 -11`} stroke={gardenMix(bark, "white", 16)} strokeWidth="0.35" fill="none" opacity="0.55" />
+      ))}
+      <path d="M23.6 38 Q 30 36 33 31" stroke={bark} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+      <path d="M23.2 34 Q 17 32 13.5 30" stroke={bark} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+      {pads.map((p, index) => (
+        <g key={index}>
+          <ellipse cx={p[0]} cy={p[1]} rx={p[2]} ry={p[3]} fill={gardenMix(JG_PINE, JG_LEAF, 12 + Math.round(rng() * 34))} opacity="0.95" />
+          <ellipse cx={p[0] - p[2] * 0.25} cy={p[1] - p[3] * 0.45} rx={p[2] * 0.55} ry={p[3] * 0.5} fill={gardenMix(JG_PINE, "white", 12)} opacity="0.5" />
+          {detail !== 0
+            ? Array.from({ length: 8 }).map((_, tick) => {
+                const angle = rng() * Math.PI * 2;
+                const radius = Math.sqrt(rng());
+                const nx = p[0] + Math.cos(angle) * p[2] * radius;
+                const ny = p[1] + Math.sin(angle) * p[3] * radius;
+                const dir = rng() < 0.5 ? -1 : 1;
+                return (
+                  <path
+                    key={tick}
+                    d={`M${nx} ${ny} l ${dir * (1.2 + rng() * 1.6)} ${-(1.4 + rng() * 1.8)}`}
+                    stroke={gardenMix(JG_PINE, rng() < 0.5 ? "white" : "black", 10 + Math.round(rng() * 18))}
+                    strokeWidth="0.5"
+                    strokeLinecap="round"
+                    opacity="0.8"
+                  />
+                );
+              })
+            : null}
+        </g>
+      ))}
+      {wise ? Array.from({ length: 6 }).map((_, index) => <circle key={index} cx={11 + rng() * 26} cy={16 + rng() * 26} r="1.2" fill={JG_GOLD} />) : null}
+    </g>
+  );
 }
 
-function GardenAzalea({ rng, color = "var(--accent)" }: GardenSpeciesProps) {
-  return <g><ellipse cx="15" cy="51" rx={7 + rng() * 2} ry={6 + rng() * 1.5} fill={gardenGreen(rng)} /><ellipse cx="31" cy="49" rx={8 + rng() * 2} ry={7 + rng() * 2} fill={gardenGreen(rng)} /><ellipse cx="24" cy="53" rx={8 + rng()} ry={5 + rng()} fill={gardenMix(gardenGreen(rng), "var(--garden)", 25)} />{Array.from({ length: 9 }).map((_, index) => <circle key={index} cx={14 + rng() * 20} cy={44 + rng() * 12} r="1.4" fill={color} opacity="0.92" />)}</g>;
+function GardenAzalea({ rng, color, maturity = 0.5, detail }: GardenSpeciesProps) {
+  const blooms = detail === 0 ? 4 : maturity > 0.5 ? 9 : 4;
+  const petal = color || "oklch(0.68 0.13 12)";
+  const mounds: number[][] = [
+    [16, 51, 8 + rng() * 3, 6.5 + rng() * 2],
+    [31, 49, 9 + rng() * 3, 7.5 + rng() * 2.5],
+    [24, 52, 10 + rng() * 2, 6 + rng() * 2],
+  ];
+  return (
+    <g>
+      {mounds.map((m, index) => (
+        <ellipse key={index} cx={m[0]} cy={m[1]} rx={m[2]} ry={m[3]} fill={index === 2 ? gardenMix(jgGreen(rng), JG_MOSS, 35) : jgGreen(rng)} />
+      ))}
+      {detail !== 0
+        ? Array.from({ length: 10 }).map((_, index) => {
+            const m = mounds[Math.floor(rng() * 3)];
+            const angle = rng() * Math.PI * 2;
+            const radius = Math.sqrt(rng());
+            const x = m[0] + Math.cos(angle) * m[2] * radius;
+            const y = m[1] + Math.sin(angle) * m[3] * radius * 0.9;
+            return (
+              <ellipse
+                key={index}
+                cx={x}
+                cy={y}
+                rx={1.5 + rng()}
+                ry={0.9 + rng() * 0.5}
+                fill={gardenMix(JG_MOSS, rng() < 0.5 ? "white" : "black", 8 + Math.round(rng() * 16))}
+                opacity="0.6"
+                transform={`rotate(${-40 + rng() * 80} ${x} ${y})`}
+              />
+            );
+          })
+        : null}
+      {Array.from({ length: blooms }).map((_, index) => {
+        const m = mounds[Math.floor(rng() * 3)];
+        const angle = rng() * Math.PI * 2;
+        const radius = Math.sqrt(rng()) * 0.85;
+        return gardenBlossom(
+          m[0] + Math.cos(angle) * m[2] * radius,
+          m[1] - m[3] * 0.35 + Math.sin(angle) * m[3] * radius,
+          1.7 + rng() * 0.9,
+          gardenMix(petal, rng() < 0.4 ? "white" : "black", 6 + Math.round(rng() * 12)),
+          rng() * 72,
+          `b${index}`,
+        );
+      })}
+    </g>
+  );
+}
+
+function GardenIris({ rng, color }: GardenSpeciesProps) {
+  const stems = 2 + Math.floor(rng() * 3);
+  return (
+    <g>
+      {Array.from({ length: stems }).map((_, index) => {
+        const dx = (index - (stems - 1) / 2) * (5 + rng() * 3);
+        const h = 24 + rng() * 14;
+        const cx = 24 + dx;
+        const cy = 58 - h;
+        const violet = color || "oklch(0.55 0.12 285)";
+        const deep = gardenMix(violet, "black", 16);
+        const pale = gardenMix(violet, "white", 22);
+        return (
+          <g key={index}>
+            {[-1, 1, -1].map((dir, bladeIndex) => (
+              <path key={bladeIndex} d={gardenBlade(24 + dx * 0.4, 58, 20 + rng() * 8, dir, -(16 + rng() * 10), 0.09)} fill={gardenMix(jgGreen(rng), "black", bladeIndex * 5)} opacity="0.85" />
+            ))}
+            <path d={`M${24 + dx * 0.4} 58 L ${cx} ${cy}`} stroke={jgGreen(rng)} strokeWidth="1.2" strokeLinecap="round" />
+            <path d={`M${cx} ${cy + 1.6} q -3.6 0.4 -4.6 3.4 q 2.6 1.4 4.6 -0.6 Z`} fill={deep} />
+            <path d={`M${cx} ${cy + 1.6} q 3.6 0.4 4.6 3.4 q -2.6 1.4 -4.6 -0.6 Z`} fill={deep} />
+            <path d={`M${cx} ${cy + 2} q -1.4 3.4 0 5.4 q 1.4 -2 0 -5.4 Z`} fill={gardenMix(violet, "black", 24)} />
+            <ellipse cx={cx - 1.5} cy={cy - 1.4} rx="1.5" ry="2.8" fill={pale} transform={`rotate(-22 ${cx} ${cy})`} />
+            <ellipse cx={cx + 1.5} cy={cy - 1.4} rx="1.5" ry="2.8" fill={pale} transform={`rotate(22 ${cx} ${cy})`} />
+            <path d={`M${cx - 1.4} ${cy + 3.2} q 1.4 0.6 2.8 0`} stroke={gardenMix(JG_GOLD, "white", 30)} strokeWidth="0.7" fill="none" strokeLinecap="round" />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function GardenHagi({ rng, color }: GardenSpeciesProps) {
+  const arcs = 3 + Math.floor(rng() * 2);
+  return (
+    <g>
+      {Array.from({ length: arcs }).map((_, index) => {
+        const dir = index % 2 ? 1 : -1;
+        const h = 22 + rng() * 12;
+        const reach = 10 + rng() * 8;
+        const green = jgGreen(rng);
+        const bloom = color || "oklch(0.66 0.1 340)";
+        const pt = (f: number): [number, number] => [24 + dir * reach * f, 58 - h * (0.55 + 0.45 * (1 - Math.abs(f - 0.45) * 1.4))];
+        return (
+          <g key={index}>
+            <path d={`M24 58 Q ${24 + dir * reach * 0.4} ${58 - h} ${24 + dir * reach} ${58 - h * 0.7}`} stroke={green} strokeWidth="1.1" fill="none" strokeLinecap="round" />
+            {[0.25, 0.45, 0.65, 0.85].map((f, leafIndex) => {
+              const [x, y] = pt(f);
+              return (
+                <g key={`lf${leafIndex}`}>
+                  <ellipse cx={x} cy={y - 1.6} rx="1.7" ry="1.1" fill={gardenMix(green, "white", 10)} opacity="0.9" transform={`rotate(${dir * -25} ${x} ${y})`} />
+                  <ellipse cx={x} cy={y + 1.6} rx="1.7" ry="1.1" fill={gardenMix(green, "black", 8)} opacity="0.9" transform={`rotate(${dir * 25} ${x} ${y})`} />
+                </g>
+              );
+            })}
+            {[0.4, 0.62, 0.86].map((f, bloomIndex) => {
+              const [x, y] = pt(f);
+              return (
+                <g key={`b${bloomIndex}`}>
+                  <ellipse cx={x} cy={y + 0.4} rx="1.5" ry="1.1" fill={bloom} opacity="0.95" />
+                  <ellipse cx={x} cy={y - 0.6} rx="1" ry="0.9" fill={gardenMix(bloom, "white", 30)} opacity="0.95" />
+                </g>
+              );
+            })}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function GardenJapaneseFern({ rng }: GardenSpeciesProps) {
+  const h = 24 + rng() * 14;
+  const curl = 3 + rng() * 4;
+  const green = jgGreen(rng);
+  const fronds: ReactNode[] = [];
+  for (let index = 0; index < 6; index += 1) {
+    const f = 0.18 + 0.78 * (index / 6);
+    const x = 24 + curl * Math.sin(f * 2.4);
+    const y = 58 - h * f;
+    const len = (1 - f) * 9 + 2;
+    [-1, 1].forEach((dir) => {
+      fronds.push(<path key={`${dir < 0 ? "l" : "r"}${index}`} d={gardenBlade(x, y, len, dir, -len * 0.85, 0.3)} fill={gardenMix(green, dir < 0 ? "black" : "white", 6)} opacity="0.92" />);
+      for (let vein = 1; vein < 4; vein += 1) {
+        const px = x + dir * len * (vein / 4);
+        const py = y - len * 0.85 * (vein / 4);
+        fronds.push(<path key={`${dir < 0 ? "lp" : "rp"}${index}${vein}`} d={`M${px} ${py} l ${dir * 1.6} -1.5`} stroke={gardenMix(green, "white", 14)} strokeWidth="0.4" opacity="0.6" />);
+      }
+    });
+  }
+  return (
+    <g>
+      <path d={`M24 58 Q ${24 + curl * 2} ${58 - h * 0.5} 24 ${58 - h}`} stroke={JG_LEAF_DEEP} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      {fronds}
+    </g>
+  );
 }
 
 function GardenStone({ rng }: GardenSpeciesProps) {
-  const grey = gardenMix("oklch(0.55 0.01 250)", "var(--garden-soil)", 20 + rng() * 20);
-  return <g><ellipse cx="24" cy="56" rx="12" ry="2.5" fill="var(--garden-soil)" opacity="0.4" /><path d="M13 56 Q 11 44 20 40 Q 28 36 35 44 Q 38 52 30 56 Z" fill={grey} /><path d="M17 46 Q 22 43 27 45" stroke={gardenMix(grey, "white", 25)} strokeWidth="1" fill="none" opacity="0.6" /></g>;
+  return (
+    <g>
+      <ellipse cx="24" cy="57" rx={12 + rng() * 4} ry="2.6" fill="black" opacity="0.16" />
+      <ellipse cx="24" cy="55" rx={11 + rng() * 5} ry={5 + rng() * 3} fill={gardenMix(JG_STONE, "black", 18)} opacity="0.9" />
+      <ellipse cx={22 + rng() * 3} cy={52 + rng() * 2} rx={7 + rng() * 3} ry={3.4 + rng() * 1.6} fill={gardenMix(JG_STONE, "white", 16)} opacity="0.75" />
+      {Array.from({ length: 5 }).map((_, index) => (
+        <path key={index} d={`M${15 + rng() * 18} ${50 + rng() * 6} q ${2 + rng() * 3} ${-1 + rng() * 2} ${4 + rng() * 4} ${-0.5 + rng()}`} stroke={gardenMix(JG_STONE, "black", 34)} strokeWidth="0.4" fill="none" opacity="0.5" />
+      ))}
+      <ellipse cx="30" cy="56" rx="4.5" ry="2.4" fill={gardenMix(JG_MOSS, "black", 10)} opacity="0.65" />
+      <ellipse cx="17" cy="55.5" rx="3" ry="1.6" fill={gardenMix(JG_MOSS, "black", 20)} opacity="0.5" />
+    </g>
+  );
 }
 
 function GardenTeaHouse({ rng }: GardenSpeciesProps) {
-  const wood = gardenMix("var(--garden-soil)", "black", 12 + rng() * 8);
-  const roof = gardenMix("var(--garden-deep)", "black", 30);
-  return <g><rect x="10" y="40" width="28" height="16" fill={wood} opacity="0.9" /><rect x="21" y="46" width="6" height="10" fill="var(--garden-soil)" opacity="0.7" /><path d="M6 40 L 24 24 L 42 40 Z" fill={roof} /><path d="M6 40 L 24 24 L 42 40" stroke={gardenMix(roof, "black", 20)} strokeWidth="1" fill="none" /><rect x="12" y="36" width="6" height="4" fill="oklch(0.85 0.06 90)" opacity="0.8" /><rect x="30" y="36" width="6" height="4" fill="oklch(0.85 0.06 90)" opacity="0.8" /></g>;
+  void rng;
+  const wood = gardenMix(JG_SOIL, "black", 18);
+  const woodLight = gardenMix(JG_SOIL, "white", 14);
+  const roof = gardenMix(JG_STONE, "black", 46);
+  const roofLight = gardenMix(JG_STONE, "black", 30);
+  const shoji = gardenMix(JG_GOLD, "white", 62);
+  return (
+    <g>
+      <ellipse cx="24" cy="57" rx="17" ry="2.6" fill="black" opacity="0.18" />
+      <rect x="9" y="48" width="30" height="3.4" rx="0.8" fill={woodLight} />
+      {[11, 20, 28, 36].map((x, index) => (
+        <rect key={index} x={x} y="51" width="1.6" height="5" fill={wood} />
+      ))}
+      <rect x="11.5" y="34" width="25" height="14" fill={gardenMix(wood, "black", 12)} />
+      <rect x="13.5" y="36" width="8.5" height="10" fill={shoji} opacity="0.75" />
+      <rect x="24" y="36" width="8.5" height="10" fill={shoji} opacity="0.55" />
+      <line x1="17.75" y1="36" x2="17.75" y2="46" stroke={wood} strokeWidth="0.6" />
+      <line x1="28.25" y1="36" x2="28.25" y2="46" stroke={wood} strokeWidth="0.6" />
+      <line x1="13.5" y1="41" x2="32.5" y2="41" stroke={wood} strokeWidth="0.6" />
+      <path d="M24 17 L 43 33 Q 39 35.5 34.5 34.2 L 24 25.5 L 13.5 34.2 Q 9 35.5 5 33 Z" fill={roof} />
+      <path d="M24 19.5 L 38.5 32 L 9.5 32 Z" fill={roofLight} opacity="0.85" />
+      <path d="M24 17 L 24 25.5" stroke={gardenMix(roof, "white", 16)} strokeWidth="0.7" />
+      <rect x="22.6" y="14.6" width="2.8" height="3" rx="0.6" fill={gardenMix(roof, "white", 10)} />
+      <ellipse cx="24" cy="55.5" rx="5" ry="2" fill={gardenMix(JG_STONE, "black", 24)} />
+    </g>
+  );
 }
 
 function GardenStoneLantern({ rng }: GardenSpeciesProps) {
-  const stone = gardenMix("oklch(0.6 0.015 250)", "var(--garden-soil)", 20 + rng() * 12);
-  return <g><ellipse cx="24" cy="57" rx="7" ry="1.6" fill="var(--garden-soil)" opacity="0.4" /><rect x="21" y="52" width="6" height="4" rx="1" fill={stone} /><rect x="19.5" y="34" width="9" height="18" rx="1.5" fill={stone} /><rect x="17" y="27" width="14" height="7" rx="1.5" fill={gardenMix(stone, "var(--warn)", 12)} /><circle cx="24" cy="30.5" r="1.6" fill="var(--warn)" opacity="0.85" /><path d="M14 27 L 24 19 L 34 27 Z" fill={gardenMix(stone, "black", 12)} /></g>;
+  void rng;
+  return (
+    <g>
+      <ellipse cx="24" cy="57.5" rx="11" ry="2.6" fill="black" opacity="0.18" />
+      <ellipse cx="24" cy="57" rx="9" ry="3" fill={gardenMix(JG_STONE, "black", 30)} opacity="0.8" />
+      <rect x="21" y="42" width="6" height="14" fill={JG_STONE} />
+      <rect x="21" y="42" width="1.6" height="14" fill={gardenMix(JG_STONE, "white", 18)} opacity="0.6" />
+      <rect x="25.6" y="42" width="1.4" height="14" fill={gardenMix(JG_STONE, "black", 22)} opacity="0.6" />
+      <rect x="17.5" y="38" width="13" height="4.5" rx="1" fill={gardenMix(JG_STONE, "white", 10)} />
+      <rect x="19" y="29" width="10" height="9.5" rx="1" fill={gardenMix(JG_STONE, "white", 6)} />
+      <rect x="21.2" y="31.5" width="5.6" height="5" rx="0.8" fill={JG_GOLD} opacity="0.8" />
+      <path d="M14.5 29 L 33.5 29 L 28 23.5 L 20 23.5 Z" fill={gardenMix(JG_STONE, "black", 12)} />
+      <circle cx="24" cy="21.5" r="2" fill={gardenMix(JG_STONE, "white", 14)} />
+    </g>
+  );
 }
 
-function GardenKoiPond({ rng }: GardenSpeciesProps) {
-  const water = gardenWater(rng);
-  return <g><ellipse cx="24" cy="52" rx="21" ry="7.5" fill={water} opacity="0.92" /><ellipse cx="24" cy="52" rx="21" ry="7.5" fill="none" stroke={gardenMix("var(--garden-soil)", "black", 15)} strokeWidth="1.2" opacity="0.5" /><path d="M15 51 Q 17 49 19 51 Q 17 53 15 51 Z" fill="oklch(0.65 0.18 30)" opacity="0.85" /><path d="M29 54 Q 31 52 33 54 Q 31 56 29 54 Z" fill="oklch(0.75 0.05 60)" opacity="0.85" /><path d="M24 49 Q 20 47 16 48" stroke="white" strokeWidth="0.6" fill="none" opacity="0.35" /></g>;
-}
-
-function GardenBridge({ rng }: GardenSpeciesProps) {
-  const water = gardenWater(rng);
-  const wood = gardenMix("var(--garden-deep)", "black", 15);
-  return <g><ellipse cx="24" cy="54" rx="22" ry="5.5" fill={water} opacity="0.85" /><path d="M4 52 Q 24 28 44 52" stroke={wood} strokeWidth="3" fill="none" strokeLinecap="round" /><path d="M4 52 Q 24 34 44 52" stroke={gardenMix(wood, "white", 15)} strokeWidth="1.4" fill="none" opacity="0.7" /><path d="M9 48 L 8 53 M 39 48 L 40 53" stroke={wood} strokeWidth="1.6" strokeLinecap="round" /></g>;
+function GardenKiku({ rng }: GardenSpeciesProps) {
+  const cx = 24;
+  const cy = 26;
+  const rot = rng() * 60;
+  return (
+    <g>
+      <circle cx={cx} cy={cy} r="12" fill={JG_GOLD} opacity="0.12" />
+      <path d={`M24 58 Q 26 42 ${cx} ${cy}`} stroke={JG_LEAF_DEEP} strokeWidth="1.7" fill="none" strokeLinecap="round" />
+      <path d={gardenLeaf(25, 46, 8, -1)} fill={jgGreen(rng)} />
+      <path d={gardenLeaf(25.2, 41, 7, 1)} fill={jgGreen(rng)} />
+      {Array.from({ length: 12 }).map((_, index) => (
+        <ellipse key={index} cx={cx} cy={cy - 6} rx="1.7" ry="6" fill={JG_GOLD} opacity={index % 2 ? 0.75 : 0.95} transform={`rotate(${rot + index * 30} ${cx} ${cy})`} />
+      ))}
+      <circle cx={cx} cy={cy} r="2.6" fill={gardenMix(JG_GOLD, "white", 55)} />
+    </g>
+  );
 }
 
 const japaneseGardenSpecies: Record<JapaneseGardenPlantKind, (props: GardenSpeciesProps) => ReactNode> = {
   shoot: GardenShoot,
   susuki: GardenSusuki,
   moss: GardenMossClump,
-  fern: GardenFern,
+  fern: GardenJapaneseFern,
   bamboo: GardenBamboo,
   momiji: GardenMomiji,
   sakura: GardenSakura,
   pine: GardenPine,
   azalea: GardenAzalea,
+  iris: GardenIris,
+  hagi: GardenHagi,
   stone: GardenStone,
   teahouse: GardenTeaHouse,
   lantern: GardenStoneLantern,
-  pond: GardenKoiPond,
-  bridge: GardenBridge,
-  kiku: GardenGlowFlower,
+  kiku: GardenKiku,
 };
 
 const japaneseGardenBaseWidth: Record<JapaneseGardenPlantKind, number> = {
-  shoot: 0.52,
+  shoot: 0.5,
   susuki: 0.85,
   moss: 0.9,
   fern: 0.95,
   bamboo: 1.1,
-  momiji: 1.6,
-  sakura: 1.7,
-  pine: 1.9,
-  azalea: 1.05,
-  stone: 0.6,
-  teahouse: 1.8,
-  lantern: 0.8,
-  pond: 2.1,
-  bridge: 1.6,
+  momiji: 1.75,
+  sakura: 1.6,
+  pine: 1.95,
+  azalea: 1.15,
+  iris: 0.95,
+  hagi: 1,
+  stone: 0.85,
+  teahouse: 2,
+  lantern: 0.95,
   kiku: 1.05,
 };
 
 function japanesePickSpecies(rng: () => number, maturity: number): JapaneseGardenPlantKind {
-  if (maturity < 0.35) return rng() < 0.5 ? "shoot" : "susuki";
-  if (maturity < 0.7) return ["susuki", "fern", "moss", "bamboo"][Math.floor(rng() * 4)] as JapaneseGardenPlantKind;
-  return ["bamboo", "momiji", "sakura", "pine"][Math.floor(rng() * 4)] as JapaneseGardenPlantKind;
+  if (maturity < 0.3) return rng() < 0.55 ? "shoot" : "susuki";
+  if (maturity < 0.6) return ["fern", "hagi", "iris", "susuki", "azalea"][Math.floor(rng() * 5)] as JapaneseGardenPlantKind;
+  if (maturity < 0.85) return ["bamboo", "azalea", "sakura", "iris", "momiji", "hagi"][Math.floor(rng() * 6)] as JapaneseGardenPlantKind;
+  return ["sakura", "momiji", "sakura", "bamboo", "pine"][Math.floor(rng() * 5)] as JapaneseGardenPlantKind;
 }
 
-function buildJapaneseGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number): JapaneseGardenItem[] {
+const JG_ROWS = [0.1, 0.36, 0.62, 0.88];
+const JG_UPPER: JapaneseGardenPondBoxShape = { cx: 63, cy: 64, rx: 9.5, ry: 3.8 };
+const JG_LOWER: JapaneseGardenPondBoxShape = { cx: 78, cy: 93, rx: 12.5, ry: 5 };
+const JG_FLOW: [number, number][] = [
+  [64.6, 65.8],
+  [65.2, 74.5],
+  [74.2, 81],
+  [76.5, 91.5],
+];
+
+const JAPANESE_GARDEN_TALL_KINDS: Partial<Record<JapaneseGardenPlantKind, true>> = {
+  momiji: true,
+  sakura: true,
+  pine: true,
+  bamboo: true,
+  kiku: true,
+  lantern: true,
+  teahouse: true,
+};
+
+const JAPANESE_GARDEN_FILL_RATIO = [0.12, 0.26, 0.38, 0.48, 0.56, 0.62, 0.68, 0.74, 0.8];
+
+/* The river/bridge geometry was authored for a ~390x205 box. Dashboard layouts
+   (e.g. the Focus layout's full-width hero card) can render this widget at far
+   wider-than-tall aspect ratios; without correction the bezier/normal-vector
+   math shears into a diagonal mess. Keep a single uniform scale tied to this
+   reference aspect and letterbox/pillarbox the water drawing inside the real
+   box instead of stretching it independently per axis. */
+const JAPANESE_GARDEN_WATER_ASPECT = 390 / 205;
+
+function japaneseGardenWaterFrame(boxW: number, boxH: number) {
+  const scaleX = Math.min(boxW / 100, (boxH / 100) * JAPANESE_GARDEN_WATER_ASPECT);
+  const scaleY = scaleX / JAPANESE_GARDEN_WATER_ASPECT;
+  const effW = scaleX * 100;
+  const effH = scaleY * 100;
+  const offsetX = (boxW - effW) / 2;
+  const offsetY = (boxH - effH) / 2;
+  return { scaleX, scaleY, effW, effH, offsetX, offsetY };
+}
+
+function japaneseGardenOnWater(x: number, t: number, stage: number, containerWidth: number, containerHeight: number) {
+  if (stage < 5) return false;
+  const frame = japaneseGardenWaterFrame(containerWidth || 390, containerHeight || 205);
+  const px = ((x * (containerWidth || 390) - frame.offsetX) / frame.effW) * 100;
+  const py = 44 + t * 55;
+  const inEllipse = (o: JapaneseGardenPondBoxShape, pad: number) => Math.pow((px - o.cx) / (o.rx + pad), 2) + Math.pow((py - o.cy) / (o.ry + pad * 0.5), 2) < 1;
+  if (inEllipse(JG_UPPER, 3)) return true;
+  if (stage >= 6) {
+    if (inEllipse(JG_LOWER, 3)) return true;
+    const [ax, ay] = JG_FLOW[0];
+    const [bx, by] = JG_FLOW[1];
+    const vx = bx - ax;
+    const vy = by - ay;
+    const u = Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / (vx * vx + vy * vy)));
+    const d = Math.hypot(px - (ax + vx * u), (py - (ay + vy * u)) * 1.9);
+    if (d < 8) return true;
+  }
+  return false;
+}
+
+function japaneseGardenCells(stage: number, wide: boolean): JapaneseGardenCell[] {
+  const cols = wide ? 8 : 5;
+  const cw = 1 / cols;
+  const upper = stage >= 5;
+  const lower = stage >= 6;
+  const cells: JapaneseGardenCell[] = [];
+  for (let row = 0; row < JG_ROWS.length; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      const x = (col + 0.5) / cols;
+      const t = JG_ROWS[row];
+      if (upper && t > 0.5 && t < 0.8 && x > 0.12 && x < 0.46) continue;
+      if (lower && t > 0.5 && t < 0.8 && x >= 0.3 && x < 0.62) continue;
+      if (lower && t > 0.8 && x > 0.46 && x < 0.92) continue;
+      const low = t > 0.8 && x < 0.4;
+      cells.push({ x, t, cw, low, key: `${row}-${col}` });
+    }
+  }
+  return cells.sort((a, b) => (gardenHash(`cell${a.key}`) % 9973) - (gardenHash(`cell${b.key}`) % 9973));
+}
+
+function buildJapaneseGardenItems(courses: Course[], sessions: StudySession[], tasks: Task[], stage: number): JapaneseGardenBuildResult {
   const courseMap = new Map(courses.map((course) => [course.id, course]));
-  const items: JapaneseGardenItem[] = [];
   const streak = getStreakDays({ sessions } as AppState);
   const todayTime = new Date(`${isoDate()}T00:00:00`).getTime();
+  const heroes: JapaneseGardenItem[] = [];
+  const features: JapaneseGardenItem[] = [];
+  const sessionItems: JapaneseGardenItem[] = [];
+  const milestones: JapaneseGardenItem[] = [];
 
+  if (stage >= 7 || streak >= 14) {
+    heroes.push({ id: "jg-great-pine", kind: "pine", wise: true, maturity: 1, anchor: [0.86, 0.36], label: "The Great Pine", sub: "Highest stage · a garden that keeps its shape" });
+  }
+  if (stage >= 5 || streak >= 10) {
+    heroes.push({ id: "jg-old-maple", kind: "momiji", maturity: 1, anchor: [0.14, 0.36], label: "The Old Maple", sub: "Weeks of steady study" });
+  }
   if (stage >= 3) {
-    items.push({ id: "jg-teahouse", kind: "teahouse", fixed: true, maturity: 1, anchor: { row: 0, frac: 0.86 }, label: "Tea House", sub: "Raised at the back of the garden" });
+    features.push({ id: "jg-teahouse", kind: "teahouse", maturity: 1, anchor: [0.3, 0.1], label: "Tea House", sub: "Built once the grasses came in" });
   }
   if (stage >= 4) {
-    items.push({ id: "jg-lantern", kind: "lantern", fixed: true, maturity: 1, anchor: { row: 1, frac: 0.62 }, label: "Stone Lantern", sub: "Lights the mid-ground" });
-  }
-  if (stage >= 5) {
-    items.push({ id: "jg-pond-upper", kind: "pond", fixed: true, maturity: 1, anchor: { row: 0, frac: 0.14 }, label: "Upper Koi Pond", sub: "Dug at the back of the garden" });
-    items.push({ id: "jg-old-maple", kind: "momiji", wise: true, fixed: true, maturity: 1, anchor: { row: 0, frac: 0.34 }, label: "The Old Maple", sub: "Anchors the left of the garden" });
-  }
-  if (stage >= 6) {
-    items.push({ id: "jg-pond-lower", kind: "pond", fixed: true, maturity: 1, anchor: { row: 3, frac: 0.58 }, label: "Lower Koi Pond", sub: "Fed by the river" });
-    items.push({ id: "jg-bridge", kind: "bridge", fixed: true, maturity: 1, anchor: { row: 3, frac: 0.74 }, label: "Arched Bridge", sub: "Crosses the river" });
-  }
-  if (stage >= 7 || streak >= 14) {
-    items.push({ id: "jg-great-pine", kind: "pine", wise: true, fixed: true, maturity: 1, anchor: { row: 0, frac: 0.5 }, label: "The Great Pine", sub: "Long tended, standing tall" });
+    features.push({ id: "jg-lantern", kind: "lantern", maturity: 1, anchor: [0.16, 0.62], label: "Stone Lantern", sub: "Unlocked at the bamboo grove" });
   }
   if (streak >= 5) {
-    items.push({ id: "jg-kiku", kind: "kiku", fixed: true, maturity: 1, anchor: { row: 2, frac: 0.5 }, label: `${streak}-day streak`, sub: "Golden kiku. Keep it alive." });
+    features.push({ id: "jg-kiku", kind: "kiku", maturity: 1, anchor: [0.82, 0.62], label: `${streak}-day streak`, sub: "Golden kiku · keep it alive" });
   }
 
   sessions
     .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
-    .slice(-90)
     .forEach((session) => {
       const course = courseMap.get(session.courseId ?? "");
       if (!course) return;
@@ -1585,129 +2084,431 @@ function buildJapaneseGardenItems(courses: Course[], sessions: StudySession[], t
       const maturity = Math.min(1, session.minutes / 90);
       const sessionDate = (session.endedAt || session.startedAt).slice(0, 10);
       const ageDays = (todayTime - new Date(`${sessionDate}T00:00:00`).getTime()) / 86400000;
-      items.push({
+      sessionItems.push({
         id: session.id,
         kind: japanesePickSpecies(rng, maturity),
         color: course.color,
         maturity,
+        minutes: session.minutes,
         fresh: ageDays <= 1.5,
         label: course.name,
         sub: `${session.presetLabel || session.kind} · ${formatMinutes(session.minutes)}${ageDays <= 1.5 ? " · freshly grown" : ""}`,
       });
     });
+  sessionItems.sort((a, b) => (b.minutes || 0) - (a.minutes || 0));
 
   tasks.forEach((task) => {
     if (task.totalUnits <= 0 || task.completedUnits < task.totalUnits) return;
     const course = courseMap.get(task.courseId);
     if (!course) return;
-    items.push({ id: `task-${task.id}`, kind: gardenHash(task.id) % 2 === 0 ? "sakura" : "azalea", color: course.color, maturity: 1, label: course.name, sub: `Milestone · ${task.title}` });
+    const rng = gardenRng(gardenHash(`${task.id}-ms`));
+    milestones.push({ id: `task-${task.id}`, kind: rng() < 0.5 ? "sakura" : "azalea", color: course.color, maturity: 1, label: course.name, sub: `Milestone · ${task.title}` });
   });
 
-  return items;
+  return { heroes, features, sessions: sessionItems, milestones };
 }
 
-function placeJapaneseGardenItems(items: JapaneseGardenItem[], columns: number, labelClearanceFraction: number, rows = 4): PlacedJapaneseGardenItem[] {
-  const rowT = (row: number) => (row + 0.5) / rows;
-  const colX = (row: number, col: number) => {
-    const jitter = gardenRng(gardenHash(`bed-${row}-${col}`))();
-    const spread = 0.35 / columns;
-    return Math.min(0.98, Math.max(0.02, (col + 0.5) / columns + (jitter - 0.5) * spread));
+function placeJapaneseGardenItems(build: JapaneseGardenBuildResult, stage: number, wide: boolean, containerWidth: number, containerHeight: number): PlacedJapaneseGardenItem[] {
+  const cells = japaneseGardenCells(stage, wide);
+  const free = cells.slice();
+  const onWater = (x: number, t: number) => japaneseGardenOnWater(x, t, stage, containerWidth, containerHeight);
+
+  const take = (anchor: [number, number] | undefined, rng: () => number, tall: boolean) => {
+    const pool = tall ? free.filter((cell) => !cell.low) : free;
+    if (!pool.length) return null;
+    let pick = pool[0];
+    if (anchor) {
+      let best = Infinity;
+      pool.forEach((cell) => {
+        const d = Math.hypot((cell.x - anchor[0]) * 1.4, cell.t - anchor[1]);
+        if (d < best) {
+          best = d;
+          pick = cell;
+        }
+      });
+    }
+    free.splice(free.indexOf(pick), 1);
+    let x = Math.max(0.05, Math.min(0.95, pick.x + (rng() - 0.5) * pick.cw * 0.44));
+    let t = pick.t + (rng() - 0.5) * 0.05;
+    for (let attempt = 0; attempt < 4 && onWater(x, t); attempt += 1) {
+      x = Math.max(0.05, Math.min(0.95, pick.x + (rng() - 0.5) * pick.cw * 0.44));
+      t = pick.t + (rng() - 0.5) * 0.05;
+    }
+    if (onWater(x, t)) return null;
+    return { x, t, cw: pick.cw, low: pick.low };
   };
 
-  const reserved = new Set<string>();
-  const fixedPlaced: PlacedJapaneseGardenItem[] = [];
-  const nonFixed: JapaneseGardenItem[] = [];
+  const placed: PlacedJapaneseGardenItem[] = [];
+  const push = (item: JapaneseGardenItem, anchor?: [number, number]) => {
+    const spot = take(anchor, gardenRng(gardenHash(`${item.id}-cell`)), !!JAPANESE_GARDEN_TALL_KINDS[item.kind]);
+    if (!spot) return false;
+    placed.push({ ...item, ...spot, growth: 1 });
+    return true;
+  };
 
-  for (const item of items) {
-    if (item.fixed && item.anchor) {
-      const row = Math.min(rows - 1, Math.max(0, item.anchor.row));
-      const col = Math.min(columns - 1, Math.max(0, Math.round(item.anchor.frac * (columns - 1))));
-      reserved.add(`${row}-${col}`);
-      fixedPlaced.push({ ...item, x: colX(row, col), t: rowT(row) });
-    } else {
-      nonFixed.push(item);
-    }
+  build.heroes.forEach((hero) => push(hero, hero.anchor));
+  build.features.forEach((feature) => push(feature, feature.anchor));
+  build.milestones.forEach((milestone) => push(milestone));
+
+  let surplus = 0;
+  build.sessions.forEach((session) => {
+    if (!push(session)) surplus += 1;
+  });
+
+  const target = Math.round(free.length * (JAPANESE_GARDEN_FILL_RATIO[stage] ?? 0.2));
+  for (let index = 0; index < target; index += 1) {
+    const rng = gardenRng(gardenHash(`jamb-${index}`));
+    const r = rng();
+    let kind: JapaneseGardenPlantKind;
+    if (stage <= 1) kind = r < 0.6 ? "moss" : "shoot";
+    else if (stage <= 3) kind = r < 0.34 ? "moss" : r < 0.62 ? "susuki" : r < 0.84 ? "shoot" : "stone";
+    else if (stage <= 5) kind = r < 0.26 ? "moss" : r < 0.46 ? "susuki" : r < 0.62 ? "fern" : r < 0.78 ? "hagi" : r < 0.92 ? "azalea" : "stone";
+    else kind = r < 0.18 ? "moss" : r < 0.32 ? "susuki" : r < 0.44 ? "fern" : r < 0.58 ? "hagi" : r < 0.72 ? "azalea" : r < 0.84 ? "bamboo" : r < 0.93 ? "momiji" : "stone";
+    const spot = free.find((cell) => cell.low);
+    const finalKind: JapaneseGardenPlantKind = spot && index % 2 === 0 ? (r < 0.6 ? "moss" : "susuki") : kind;
+    const ambientRng = gardenRng(gardenHash(`jamb-${index}`));
+    push({ id: `jamb-${index}`, kind: finalKind, maturity: 0.24 + ambientRng() * 0.36, ambient: true });
   }
 
-  const available: { row: number; col: number }[] = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let col = 0; col < columns; col += 1) {
-      const key = `${row}-${col}`;
-      if (reserved.has(key)) continue;
-      if (row === rows - 1 && colX(row, col) < labelClearanceFraction) continue;
-      available.push({ row, col });
-    }
-  }
+  const fullness = 1 - free.length / Math.max(1, cells.length);
+  const growth = 1 + Math.min(0.32, surplus * 0.02) + Math.max(0, fullness - 0.7) * 0.35;
+  return placed.map((plant) => ({ ...plant, growth: plant.ambient ? 1 + (growth - 1) * 0.3 : growth })).sort((a, b) => a.t - b.t);
+}
 
-  const buckets = new Map<string, JapaneseGardenItem[]>();
-  if (available.length > 0) {
-    for (const item of nonFixed) {
-      const bed = available[gardenHash(`${item.id}-bed`) % available.length];
-      const key = `${bed.row}-${bed.col}`;
-      const bucket = buckets.get(key);
-      if (bucket) bucket.push(item);
-      else buckets.set(key, [item]);
-    }
-  }
+function GardenKoi({ tone, left, top, dur, del, flip }: { tone: string; left: number; top: number; dur: number; del: number; flip?: number }) {
+  return (
+    <span className="jg-koi" style={{ position: "absolute", left: `${left}%`, top: `${top}%`, display: "block", "--jg-dur": `${dur}s`, "--jg-del": `${del}s` } as CSSProperties}>
+      <svg viewBox="0 0 22 10" width="18" style={{ display: "block", opacity: 0.92, transform: `rotate(${flip || 0}deg)` }}>
+        <ellipse cx="9" cy="5" rx="7" ry="2.6" fill={tone} />
+        <path d="M16 5 L 21 2.2 L 20 5 L 21 7.8 Z" fill={tone} opacity="0.85" />
+        <ellipse cx="7" cy="4.2" rx="2.2" ry="1.2" fill="rgba(255,255,255,.55)" />
+      </svg>
+    </span>
+  );
+}
 
-  const resolved: PlacedJapaneseGardenItem[] = [];
-  for (const bed of available) {
-    const key = `${bed.row}-${bed.col}`;
-    const bucket = buckets.get(key);
-    const x = colX(bed.row, bed.col);
-    const t = rowT(bed.row);
-    if (!bucket || bucket.length === 0) {
-      const rng = gardenRng(gardenHash(`bed-${bed.row}-${bed.col}-ambient`));
-      const kind: JapaneseGardenPlantKind = rng() < 0.5 ? "moss" : "stone";
-      resolved.push({ id: `bed-${bed.row}-${bed.col}-ambient`, kind, maturity: 0.2 + rng() * 0.2, ambient: true, x, t });
-      continue;
-    }
-    let winner = bucket[0];
-    for (const candidate of bucket) if (candidate.maturity >= winner.maturity) winner = candidate;
-    const growthBonus = Math.min(0.6, (bucket.length - 1) * 0.12);
-    const sub = bucket.length > 1 ? `${winner.sub ?? ""}${winner.sub ? " · " : ""}${bucket.length} sessions grown here` : winner.sub;
-    resolved.push({ ...winner, sub, growthBonus, count: bucket.length, x, t });
-  }
+type JapaneseGardenPondBoxShape = { cx: number; cy: number; rx: number; ry: number };
 
-  return [...resolved, ...fixedPlaced].sort((a, b) => a.t - b.t);
+function GardenKoiSet({ box, fish }: { box: JapaneseGardenPondBoxShape; fish: [string, number, number, number][] }) {
+  return (
+    <>
+      {fish.map((k, index) => (
+        <GardenKoi key={index} tone={k[0]} left={box.cx - box.rx + k[1] * box.rx * 2} top={box.cy - box.ry * 0.4 + k[2] * box.ry} dur={12 + index * 4} del={-index * 3} flip={k[3]} />
+      ))}
+    </>
+  );
+}
+
+function JapaneseGardenWater({ stage, boxWidth, boxHeight }: { stage: number; boxWidth: number; boxHeight: number }) {
+  const boxW = boxWidth || 390;
+  const boxH = boxHeight || 205;
+  const lower = stage >= 6;
+  const frame = japaneseGardenWaterFrame(boxW, boxH);
+  const effW = frame.effW;
+  const effH = frame.effH;
+  const offsetX = frame.offsetX;
+  const offsetY = frame.offsetY;
+  const X = (p: number) => offsetX + p * frame.scaleX;
+  const Y = (p: number) => offsetY + p * frame.scaleY;
+  const SX = (r: number) => r * frame.scaleX;
+  const SY = (r: number) => r * frame.scaleY;
+  const rim = gardenMix(JG_STONE, "black", 46);
+  const deep = gardenMix(JG_WATER, "black", 18);
+  const lit = gardenMix(JG_WATER, "white", 16);
+
+  const CP = JG_FLOW.map((p) => [X(p[0]), Y(p[1])]);
+  const bez = (u: number, i: number) => {
+    const v = 1 - u;
+    return v * v * v * CP[0][i] + 3 * v * v * u * CP[1][i] + 3 * v * u * u * CP[2][i] + u * u * u * CP[3][i];
+  };
+  const dbez = (u: number, i: number) => {
+    const v = 1 - u;
+    return 3 * v * v * (CP[1][i] - CP[0][i]) + 6 * v * u * (CP[2][i] - CP[1][i]) + 3 * u * u * (CP[3][i] - CP[2][i]);
+  };
+  const at = (u: number): [number, number] => [bez(u, 0), bez(u, 1)];
+  const norm = (u: number): [number, number, number, number] => {
+    const tx = dbez(u, 0);
+    const ty = dbez(u, 1);
+    const m = Math.hypot(tx, ty) || 1;
+    return [-ty / m, tx / m, tx / m, ty / m];
+  };
+  const halfW = (u: number) => effW * (0.011 + 0.015 * u) + (u > 0.76 ? effW * 0.032 * Math.pow((u - 0.76) / 0.24, 2) : 0);
+  const SN = 28;
+  const offs = (sgn: number, k?: number): [number, number][] =>
+    Array.from({ length: SN + 1 }, (_, index) => {
+      const u = index / SN;
+      const p = at(u);
+      const n = norm(u);
+      const wob = sgn ? Math.sin(u * 9.1 + (sgn > 0 ? 0 : 2.3)) * effW * 0.005 : 0;
+      const h = (halfW(u) + wob) * (sgn || k || 0);
+      return [p[0] + n[0] * h, p[1] + n[1] * h];
+    });
+  const poly = (pts: [number, number][]) => pts.map((p, index) => `${index ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(" ");
+  const eL = offs(1);
+  const eR = offs(-1);
+  const river = `${poly(eL)} ${poly(eR.slice().reverse()).replace("M", "L")} Z`;
+  const thread = (k: number) => poly(offs(0, k));
+
+  const uB = 0.46;
+  const nB = norm(uB);
+  const cross = at(uB);
+  const nx = nB[0];
+  const ny = nB[1];
+  const fx = nB[2];
+  const fy = nB[3];
+  const hwMid = halfW(uB);
+
+  const ell = (o: JapaneseGardenPondBoxShape, grow: number) => <ellipse cx={X(o.cx)} cy={Y(o.cy)} rx={SX(o.rx) + grow} ry={SY(o.ry) + grow} />;
+
+  const foot = hwMid + Math.max(20, effW * 0.07);
+  const plank = Math.max(13, effW * 0.038);
+  const clampY = (y: number) => Math.max(offsetY + plank, Math.min(offsetY + effH - plank * 1.2, y));
+  const L: [number, number] = [cross[0] - nx * foot - (fx * plank) / 2, clampY(cross[1] - ny * foot - (fy * plank) / 2)];
+  const R: [number, number] = [cross[0] + nx * foot - (fx * plank) / 2, clampY(cross[1] + ny * foot - (fy * plank) / 2)];
+  const spanLen = Math.hypot(R[0] - L[0], R[1] - L[1]);
+  const rise = (Math.max(6, effH * 0.075) * Math.abs(R[0] - L[0])) / Math.max(1, spanLen);
+  const arc = (p: [number, number], q: [number, number], dy: number) => {
+    const c: [number, number] = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2 - rise * 2 + dy];
+    return { d: `M${p[0]} ${p[1] + dy} Q ${c[0]} ${c[1]} ${q[0]} ${q[1] + dy}`, c };
+  };
+  const nearArc = arc(L, R, 0);
+  const farL: [number, number] = [L[0] + fx * plank, L[1] + fy * plank];
+  const farR: [number, number] = [R[0] + fx * plank, R[1] + fy * plank];
+  const farArc = arc(farL, farR, 0);
+  const deckBody = `${nearArc.d} L ${farR[0]} ${farR[1]} Q ${farArc.c[0]} ${farArc.c[1]} ${farL[0]} ${farL[1]} Z`;
+  const onArc = (p: [number, number], q: [number, number], c: [number, number], u: number): [number, number] => [
+    (1 - u) * (1 - u) * p[0] + 2 * (1 - u) * u * c[0] + u * u * q[0],
+    (1 - u) * (1 - u) * p[1] + 2 * (1 - u) * u * c[1] + u * u * q[1],
+  ];
+  const postH = Math.max(9, effH * 0.055);
+  const railC: [number, number] = [nearArc.c[0], nearArc.c[1] - postH];
+  const railTop = `M${L[0]} ${L[1] - postH} Q ${railC[0]} ${railC[1]} ${R[0]} ${R[1] - postH}`;
+
+  /* koi/lily-pad/ripple overlay below is positioned with plain CSS percentages
+     of the full container, so pond boxes need to be expressed in that same
+     container-relative percentage space (not the raw 0-100 water-authoring
+     units the SVG geometry above uses via X()/Y()). */
+  const pctX = (p: number) => (X(p) / boxW) * 100;
+  const pctY = (p: number) => (Y(p) / boxH) * 100;
+  const pctRX = (r: number) => ((r * frame.scaleX) / boxW) * 100;
+  const pctRY = (r: number) => ((r * frame.scaleY) / boxH) * 100;
+  const toPondPct = (o: JapaneseGardenPondBoxShape): JapaneseGardenPondBoxShape => ({ cx: pctX(o.cx), cy: pctY(o.cy), rx: pctRX(o.rx), ry: pctRY(o.ry) });
+  const upperPct = toPondPct(JG_UPPER);
+  const lowerPct = toPondPct(JG_LOWER);
+
+  return (
+    <>
+      <svg viewBox={`0 0 ${boxW} ${boxH}`} preserveAspectRatio="none" style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", zIndex: 24, pointerEvents: "none" }}>
+        <defs>
+          <linearGradient id="jgWaterFill" gradientUnits="userSpaceOnUse" x1={offsetX + effW * 0.5} y1={offsetY + effH * 0.55} x2={offsetX + effW * 0.72} y2={offsetY + effH}>
+            <stop offset="0%" stopColor={lit} />
+            <stop offset="55%" stopColor={JG_WATER} />
+            <stop offset="100%" stopColor={deep} />
+          </linearGradient>
+          <clipPath id="jgWaterClip">
+            {ell(JG_UPPER, 0)}
+            {lower ? ell(JG_LOWER, 0) : null}
+            {lower ? <path d={river} /> : null}
+          </clipPath>
+        </defs>
+        <g fill={gardenMix(JG_SOIL, "black", 46)} stroke={gardenMix(JG_SOIL, "black", 46)} strokeWidth="7" strokeLinejoin="round" opacity="0.55">
+          {ell(JG_UPPER, 3)}
+          {lower ? ell(JG_LOWER, 3) : null}
+          {lower ? <path d={river} /> : null}
+        </g>
+        <g fill={rim} stroke={rim} strokeWidth="3" strokeLinejoin="round">
+          {ell(JG_UPPER, 1)}
+          {lower ? ell(JG_LOWER, 1) : null}
+          {lower ? <path d={river} /> : null}
+        </g>
+        <g fill="url(#jgWaterFill)">
+          {ell(JG_UPPER, 0)}
+          {lower ? ell(JG_LOWER, 0) : null}
+          {lower ? <path d={river} /> : null}
+        </g>
+        <ellipse cx={X(JG_UPPER.cx - 3)} cy={Y(JG_UPPER.cy - 1.2)} rx={SX(JG_UPPER.rx) * 0.44} ry={SY(JG_UPPER.ry) * 0.34} fill="rgba(255,255,255,.16)" />
+        {lower ? <ellipse cx={X(JG_LOWER.cx - 4)} cy={Y(JG_LOWER.cy - 1.4)} rx={SX(JG_LOWER.rx) * 0.4} ry={SY(JG_LOWER.ry) * 0.32} fill="rgba(255,255,255,.14)" /> : null}
+        {lower ? (
+          <g fill="none" strokeLinecap="round">
+            <path d={poly(eL)} stroke="rgba(0,0,0,.26)" strokeWidth="1.5" />
+            <path d={poly(eR)} stroke="rgba(255,255,255,.2)" strokeWidth="1.1" />
+            {[
+              [-0.5, 7.5, 0],
+              [0, 6.2, -1.4],
+              [0.52, 8.4, -2.8],
+            ].map((t, index) => (
+              <path
+                key={`th${index}`}
+                className="jg-flow"
+                d={thread(t[0])}
+                stroke="rgba(255,255,255,.3)"
+                strokeWidth="1.1"
+                strokeDasharray="6 17"
+                style={{ "--jg-dur": `${t[1]}s`, "--jg-del": `${t[2]}s`, "--jg-off": -92 } as CSSProperties}
+              />
+            ))}
+            {[0.2, 0.35, 0.52, 0.68].map((u, index) => {
+              const p = at(u);
+              const n = norm(u);
+              const h = halfW(u) * 0.62;
+              return (
+                <path
+                  key={`rf${index}`}
+                  stroke="rgba(255,255,255,.15)"
+                  strokeWidth="1"
+                  d={`M${p[0] - n[0] * h} ${p[1] - n[1] * h} Q ${p[0] + n[2] * 3.5} ${p[1] + n[3] * 3.5} ${p[0] + n[0] * h} ${p[1] + n[1] * h}`}
+                />
+              );
+            })}
+          </g>
+        ) : null}
+        {lower
+          ? (() => {
+              const hd = at(0.05);
+              const hn = norm(0.05);
+              const hw = halfW(0.05);
+              const mo = at(0.95);
+              const mn = norm(0.95);
+              const mw = halfW(0.95);
+              const junctionArc = (p: [number, number], n: [number, number, number, number], h: number, d: number) =>
+                `M${p[0] - n[0] * h} ${p[1] - n[1] * h} Q ${p[0] + n[2] * d} ${p[1] + n[3] * d} ${p[0] + n[0] * h} ${p[1] + n[1] * h}`;
+              return (
+                <g fill="none" clipPath="url(#jgWaterClip)">
+                  <path d={junctionArc(hd, hn, hw, 4)} stroke="rgba(255,255,255,.45)" strokeWidth="1.3" />
+                  {[0.55, 0.85, 1.15].map((k, index) => (
+                    <path key={`dl${index}`} d={junctionArc(mo, mn, mw * k, 5 * k)} strokeWidth="1" stroke={`rgba(255,255,255,${(0.28 - index * 0.07).toFixed(2)})`} />
+                  ))}
+                </g>
+              );
+            })()
+          : null}
+        {lower
+          ? (() => {
+              const hd = at(0.05);
+              const hn = norm(0.05);
+              const hw = halfW(0.05);
+              return (
+                <g fill="none">
+                  <ellipse cx={hd[0] - hn[0] * (hw + 5.2)} cy={hd[1] - hn[1] * (hw + 5.2)} rx="5" ry="3" fill={gardenMix(JG_STONE, "black", 22)} />
+                  <ellipse cx={hd[0] + hn[0] * (hw + 3.4)} cy={hd[1] + hn[1] * (hw + 3.4)} rx="4.3" ry="2.6" fill={gardenMix(JG_STONE, "black", 34)} />
+                </g>
+              );
+            })()
+          : null}
+
+        {lower ? (
+          <g>
+            <ellipse cx={L[0] + (fx * plank) / 2} cy={L[1] + (fy * plank) / 2 + 2} rx={plank * 0.8} ry={plank * 0.34} fill={gardenMix(JG_STONE, "black", 48)} />
+            <ellipse cx={R[0] + (fx * plank) / 2} cy={R[1] + (fy * plank) / 2 + 2} rx={plank * 0.8} ry={plank * 0.34} fill={gardenMix(JG_STONE, "black", 48)} />
+            <path d={deckBody} fill={gardenMix(JG_MAPLE, "black", 18)} />
+            <path d={farArc.d} stroke={gardenMix(JG_MAPLE, "black", 48)} strokeWidth="3" fill="none" />
+            <path d={nearArc.d} stroke={gardenMix(JG_MAPLE, "white", 26)} strokeWidth="1.6" fill="none" />
+            {[0.12, 0.5, 0.88].map((u, index) => {
+              const p = onArc(L, R, nearArc.c, u);
+              return <line key={`pl${index}`} x1={p[0]} y1={p[1]} x2={p[0] + fx * plank} y2={p[1] + fy * plank} stroke={gardenMix(JG_MAPLE, "black", 36)} strokeWidth="1.1" opacity="0.7" />;
+            })}
+            {[0.06, 0.28, 0.5, 0.72, 0.94].map((u, index) => {
+              const p = onArc(L, R, nearArc.c, u);
+              return <rect key={index} x={p[0] - 1.9} y={p[1] - postH} width="3.8" height={postH + 1} rx="1.3" fill={gardenMix(JG_MAPLE, "black", 34)} />;
+            })}
+            <path d={railTop} stroke={gardenMix(JG_MAPLE, "black", 20)} strokeWidth="3.4" fill="none" strokeLinecap="round" />
+            <path d={railTop} stroke={gardenMix(JG_MAPLE, "white", 24)} strokeWidth="1.2" fill="none" strokeLinecap="round" />
+          </g>
+        ) : null}
+      </svg>
+
+      <div style={{ position: "absolute", left: 0, top: 0, width: "100%", height: "100%", zIndex: 25, pointerEvents: "none" }}>
+        <GardenKoiSet
+          box={upperPct}
+          fish={[
+            ["oklch(0.72 0.15 45)", 0.3, 0.4, 0],
+            ["oklch(0.9 0.02 60)", 0.64, 1, -6],
+          ]}
+        />
+        {lower ? (
+          <GardenKoiSet
+            box={lowerPct}
+            fish={[
+              ["oklch(0.66 0.16 30)", 0.24, 0.35, -8],
+              ["oklch(0.9 0.02 60)", 0.54, 1.1, 5],
+              ["oklch(0.72 0.15 45)", 0.78, 0.5, -4],
+            ]}
+          />
+        ) : null}
+        {(
+          [[upperPct, 0.14, 1, 7] as [JapaneseGardenPondBoxShape, number, number, number]].concat(
+            lower
+              ? [
+                  [lowerPct, 0.12, 0.95, 9] as [JapaneseGardenPondBoxShape, number, number, number],
+                  [lowerPct, 0.84, 1.15, 7] as [JapaneseGardenPondBoxShape, number, number, number],
+                ]
+              : [],
+          )
+        ).map((p, index) => (
+          <span
+            key={index}
+            style={{
+              position: "absolute",
+              left: `${p[0].cx - p[0].rx + p[1] * p[0].rx * 2}%`,
+              top: `${p[0].cy - p[0].ry * 0.3 + p[2] * p[0].ry}%`,
+              width: p[3],
+              height: p[3] * 0.62,
+              borderRadius: "50%",
+              background: gardenMix(JG_MOSS, "black", 12),
+              opacity: 0.85,
+            }}
+          />
+        ))}
+        <span
+          className="jg-ripple"
+          style={{ position: "absolute", left: `${upperPct.cx + 2}%`, top: `${upperPct.cy + 0.6}%`, width: 14, height: 5, borderRadius: "50%", border: "1px solid rgba(255,255,255,.32)", "--jg-dur": "5s" } as CSSProperties}
+        />
+        {lower ? (
+          <span
+            className="jg-ripple"
+            style={{
+              position: "absolute",
+              left: `${lowerPct.cx - 2}%`,
+              top: `${lowerPct.cy + 0.6}%`,
+              width: 16,
+              height: 6,
+              borderRadius: "50%",
+              border: "1px solid rgba(255,255,255,.28)",
+              "--jg-dur": "6.5s",
+              "--jg-del": "-2s",
+            } as CSSProperties}
+          />
+        ) : null}
+      </div>
+    </>
+  );
 }
 
 function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState; weeklyMinutes: number }) {
-  const japaneseGardenStageNames = ["Bare Ground", "First Shoots", "Moss & Bloom", "Susuki Fields", "Bamboo Grove", "Upper Pond", "River & Bridge", "Every Bed Planted", "Long-Tended"];
+  const japaneseGardenStageNames = ["Bare Ground", "First Shoots", "Moss Takes Hold", "Tea House", "Bamboo Grove", "Koi Pond", "River & Bridge", "Full Garden", "Long Tended"];
   const japaneseGardenStageThresholds = [0, 45, 120, 240, 400, 600, 850, 1150, 1500];
   const stage = Math.max(0, japaneseGardenStageThresholds.filter((threshold) => weeklyMinutes >= threshold).length - 1);
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const statsRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(380);
-  const [statsWidth, setStatsWidth] = useState(0);
+  const [containerHeight, setContainerHeight] = useState(205);
   const [tip, setTip] = useState<{ x: number; y: number; label?: string; sub?: string } | null>(null);
   const streak = useMemo(() => getStreakDays({ sessions: appState.sessions } as AppState), [appState.sessions]);
-  const columns = Math.max(5, Math.min(11, Math.round(containerWidth / 70)));
-  const labelClearanceFraction = statsWidth > 0 ? Math.max(0.12, Math.min(0.55, (statsWidth + 24) / containerWidth)) : 0.46;
+  const wide = containerWidth > 430;
   const plants = useMemo(
-    () => placeJapaneseGardenItems(buildJapaneseGardenItems(appState.courses, appState.sessions, appState.tasks, stage), columns, labelClearanceFraction),
-    [appState.courses, appState.sessions, appState.tasks, stage, columns, labelClearanceFraction],
+    () => placeJapaneseGardenItems(buildJapaneseGardenItems(appState.courses, appState.sessions, appState.tasks, stage), stage, wide, containerWidth, containerHeight),
+    [appState.courses, appState.sessions, appState.tasks, stage, wide, containerWidth, containerHeight],
   );
-  const fireflies = streak >= 5 ? Math.min(6, 2 + Math.floor(streak / 3)) : 0;
-  const petals = stage >= 5 ? 6 : 0;
+  const fireflies = streak >= 5 ? Math.min(7, 2 + Math.floor(streak / 3)) : 0;
+  const petals = stage >= 6 ? 7 : stage >= 5 ? 4 : 0;
 
   useLayoutEffect(() => {
     const element = wrapRef.current;
     if (!element || typeof ResizeObserver === "undefined") return undefined;
     const observer = new ResizeObserver(() => {
       const width = Math.round(element.clientWidth / 12) * 12;
+      const height = Math.round(element.clientHeight);
       setContainerWidth((prev) => (prev === width ? prev : width));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
-    const element = statsRef.current;
-    if (!element || typeof ResizeObserver === "undefined") return undefined;
-    const observer = new ResizeObserver(() => {
-      const width = Math.round(element.clientWidth);
-      setStatsWidth((prev) => (prev === width ? prev : width));
+      setContainerHeight((prev) => (prev === height ? prev : height));
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -1721,22 +2522,25 @@ function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState;
 
   return (
     <div ref={wrapRef} className="garden-stage jg-stage" aria-label={`Japanese Garden of Knowledge: ${japaneseGardenStageNames[stage]}, ${formatMinutes(weeklyMinutes)} last 7 days`}>
-      <div className="gk-sun" aria-hidden="true" />
+      <div className="jg-moon" aria-hidden="true" />
+      <svg className="jg-hills" preserveAspectRatio="none" viewBox="0 0 100 20" aria-hidden="true">
+        <path d="M0 20 Q 22 3 44 11 Q 62 17 78 6 Q 90 -1 100 9 L 100 20 Z" />
+      </svg>
       <div className={`gk-ground jg-ground${stage >= 2 ? " jg-ground-moss" : ""}`} aria-hidden="true">
         <svg preserveAspectRatio="none" viewBox="0 0 100 8"><path d="M0 8 Q 14 2.5 32 4.8 T 64 3.6 T 100 5.2 L 100 8 Z" /></svg>
       </div>
-      {stage >= 6 ? (
-        <div className="jg-river" aria-hidden="true">
-          <svg preserveAspectRatio="none" viewBox="0 0 100 100"><path d="M14 12 Q 30 30 40 45 Q 52 62 58 82" /></svg>
-        </div>
-      ) : null}
+
+      {stage >= 5 ? <JapaneseGardenWater stage={stage} boxWidth={containerWidth} boxHeight={containerHeight} /> : null}
 
       {plants.map((plant, index) => {
         const Species = japaneseGardenSpecies[plant.kind];
-        const rng = gardenRng(gardenHash(`${plant.id}-draw`));
-        const depth = 0.45 + 0.55 * plant.t;
-        const width = 76 * (japaneseGardenBaseWidth[plant.kind] || 1) * depth * (0.72 + 0.38 * (plant.maturity || 0.5)) * (1 + (plant.growthBonus || 0));
-        const bottomPct = 2 + (1 - plant.t) * 52;
+        const rng = gardenRng(gardenHash(`${plant.id}-jdraw`));
+        const depth = 0.62 + 0.38 * plant.t;
+        const bed = containerWidth * (plant.cw || 0.125);
+        const bottomPct = 1 + (1 - plant.t) * 55;
+        const headroom = (containerHeight * (1 - bottomPct / 100) * 0.94) / 1.21;
+        let width = Math.min(bed * 0.66 * (japaneseGardenBaseWidth[plant.kind] || 1) * depth * (0.8 + 0.25 * (plant.maturity || 0.5)) * plant.growth, headroom, containerHeight * 0.46);
+        if (plant.low) width = Math.min(width, containerHeight * 0.17);
         const interactive = !plant.ambient;
         return (
           <div
@@ -1752,21 +2556,21 @@ function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState;
               width,
               transform: "translateX(-50%)",
               zIndex: Math.round(plant.t * 40) + 3,
-              opacity: plant.ambient ? 0.5 + 0.35 * plant.t : 0.72 + 0.28 * plant.t,
-              animationDelay: `${(index % 12) * 0.05}s`,
+              opacity: plant.ambient ? 0.62 + 0.32 * plant.t : 0.82 + 0.18 * plant.t,
+              animationDelay: `${(index % 14) * 0.045}s`,
               pointerEvents: interactive ? "auto" : "none",
             }}
           >
-            <span className="gk-sway" style={{ "--gk-dur": `${4.5 + (gardenHash(plant.id) % 40) / 10}s`, "--gk-del": `${-(gardenHash(plant.id) % 60) / 10}s` } as CSSProperties}>
-              <svg viewBox="0 0 48 58" aria-hidden="true"><Species rng={rng} color={plant.color} maturity={plant.maturity} wise={plant.wise} /></svg>
+            <span
+              className={plant.ambient || index > 8 ? undefined : "gk-sway"}
+              style={{ display: "block", "--gk-dur": `${5 + (gardenHash(plant.id) % 40) / 10}s`, "--gk-del": `${-(gardenHash(plant.id) % 60) / 10}s` } as CSSProperties}
+            >
+              <svg viewBox="0 0 48 58" aria-hidden="true">
+                <Species rng={rng} color={plant.color} maturity={plant.maturity} wise={plant.wise} detail={plant.ambient ? 0 : 1} />
+              </svg>
             </span>
           </div>
         );
-      })}
-
-      {Array.from({ length: fireflies }).map((_, index) => {
-        const rng = gardenRng(gardenHash(`jg-fly-${index}`));
-        return <span key={index} className="gk-firefly" style={{ left: `${8 + rng() * 84}%`, top: `${12 + rng() * 38}%`, "--gk-dur": `${2.4 + rng() * 2.4}s`, "--gk-del": `${-rng() * 4}s` } as CSSProperties} />;
       })}
 
       {Array.from({ length: petals }).map((_, index) => {
@@ -1775,14 +2579,32 @@ function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState;
           <span
             key={index}
             className="jg-petal"
-            style={{ left: `${6 + rng() * 88}%`, "--jg-dur": `${6 + rng() * 5}s`, "--jg-del": `${-rng() * 8}s`, "--jg-drift": `${(rng() - 0.5) * 40}px` } as CSSProperties}
+            style={{
+              position: "absolute",
+              left: `${10 + rng() * 80}%`,
+              top: `${-4 + rng() * 20}%`,
+              width: 5,
+              height: 4,
+              borderRadius: "60% 40% 60% 40%",
+              background: JG_SAKURA,
+              opacity: 0.85,
+              zIndex: 44,
+              pointerEvents: "none",
+              "--jg-dur": `${7 + rng() * 6}s`,
+              "--jg-del": `${-rng() * 8}s`,
+            } as CSSProperties}
           />
         );
       })}
 
-      <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 8 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
-      <div ref={statsRef} className="gk-stats"><span className="serif">{japaneseGardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
-      {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to break the gravel</p> : null}
+      {Array.from({ length: fireflies }).map((_, index) => {
+        const rng = gardenRng(gardenHash(`jg-fly-${index}`));
+        return <span key={index} className="gk-firefly" style={{ left: `${8 + rng() * 84}%`, top: `${14 + rng() * 36}%`, "--gk-dur": `${2.4 + rng() * 2.4}s`, "--gk-del": `${-rng() * 4}s` } as CSSProperties} />;
+      })}
+
+      <div className="gk-stage-dots" aria-hidden="true">{Array.from({ length: 9 }).map((_, index) => <span key={index} className={index < stage ? "active" : ""} />)}</div>
+      <div className="gk-stats"><span className="serif">{japaneseGardenStageNames[stage]}</span><span className="mono">{formatMinutes(weeklyMinutes)} last 7 days</span></div>
+      {stage === 0 && weeklyMinutes === 0 ? <p className="gk-empty mono">log a session to set the first stone</p> : null}
       {tip ? <div className="gk-tooltip" style={{ left: tip.x, top: tip.y - 14 }}><strong>{tip.label}</strong>{tip.sub ? <span>{tip.sub}</span> : null}</div> : null}
     </div>
   );
@@ -2462,6 +3284,23 @@ function buildSessionsFromTimerRange(timer: TimerState, endedAt: string) {
   return [...buckets.values()].map((bucket) => buildSessionFromTimer(timer, bucket.endedAt, Math.max(1, Math.round(bucket.seconds / 60)), bucket.startedAt));
 }
 
+/**
+ * Study/exam time overlapping `(sinceIso, nowIso]`, drawn from already-finalized sessions plus
+ * whatever's still open on the live timer (truncated to `nowIso` via `closeTimerSegments`, the
+ * same helper crash-recovery already uses) — the candidate claim for offline-credit reconciliation.
+ * The server clamps/plausibility-caps this independently; this is just "what could plausibly apply."
+ */
+function computeOfflineIntervals(state: AppState, sinceIso: string, nowIso: string) {
+  const sinceMs = new Date(sinceIso).getTime();
+  const fromHistory = state.sessions
+    .filter((session) => (session.kind === "study" || session.kind === "exam") && new Date(session.endedAt).getTime() > sinceMs)
+    .map((session) => ({ startedAt: session.startedAt, endedAt: session.endedAt }));
+  const fromActiveTimer = state.timer.phase === "study" || state.timer.phase === "exam"
+    ? closeTimerSegments(state.timer, nowIso).filter((segment) => new Date(segment.endedAt).getTime() > sinceMs)
+    : [];
+  return [...fromHistory, ...fromActiveTimer];
+}
+
 function getNewLifetimeTotals(state: AppState, sessions: StudySession[]) {
   return sessions
     .filter((session) => session.kind === "study" || session.kind === "exam")
@@ -2516,6 +3355,11 @@ function formatFeedPostedAt(value: string) {
 }
 
 const WABI_ATTENDANCE_WINDOW_MS = 48 * 60 * 60 * 1000;
+// Must match VERIFIED_SESSION_HEARTBEAT_MS / VERIFIED_SESSION_GRACE_MS in cloudflare/src/index.ts —
+// used client-side only to decide when a gap is worth reconciling, not as an authoritative bound
+// (the server independently derives and enforces its own boundary).
+const VERIFIED_SESSION_HEARTBEAT_MS = 15 * 60 * 1000;
+const VERIFIED_SESSION_GRACE_MS = 5 * 60 * 1000;
 
 function isRecentlyActive(value: string | null | undefined, maxAgeMs = 45 * 60 * 1000) {
   const timestamp = parseSocialTimestamp(value);
@@ -3334,6 +4178,8 @@ function App() {
   const verifiedSessionRef = useRef<string | null>(null);
   const timerRunningRef = useRef(state.timer.running);
   timerRunningRef.current = state.timer.running;
+  const attemptVerifiedSyncRef = useRef<() => void>(() => {});
+  const reconcilingOfflineCreditRef = useRef(false);
   const pendingSaveRef = useRef<AppState | null>(null);
   const socialSyncInProgressRef = useRef(false);
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
@@ -3820,10 +4666,15 @@ function App() {
 
   useEffect(() => {
     if (!isTauriApp()) return;
+    const verifiedSessionActive = isSocialApiConfigured()
+      && state.timer.running
+      && state.timer.phase !== "idle"
+      && state.timer.phase !== "break";
     void invoke("set_timer_tray_state", {
       phase: state.timer.phase,
       running: state.timer.running,
       remainingSeconds: Math.max(0, Math.floor(state.timer.remainingSeconds)),
+      verifiedSessionActive,
     }).catch((error: unknown) => {
       console.warn("Timer tray state could not be updated.", error);
     });
@@ -4209,10 +5060,70 @@ function App() {
     let heartbeatInterval: number | undefined;
     const social = state.social;
 
+    // Offline credit is measured from the PREVIOUS anchor (the last point the server actually
+    // acknowledged) forward to the moment a call succeeds again — i.e. only triggers once a real
+    // gap (longer than the heartbeat+grace window) is confirmed to have closed, never on the
+    // ordinary 15-minute cadence.
+    const maybeReconcileOffline = (previousAnchor: SocialState["verifiedAnchor"], confirmedAt: string) => {
+      if (!previousAnchor || reconcilingOfflineCreditRef.current) return;
+      const staleMs = new Date(confirmedAt).getTime() - new Date(previousAnchor.confirmedAt).getTime();
+      if (staleMs <= VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS) return;
+
+      const intervals = computeOfflineIntervals(latestStateRef.current, previousAnchor.confirmedAt, confirmedAt);
+      if (!intervals.length) return;
+
+      reconcilingOfflineCreditRef.current = true;
+      void reconcileOfflineVerifiedCredit(social, { anchorSessionId: previousAnchor.sessionId, intervals })
+        .then((result) => {
+          if (result.cappedFromClaimedMinutes > 0) {
+            setMessage(`${result.cappedFromClaimedMinutes} offline minute${result.cappedFromClaimedMinutes === 1 ? "" : "s"} could not be verified.`);
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          reconcilingOfflineCreditRef.current = false;
+        });
+    };
+
+    const confirmAnchor = (sessionId: string) => {
+      const previousAnchor = latestStateRef.current.social.verifiedAnchor;
+      const confirmedAt = new Date().toISOString();
+      setState((current) => ({ ...current, social: { ...current.social, verifiedAnchor: { sessionId, confirmedAt } } }));
+      maybeReconcileOffline(previousAnchor, confirmedAt);
+    };
+
+    const attemptHeartbeat = (sessionId: string) => {
+      void heartbeatVerifiedSession(social, sessionId)
+        .then(() => confirmAnchor(sessionId))
+        .catch(() => undefined);
+    };
+
     const scheduleHeartbeats = (sessionId: string) => {
-      heartbeatInterval = window.setInterval(() => {
-        void heartbeatVerifiedSession(social, sessionId).catch(() => undefined);
-      }, 15 * 60 * 1000);
+      heartbeatInterval = window.setInterval(() => attemptHeartbeat(sessionId), VERIFIED_SESSION_HEARTBEAT_MS);
+    };
+
+    const attemptStart = () => {
+      void startVerifiedSession(social)
+        .then(({ sessionId }) => {
+          if (disposed || !timerRunningRef.current) {
+            return finishVerifiedSession(social, sessionId).catch(() => undefined);
+          }
+          verifiedSessionRef.current = sessionId;
+          confirmAnchor(sessionId);
+          scheduleHeartbeats(sessionId);
+          return undefined;
+        })
+        .catch(() => undefined);
+    };
+
+    // Ground-truth reconnect detection is "the next verified-session call actually succeeds" —
+    // the `online` listener below just calls this sooner as a latency optimization; it never
+    // substitutes for it (`navigator.onLine` only reflects the network interface, not whether
+    // the Worker is actually reachable).
+    attemptVerifiedSyncRef.current = () => {
+      if (!eligible || disposed) return;
+      if (verifiedSessionRef.current) attemptHeartbeat(verifiedSessionRef.current);
+      else attemptStart();
     };
 
     if (!eligible) {
@@ -4225,16 +5136,7 @@ function App() {
     if (verifiedSessionRef.current) {
       scheduleHeartbeats(verifiedSessionRef.current);
     } else {
-      void startVerifiedSession(social)
-        .then(({ sessionId }) => {
-          if (disposed || !timerRunningRef.current) {
-            return finishVerifiedSession(social, sessionId).catch(() => undefined);
-          }
-          verifiedSessionRef.current = sessionId;
-          scheduleHeartbeats(sessionId);
-          return undefined;
-        })
-        .catch(() => undefined);
+      attemptStart();
     }
 
     return () => {
@@ -4242,6 +5144,12 @@ function App() {
       if (heartbeatInterval !== undefined) window.clearInterval(heartbeatInterval);
     };
   }, [socialConfigured, state.social.deviceSecret, state.social.userId, state.timer.phase, state.timer.running]);
+
+  useEffect(() => {
+    const handleOnline = () => attemptVerifiedSyncRef.current();
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, []);
   const lastSocialSyncLabel = state.social.lastSyncedAt ? `${formatDate(state.social.lastSyncedAt)} ${new Date(state.social.lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Never";
   const socialFriendIds = new Set(state.social.friends.map((friend) => friend.userId));
   const outgoingFriendRequestCodes = new Set(state.social.outgoingFriendRequests.map((request) => request.toFriendCode));

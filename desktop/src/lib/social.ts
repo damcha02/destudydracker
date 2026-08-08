@@ -547,6 +547,36 @@ export async function finishVerifiedSession(social: SocialState, sessionId: stri
   });
 }
 
+/**
+ * Payload-integrity checksum only, not a security boundary: proves the interval data that
+ * arrived at the server is exactly what this function hashed, nothing more (it does not, and
+ * cannot, prove the underlying session data wasn't edited before this function ran — the hashing
+ * logic ships in this same client bundle, so anyone willing to recompute it can match it).
+ * Must stay byte-identical to the worker's canonicalization in handleVerifiedSessionReconcileOffline.
+ */
+async function hashOfflineIntervals(intervals: Array<{ startedAt: string; endedAt: string }>) {
+  const canonical = JSON.stringify(intervals.map((interval) => ({ startedAt: interval.startedAt, endedAt: interval.endedAt })));
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Credits genuinely-offline study time once the client reconnects. `anchorSessionId` is the
+ * verified session the offline gap follows; the server derives the authoritative gap boundary
+ * from its own record of that session, never from a client-supplied timestamp. `intervals` are
+ * clamped and plausibility-capped server-side — see handleVerifiedSessionReconcileOffline.
+ */
+export async function reconcileOfflineVerifiedCredit(
+  social: SocialState,
+  payload: { anchorSessionId: string; intervals: Array<{ startedAt: string; endedAt: string }> },
+) {
+  const chainTipHash = await hashOfflineIntervals(payload.intervals);
+  return requestSocialApi<{ ok: boolean; creditedMinutes: number; cappedFromClaimedMinutes: number; flagged: boolean }>("/verified-session/reconcile-offline", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, ...payload, chainTipHash }),
+  });
+}
+
 export async function createSquad(social: SocialState, name: string, isPrivate: boolean) {
   return requestSocialApi<SocialSyncResponse>("/squads/create", {
     method: "POST",

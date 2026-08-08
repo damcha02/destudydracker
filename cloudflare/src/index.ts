@@ -122,6 +122,10 @@ const MAX_LOG_DETAIL_LENGTH = 300;
 const VERIFIED_SESSION_HEARTBEAT_MS = 15 * 60 * 1000;
 const VERIFIED_SESSION_GRACE_MS = 5 * 60 * 1000;
 const VERIFIED_SESSION_MAX_MS = 4 * 60 * 60 * 1000;
+// Hard ceiling per offline-credit reconciliation call, independent of the plausibility-rate cap
+// below — bounds worst-case payload/claim size (e.g. a multi-day trip) rather than daily rate.
+const OFFLINE_RECONCILE_MAX_CLAIM_MS = 24 * 60 * 60 * 1000;
+const MAX_OFFLINE_INTERVALS = 500;
 
 const avatarStyles = new Set<SocialAvatarStyle>(["classic", "serif", "cursive", "graffiti", "pixel", "mono"]);
 const avatarIcons = new Set(["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐", "🚀", "🎯", "🏆", "🛡", "🦉", "🐢", "🐺", "🐱", "🍄", "🌙", "🌸", "🍀", "💎", "🎲", "🎧", "📝", "🔮", "🧩", "🕹", "📖", "🧪", "🛰", "🌌", "🦊"]);
@@ -331,6 +335,18 @@ async function hmacHex(secret: string, value: string) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
   return toHex(signature);
+}
+
+/**
+ * Plain (unkeyed) SHA-256 of a value — used only as a self-consistency check on client-submitted
+ * offline-credit intervals (does the payload match the hash the client claims for it), not as an
+ * auth/anti-forgery boundary. The hashing algorithm ships in the client bundle, so anyone willing
+ * to recompute it can produce a matching hash for fabricated data; it only catches naive,
+ * unintentional edits to already-stored data (e.g. a stray localStorage tweak), same caveat as
+ * any client-side integrity check over data the client itself controls.
+ */
+async function sha256Hex(value: string) {
+  return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
 }
 
 /** Requires IP_HASH_SECRET — throws (fail closed) if it's not bound. Never falls back to an empty/default key. */
@@ -580,6 +596,175 @@ async function handleVerifiedSessionFinish(request: Request, env: Env) {
   return json({ ok: true, ...(await finishVerifiedSession(env, session)) });
 }
 
+/**
+ * Ceiling on how many minutes could plausibly accrue in `elapsedMinutes` of wall-clock time,
+ * per MAX_PLAUSIBLE_STUDY_MINUTES_PER_DAY, with a small grace buffer for clock skew/batched syncs.
+ * Shared by the regular /sync growth check (upsertUser) and offline-credit reconciliation.
+ */
+function maxPlausibleMinutes(elapsedMinutes: number): number {
+  const maxPlausibleDelta = (elapsedMinutes / (24 * 60)) * MAX_PLAUSIBLE_STUDY_MINUTES_PER_DAY;
+  return Math.max(elapsedMinutes + 5, maxPlausibleDelta);
+}
+
+/**
+ * Per-day-bucket credit split for an arbitrary list of (possibly disjoint) intervals — the
+ * offline-reconciliation analog of `verifiedSessionCredits`, which only handles a single
+ * contiguous span. One "session" credit is attributed to each interval's start date.
+ */
+function bucketOfflineCredits(intervals: Array<{ start: Date; end: Date }>) {
+  const credits = new Map<string, { minutes: number; sessions: number }>();
+  const bump = (date: string, minutes: number, sessions: number) => {
+    const existing = credits.get(date) ?? { minutes: 0, sessions: 0 };
+    credits.set(date, { minutes: existing.minutes + minutes, sessions: existing.sessions + sessions });
+  };
+  for (const { start, end } of intervals) {
+    const totalMinutes = Math.max(0, Math.floor((end.getTime() - start.getTime()) / 60_000));
+    for (let minute = 0; minute < totalMinutes; minute += 1) {
+      bump(serverDateIso(new Date(start.getTime() + minute * 60_000)), 1, 0);
+    }
+    if (totalMinutes > 0) bump(serverDateIso(start), 0, 1);
+  }
+  return credits;
+}
+
+/**
+ * Truncates a chronologically-sorted list of intervals to at most `capMinutes` total, clipping
+ * (not dropping) whichever interval straddles the boundary — earliest offline time is credited
+ * first, anything past the cap is left uncredited (surfaced to the user, not silently claimed).
+ */
+function capIntervalsToMinutes(intervals: Array<{ start: Date; end: Date }>, capMinutes: number) {
+  const sorted = [...intervals].sort((a, b) => a.start.getTime() - b.start.getTime());
+  let claimedMinutes = 0;
+  let remaining = Math.max(0, Math.floor(capMinutes));
+  const capped: Array<{ start: Date; end: Date }> = [];
+  for (const interval of sorted) {
+    const minutes = Math.max(0, Math.floor((interval.end.getTime() - interval.start.getTime()) / 60_000));
+    claimedMinutes += minutes;
+    if (remaining <= 0 || minutes <= 0) continue;
+    if (minutes <= remaining) {
+      capped.push(interval);
+      remaining -= minutes;
+    } else {
+      capped.push({ start: interval.start, end: new Date(interval.start.getTime() + remaining * 60_000) });
+      remaining = 0;
+    }
+  }
+  const creditedMinutes = capped.reduce((sum, i) => sum + Math.max(0, Math.floor((i.end.getTime() - i.start.getTime()) / 60_000)), 0);
+  return { capped, claimedMinutes, creditedMinutes };
+}
+
+/**
+ * Credits genuinely-offline study time once the client reconnects. Offline time is inherently
+ * lower-trust than a live-witnessed heartbeat (the client controls its own clock), so this never
+ * merges into `verified_daily_stats` — it lands in a separate `verified_daily_stats_offline`
+ * table, is bounded by the same plausibility-rate cap as the regular /sync path plus a hard
+ * per-claim ceiling, and is routed through the existing weak-signal flagging machinery rather
+ * than trusted outright.
+ */
+async function handleVerifiedSessionReconcileOffline(request: Request, env: Env) {
+  const payload = await readJson<{
+    userId: string;
+    deviceSecret: string;
+    anchorSessionId: string;
+    intervals: Array<{ startedAt: string; endedAt: string }>;
+    chainTipHash?: string;
+  }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const anchorSessionId = requiredText(payload.anchorSessionId, "anchorSessionId", MAX_ID_LENGTH);
+
+  const anchor = await env.DB.prepare(`
+    SELECT id, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt,
+      credited_minutes AS creditedMinutes, status
+    FROM verified_study_sessions WHERE id = ? AND user_id = ?
+  `).bind(anchorSessionId, userId).first<{ id: string; startedAt: string; lastHeartbeatAt: string; creditedMinutes: number; status: string }>();
+  if (!anchor) return text("Verified session not found.", 404);
+
+  const anchorStartedAt = parseServerTimestamp(anchor.startedAt);
+  if (!anchorStartedAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
+
+  // Authoritative gap start is derived server-side from where the live-heartbeat path's own cap
+  // already left off — never from a client-supplied timestamp — so offline credit can only begin
+  // where live credit stopped, with no overlap/double-counting between the two tiers.
+  let gapStart: Date;
+  if (anchor.status === "finished") {
+    gapStart = new Date(anchorStartedAt.getTime() + anchor.creditedMinutes * 60_000);
+  } else {
+    const lastHeartbeatAt = parseServerTimestamp(anchor.lastHeartbeatAt);
+    if (!lastHeartbeatAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
+    gapStart = new Date(Math.min(
+      anchorStartedAt.getTime() + VERIFIED_SESSION_MAX_MS,
+      lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS,
+    ));
+  }
+
+  const now = new Date();
+  const rawIntervals = Array.isArray(payload.intervals) ? payload.intervals.slice(0, MAX_OFFLINE_INTERVALS) : [];
+  const intervals: Array<{ start: Date; end: Date }> = [];
+  for (const raw of rawIntervals) {
+    const start = parseServerTimestamp(String(raw?.startedAt ?? ""));
+    const end = parseServerTimestamp(String(raw?.endedAt ?? ""));
+    if (!start || !end || end <= start) continue;
+    // Clamp to the actual gap — time already covered by the live path, or claimed in the future,
+    // is never eligible for offline credit regardless of what the client sends.
+    const clampedStart = new Date(Math.max(start.getTime(), gapStart.getTime()));
+    const clampedEnd = new Date(Math.min(end.getTime(), now.getTime()));
+    if (clampedEnd > clampedStart) intervals.push({ start: clampedStart, end: clampedEnd });
+  }
+
+  // Tamper-evidence only, not an auth boundary (see sha256Hex doc comment) — recorded for audit,
+  // never used to reject or grant additional trust to the claim. Hashed over the RAW submitted
+  // intervals (pre-clamp) so an honest client's own hash of what it's sending actually matches —
+  // clamping/capping is a separate plausibility check applied after this, not part of the hash.
+  const canonicalIntervals = JSON.stringify(rawIntervals.map((raw) => ({ startedAt: String(raw?.startedAt ?? ""), endedAt: String(raw?.endedAt ?? "") })));
+  const recomputedHash = await sha256Hex(canonicalIntervals);
+  const chainVerified = typeof payload.chainTipHash === "string" && payload.chainTipHash === recomputedHash;
+
+  const elapsedMinutesSinceGap = Math.max(0, (now.getTime() - gapStart.getTime()) / 60_000);
+  const capMinutes = Math.min(maxPlausibleMinutes(elapsedMinutesSinceGap), OFFLINE_RECONCILE_MAX_CLAIM_MS / 60_000);
+  const { capped, claimedMinutes, creditedMinutes } = capIntervalsToMinutes(intervals, capMinutes);
+  const wasCapped = creditedMinutes < claimedMinutes;
+
+  const credits = bucketOfflineCredits(capped);
+  if (credits.size) {
+    const statements: D1PreparedStatement[] = [];
+    for (const [date, { minutes, sessions }] of credits) {
+      statements.push(env.DB.prepare(`
+        INSERT INTO verified_daily_stats_offline (user_id, date, minutes, sessions, updated_at)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, date) DO UPDATE SET
+          minutes = verified_daily_stats_offline.minutes + excluded.minutes,
+          sessions = verified_daily_stats_offline.sessions + excluded.sessions,
+          updated_at = CURRENT_TIMESTAMP
+      `).bind(userId, date, minutes, sessions));
+    }
+    await env.DB.batch(statements);
+  }
+
+  await env.DB.prepare(`
+    INSERT INTO verified_offline_reconciliations
+      (id, user_id, anchor_session_id, gap_started_at, gap_ended_at, claimed_minutes, credited_minutes, was_capped, chain_tip_hash, chain_verified)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(crypto.randomUUID(), userId, anchorSessionId, gapStart.toISOString(), now.toISOString(), claimedMinutes, creditedMinutes, wasCapped ? 1 : 0, payload.chainTipHash ?? null, chainVerified ? 1 : 0).run();
+
+  // Ordinary, uncapped reconciliation isn't a flag signal at all — using the feature as intended
+  // is expected behavior, and it's already recorded in verified_offline_reconciliations for audit.
+  // "offline_credit_capped" is deliberately NOT in STANDALONE_FLAG_REASONS, and deliberately the
+  // *only* reason passed here: a single capped claim (e.g. a laptop asleep 10h with 3h legitimately
+  // studied) must not auto-flag on its own — it needs one more distinct reason (from anywhere:
+  // honeypot, atypical friend code, implausible /sync growth, etc.) to cross the 2-reason threshold.
+  if (wasCapped) await maybeFlagUser(env, userId, ["offline_credit_capped"], request);
+
+  const flaggedRow = await env.DB.prepare("SELECT is_flagged AS isFlagged FROM users WHERE id = ?").bind(userId).first<{ isFlagged: number }>();
+
+  return json({
+    ok: true,
+    creditedMinutes,
+    cappedFromClaimedMinutes: Math.max(0, claimedMinutes - creditedMinutes),
+    flagged: Boolean(flaggedRow?.isFlagged),
+  });
+}
+
 async function upsertUser(env: Env, payload: SyncPayload["user"], request: Request) {
   const userId = cleanUserId(payload.userId);
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
@@ -636,10 +821,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
     if (priorUpdatedAt && !Number.isNaN(priorUpdatedAt.getTime())) {
       const elapsedMinutes = Math.max(0, (Date.now() - priorUpdatedAt.getTime()) / 60_000);
       const deltaMinutes = lifetimeStudyMinutes - priorMinutes;
-      const maxPlausibleDelta = (elapsedMinutes / (24 * 60)) * MAX_PLAUSIBLE_STUDY_MINUTES_PER_DAY;
-      const impossibleGrowth = deltaMinutes > elapsedMinutes + 5; // small grace buffer for clock skew/batched syncs
-      const sustainedUnrealisticRate = elapsedMinutes > 0 && deltaMinutes > maxPlausibleDelta;
-      if (impossibleGrowth || sustainedUnrealisticRate) flagReasons.push("implausible_stat_growth");
+      if (deltaMinutes > maxPlausibleMinutes(elapsedMinutes)) flagReasons.push("implausible_stat_growth");
     }
 
     await env.DB.prepare(`
@@ -2936,6 +3118,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/verified-session/start") return await handleVerifiedSessionStart(request, env);
       if (request.method === "POST" && url.pathname === "/verified-session/heartbeat") return await handleVerifiedSessionHeartbeat(request, env);
       if (request.method === "POST" && url.pathname === "/verified-session/finish") return await handleVerifiedSessionFinish(request, env);
+      if (request.method === "POST" && url.pathname === "/verified-session/reconcile-offline") return await handleVerifiedSessionReconcileOffline(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);
       if (request.method === "POST" && url.pathname === "/feed/comment") return await handleFeedComment(request, env);

@@ -11,12 +11,20 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+use tauri_plugin_notification::NotificationExt;
 
 #[cfg(target_os = "linux")]
 const LATEST_UPDATE_JSON_URL: &str =
     "https://github.com/damcha02/destudydracker/releases/latest/download/latest.json";
 const TIMER_TRAY_ID: &str = "study-tracker-timer";
 static LAST_TRAY_ICON_PHASE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+// Whether a verified study session is currently active, per the frontend's own eligibility check
+// (App.tsx). Closing the main window only hides it (instead of quitting) while this is true, so
+// an in-progress session survives the close button; closing while idle still quits as before.
+static VERIFIED_SESSION_ACTIVE: OnceLock<Mutex<bool>> = OnceLock::new();
+// Session-scoped (not persisted across restarts) — just enough to avoid repeating the
+// hide-to-tray notice on every close click within a single run of the app.
+static TRAY_CLOSE_NOTICE_SHOWN: OnceLock<Mutex<bool>> = OnceLock::new();
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -372,7 +380,15 @@ fn set_timer_tray_state(
     phase: String,
     running: bool,
     remaining_seconds: u32,
+    verified_session_active: bool,
 ) -> Result<(), String> {
+    if let Ok(mut active) = VERIFIED_SESSION_ACTIVE
+        .get_or_init(|| Mutex::new(false))
+        .lock()
+    {
+        *active = verified_session_active;
+    }
+
     let Some(tray) = app.tray_by_id(TIMER_TRAY_ID) else {
         return Ok(());
     };
@@ -1102,6 +1118,45 @@ pub fn run() {
                 enable_native_fullscreen(&window);
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            let session_active = VERIFIED_SESSION_ACTIVE
+                .get_or_init(|| Mutex::new(false))
+                .lock()
+                .map(|guard| *guard)
+                .unwrap_or(false);
+            if !session_active {
+                return;
+            }
+            // A study session is running — hide instead of quitting so it isn't interrupted.
+            // The tray's own "Quit" menu item remains the real, visible way to fully exit.
+            api.prevent_close();
+            let _ = window.hide();
+
+            let already_shown = TRAY_CLOSE_NOTICE_SHOWN.get_or_init(|| Mutex::new(false));
+            let should_notify = already_shown
+                .lock()
+                .map(|mut shown| {
+                    let first_time = !*shown;
+                    *shown = true;
+                    first_time
+                })
+                .unwrap_or(false);
+            if should_notify {
+                let _ = window
+                    .app_handle()
+                    .notification()
+                    .builder()
+                    .title("Study Tracker is still running")
+                    .body("Your session keeps tracking in the tray. Right-click the tray icon to quit.")
+                    .show();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             create_obsidian_vault,

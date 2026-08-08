@@ -8046,7 +8046,9 @@ input[type="color"] {
 
 .jg-ground::after {
   opacity: 0.3;
-  background-image: repeating-linear-gradient(100deg, color-mix(in oklab, var(--ink-4), transparent 45%) 0px, transparent 1.4px 26px);
+  background-image:
+    repeating-linear-gradient(100deg, color-mix(in oklab, var(--ink-4), transparent 45%) 0px, transparent 1.4px 26px),
+    repeating-radial-gradient(120% 60% at 50% 118%, transparent 0 11px, color-mix(in oklab, var(--ink-4), transparent 65%) 11px 12px);
   background-size: auto;
   background-position: 0 0;
 }
@@ -8055,51 +8057,85 @@ input[type="color"] {
   opacity: 0.4;
   background-image:
     repeating-linear-gradient(100deg, color-mix(in oklab, var(--ink-4), transparent 55%) 0px, transparent 1.4px 26px),
+    repeating-radial-gradient(120% 60% at 50% 118%, transparent 0 11px, color-mix(in oklab, var(--ink-4), transparent 65%) 11px 12px),
     radial-gradient(ellipse at 30% 60%, color-mix(in oklab, var(--garden), transparent 45%), transparent 65%);
 }
 
-.jg-river {
+.jg-hills {
   position: absolute;
-  inset: 0;
-  z-index: 1;
-  opacity: 0.85;
-}
-
-.jg-river svg {
+  left: 0;
+  right: 0;
+  bottom: 38%;
   width: 100%;
-  height: 100%;
+  height: 22%;
+  opacity: 0.3;
+  pointer-events: none;
 }
 
-.jg-river path {
-  fill: none;
-  stroke: color-mix(in oklab, var(--accent), var(--garden-sky) 35%);
-  stroke-width: 3.5;
-  stroke-linecap: round;
+.jg-hills path {
+  fill: oklch(0.42 0.055 155);
+}
+
+.jg-moon {
+  position: absolute;
+  top: 12px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--garden-deep), white 55%);
+  opacity: 0.16;
+  pointer-events: none;
 }
 
 .jg-petal {
-  position: absolute;
-  top: -6%;
-  width: 6px;
-  height: 6px;
-  border-radius: 60% 10% 60% 10%;
-  background: color-mix(in oklab, oklch(0.85 0.07 350), white 20%);
-  opacity: 0.85;
   z-index: 44;
+  pointer-events: none;
+}
+
+.jg-koi,
+.jg-ripple,
+.jg-flow {
   pointer-events: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .jg-petal {
-    animation: jgPetalFall var(--jg-dur, 8s) linear var(--jg-del, 0s) infinite;
+    animation: jgFall var(--jg-dur, 9s) linear var(--jg-del, 0s) infinite;
+  }
+
+  .jg-koi {
+    animation: jgSwim var(--jg-dur, 16s) ease-in-out var(--jg-del, 0s) infinite alternate;
+  }
+
+  .jg-ripple {
+    animation: jgRipple var(--jg-dur, 5s) ease-out var(--jg-del, 0s) infinite;
+  }
+
+  .jg-flow {
+    animation: jgFlow var(--jg-dur, 7s) linear var(--jg-del, 0s) infinite;
   }
 }
 
-@keyframes jgPetalFall {
-  0% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-  10% { opacity: 0.85; }
-  90% { opacity: 0.7; }
-  100% { transform: translate(var(--jg-drift, 20px), 128%) rotate(220deg); opacity: 0; }
+@keyframes jgFall {
+  0% { opacity: 0; transform: translate(0, -8px) rotate(0deg); }
+  12% { opacity: 0.9; }
+  100% { transform: translate(-34px, 150px) rotate(220deg); opacity: 0; }
+}
+
+@keyframes jgSwim {
+  0% { transform: translate(-14px, 3px) rotate(-8deg); }
+  50% { transform: translate(10px, -4px) rotate(6deg); }
+  100% { transform: translate(20px, 4px) rotate(-4deg); }
+}
+
+@keyframes jgRipple {
+  0% { transform: scale(0.35); opacity: 0.5; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+@keyframes jgFlow {
+  to { stroke-dashoffset: var(--jg-off, -120); }
 }
 
 .planner-stack {

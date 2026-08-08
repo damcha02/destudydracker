@@ -297,6 +297,8 @@ export interface SocialState {
   pendingFeedPostDeletions: string[];
   cachedLeaderboards: Record<SocialLeaderboardScope, Record<SocialLeaderboardPeriod, SocialLeaderboardEntry[]>>;
   cachedSquadScoreLeaderboards: Record<SocialSquadScorePeriod, SocialSquadScoreEntry[]>;
+  /** The last point the server actually acknowledged a verified-session call — the boundary offline credit is measured from. */
+  verifiedAnchor: { sessionId: string; confirmedAt: string } | null;
 }
 
 export interface TimerActiveSegment {
