@@ -47,6 +47,7 @@ import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsRespo
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
+import { pauseCountdownTimer, pauseStopwatchTimer, resumeCountdownTimer, resumeStopwatchTimer } from "./lib/timerTransitions";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
@@ -8842,60 +8843,20 @@ function App() {
 
       if (timer.phase === "stopwatch") {
         if (timer.running) {
-          const pausedAt = new Date().toISOString();
           endlessContinuousStartedAtRef.current = null;
           clearEndlessInactivityPrompt();
-          return {
-            ...current,
-            timer: {
-              ...timer,
-              running: false,
-              activeSegments: (timer.activeSegments ?? []).map((segment) => segment.endedAt === null ? { ...segment, endedAt: pausedAt } : segment),
-            },
-          };
+          return { ...current, timer: pauseStopwatchTimer(timer) };
         }
-        const elapsed = getTimerActiveSeconds(timer);
-        const resumedAt = new Date().toISOString();
         endlessContinuousStartedAtRef.current = new Date().toISOString();
         clearEndlessInactivityPrompt();
-        return {
-          ...current,
-          timer: {
-            ...timer,
-            running: true,
-            startedAt: resumedAt,
-            remainingSeconds: elapsed,
-            activeSegments: [...(timer.activeSegments ?? []), { startedAt: resumedAt, endedAt: null }],
-          },
-        };
+        return { ...current, timer: resumeStopwatchTimer(timer) };
       }
 
       if (timer.running && timer.endsAt) {
-        const pausedAt = new Date().toISOString();
-        const diff = Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000));
-        return {
-          ...current,
-          timer: {
-            ...timer,
-            running: false,
-            endsAt: null,
-            remainingSeconds: diff,
-            activeSegments: (timer.activeSegments ?? []).map((segment) => segment.endedAt === null ? { ...segment, endedAt: pausedAt } : segment),
-          },
-        };
+        return { ...current, timer: pauseCountdownTimer(timer, timer.endsAt) };
       }
 
-      const resumedAt = new Date().toISOString();
-      return {
-        ...current,
-        timer: {
-          ...timer,
-          running: true,
-          startedAt: resumedAt,
-          endsAt: new Date(Date.now() + timer.remainingSeconds * 1000).toISOString(),
-          activeSegments: [...(timer.activeSegments ?? []), { startedAt: resumedAt, endedAt: null }],
-        },
-      };
+      return { ...current, timer: resumeCountdownTimer(timer) };
     });
   }
 
