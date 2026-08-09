@@ -43,7 +43,7 @@ import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, de
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
-import { closeTimerSegments, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
+import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
 import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
@@ -4488,7 +4488,6 @@ function App() {
         if (timer.phase === "stopwatch") {
           if (!timer.startedAt) return current;
           const now = new Date();
-          const elapsed = getTimerActiveSeconds(timer);
           const prompt = endlessInactivityPromptRef.current;
           if (prompt) {
             if (now.getTime() - new Date(prompt.promptedAt).getTime() >= ENDLESS_INACTIVITY_GRACE_MS) {
@@ -4516,8 +4515,10 @@ function App() {
               return next;
             }
 
-            if (elapsed === timer.remainingSeconds) return current;
-            return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+            // Display value is derived on demand (getDisplayRemainingSeconds) instead of
+            // being written to state every tick; this tick only needs to poll for the
+            // inactivity-grace-period transition above.
+            return current;
           }
 
           if (!endlessContinuousStartedAtRef.current) {
@@ -4530,8 +4531,7 @@ function App() {
             void sendTimerNotification("Are you still here?", "Confirm that you are still studying to keep the endless timer running.");
           }
 
-          if (elapsed === timer.remainingSeconds) return current;
-          return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+          return current;
         }
 
         const endsAt = timer.endsAt;
@@ -4540,8 +4540,9 @@ function App() {
         const now = new Date();
         const diff = Math.ceil((new Date(endsAt).getTime() - now.getTime()) / 1000);
         if (diff > 0) {
-          if (diff === timer.remainingSeconds) return current;
-          return { ...current, timer: { ...timer, remainingSeconds: diff } };
+          // Same reasoning as the stopwatch branch above: this tick only needs to detect
+          // whether endsAt has been crossed yet, not keep remainingSeconds fresh in state.
+          return current;
         }
 
         const endedAt = new Date(new Date(endsAt).getTime()).toISOString();
@@ -8708,7 +8709,7 @@ function App() {
         presetLabel: label,
         phase: current.timer.running ? current.timer.phase : "idle",
         remainingSeconds: current.timer.running
-          ? current.timer.remainingSeconds
+          ? getDisplayRemainingSeconds(current.timer)
           : getIdleTimerSeconds({
               mode,
               studyMinutes: mode === "exam" ? current.timer.studyMinutes : study,
@@ -10929,7 +10930,7 @@ function App() {
                         ...current,
                         timer: {
                           ...timer,
-                          remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                          remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer),
                         },
                       };
                     });
@@ -11123,7 +11124,7 @@ function App() {
                         };
                         return {
                           ...current,
-                          timer: { ...timer, remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer) },
+                          timer: { ...timer, remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer) },
                         };
                       });
                     }}
@@ -13574,7 +13575,7 @@ function App() {
                             ...current,
                             timer: {
                               ...timer,
-                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                              remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer),
                             },
                           };
                         });

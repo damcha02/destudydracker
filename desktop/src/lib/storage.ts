@@ -2,6 +2,7 @@ import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzle
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
+import { getDisplayRemainingSeconds } from "./timerDisplay";
 import { getWordleAnswerForDate, getWordlePuzzleId, makeWordleSeedSalt } from "./wordle";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
@@ -1096,7 +1097,20 @@ function stripAvatarCopiesForStorage(state: AppState): AppState {
 }
 
 export function saveAppState(state: AppState) {
-  const stateToSave: AppState = { ...state, timer: { ...state.timer, lastAliveAt: new Date().toISOString() } };
+  const now = new Date();
+  const stateToSave: AppState = {
+    ...state,
+    timer: {
+      ...state.timer,
+      // Steady 500ms ticks no longer write remainingSeconds into React state (Phase 1 perf
+      // change) to avoid re-rendering the whole app every tick. Persistence still needs an
+      // accurate snapshot for force-close recovery — storage.ts's rehydrateTimer "stale but
+      // not abandoned" branch (5min-6h heartbeat gap) trusts this field as-is for study/exam
+      // timers rather than recomputing it — so derive it fresh at write time instead.
+      remainingSeconds: state.timer.running ? getDisplayRemainingSeconds(state.timer, now) : state.timer.remainingSeconds,
+      lastAliveAt: now.toISOString(),
+    },
+  };
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
   } catch (error) {
