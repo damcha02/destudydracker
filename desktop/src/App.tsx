@@ -43,7 +43,8 @@ import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, de
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
+import { closeTimerSegments, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
@@ -2964,61 +2965,10 @@ function getTimeGreeting(date = new Date()) {
   return "Good night";
 }
 
-function getConfiguredTimerSeconds(timer: Pick<TimerState, "phase" | "mode" | "studyMinutes" | "examMinutes">) {
-  return timer.phase === "exam" || timer.mode === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
-}
-
-function closeTimerSegments(timer: TimerState, endedAt: string): Array<{ startedAt: string; endedAt: string }> {
-  const fallbackSegments: TimerActiveSegment[] = [];
-  if (timer.startedAt && (timer.phase === "study" || timer.phase === "exam" || timer.phase === "stopwatch")) {
-    const startedAtMs = new Date(timer.startedAt).getTime();
-    if (Number.isFinite(startedAtMs)) {
-      const configuredSeconds = timer.phase === "stopwatch" ? Math.max(0, Math.floor(timer.remainingSeconds)) : getConfiguredTimerSeconds(timer);
-      const fallbackActiveSeconds = timer.phase === "stopwatch"
-        ? configuredSeconds
-        : clamp(configuredSeconds - timer.remainingSeconds - (timer.loggedSplitSeconds ?? 0), 0, configuredSeconds);
-      fallbackSegments.push({
-        startedAt: timer.startedAt,
-        endedAt: timer.running ? null : new Date(startedAtMs + fallbackActiveSeconds * 1000).toISOString(),
-      });
-    }
-  }
-  const segments = timer.activeSegments?.length ? timer.activeSegments : fallbackSegments;
-  const finalEndMs = new Date(endedAt).getTime();
-  return segments.flatMap((segment) => {
-    const startMs = new Date(segment.startedAt).getTime();
-    const segmentEndMs = new Date(segment.endedAt ?? endedAt).getTime();
-    const boundedEndMs = Math.min(segmentEndMs, finalEndMs);
-    if (!Number.isFinite(startMs) || !Number.isFinite(boundedEndMs) || boundedEndMs <= startMs) return [];
-    return [{ startedAt: segment.startedAt, endedAt: new Date(boundedEndMs).toISOString() }];
-  });
-}
-
-function getTimerActiveSeconds(timer: TimerState) {
-  if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return 0;
-
-  const activeSegments = closeTimerSegments(timer, new Date().toISOString());
-  if (activeSegments.length) {
-    return activeSegments.reduce((sum, segment) => {
-      const startMs = new Date(segment.startedAt).getTime();
-      const endMs = new Date(segment.endedAt).getTime();
-      return sum + Math.max(0, Math.floor((endMs - startMs) / 1000));
-    }, 0);
-  }
-
-  const configuredSeconds = getConfiguredTimerSeconds(timer);
-  return clamp(configuredSeconds - timer.remainingSeconds - (timer.loggedSplitSeconds ?? 0), 0, configuredSeconds);
-}
-
 function getTimerMinutes(timer: TimerState) {
   const activeSeconds = getTimerActiveSeconds(timer);
   if (activeSeconds <= 0) return 0;
   return Math.max(1, Math.round(activeSeconds / 60));
-}
-
-function getIdleTimerSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
-  if (timer.mode === "endless") return 0;
-  return (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60;
 }
 
 function keepTimerContext(timer: TimerState) {
