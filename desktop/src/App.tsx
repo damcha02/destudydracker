@@ -11,7 +11,10 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
+import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
+import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
+import { useTimerTick } from "./hooks/useTimerTick";
 import {
   buildDailyNoteMarkdown,
   calculateAggregateWorkload,
@@ -4123,6 +4126,8 @@ function App() {
   const summaryLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const latestStateRef = useRef(state);
+  const timerFaceRingRef = useRef<HTMLDivElement | null>(null);
+  const examFaceRingRef = useRef<HTMLDivElement | null>(null);
   const saveStateTimeoutRef = useRef<number | null>(null);
   const sessionSavePendingRef = useRef(false);
   const verifiedSessionRef = useRef<string | null>(null);
@@ -4615,21 +4620,24 @@ function App() {
     return () => window.clearInterval(interval);
   }, [state.timer.running]);
 
-  useEffect(() => {
+  // Ticks on its own (via useTimerTick, capped at 1/sec) instead of depending on a
+  // per-tick-written remainingSeconds field, and only ever calls invoke() - never setState -
+  // so it cannot itself trigger an App() re-render.
+  useTimerTick(state.timer, (timer) => {
     if (!isTauriApp()) return;
     const verifiedSessionActive = isSocialApiConfigured()
-      && state.timer.running
-      && state.timer.phase !== "idle"
-      && state.timer.phase !== "break";
+      && timer.running
+      && timer.phase !== "idle"
+      && timer.phase !== "break";
     void invoke("set_timer_tray_state", {
-      phase: state.timer.phase,
-      running: state.timer.running,
-      remainingSeconds: Math.max(0, Math.floor(state.timer.remainingSeconds)),
+      phase: timer.phase,
+      running: timer.running,
+      remainingSeconds: Math.max(0, Math.floor(getDisplayRemainingSeconds(timer))),
       verifiedSessionActive,
     }).catch((error: unknown) => {
       console.warn("Timer tray state could not be updated.", error);
     });
-  }, [state.timer.phase, state.timer.remainingSeconds, state.timer.running]);
+  }, 1000);
 
   useEffect(() => {
     if (state.timer.phase === "idle") {
@@ -5288,14 +5296,11 @@ function App() {
   const timerTask = state.timer.taskId ? taskLookup.get(state.timer.taskId) : null;
   const hasKnownTimerPreset = focusPresets.some((preset) => preset.label === state.timer.presetLabel);
   const isCustomTimerPreset = !hasKnownTimerPreset || state.timer.presetLabel === "Custom";
-  const timerConfiguredSeconds = state.timer.phase === "stopwatch"
-    ? 1
-    : state.timer.phase === "break"
-    ? Math.max(1, state.timer.breakMinutes * 60)
-    : Math.max(1, (state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes) * 60);
-  const timerProgress = state.timer.phase === "stopwatch"
-    ? 100
-    : clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
+  // The progress ring's --timer-progress CSS variable is mutated directly on these two
+  // elements by useTimerProgressRing's own interval, instead of flowing through a per-tick
+  // root AppState field and a declarative style prop - see hooks/useTimerProgressRing.ts.
+  useTimerProgressRing(timerFaceRingRef, state.timer);
+  useTimerProgressRing(examFaceRingRef, state.timer);
 
   const calendarDays = useMemo(
     () => (calendarView === "month" ? buildMonthDays(calendarCursorDate) : buildWeekDays(calendarCursorDate)),
@@ -11056,7 +11061,7 @@ function App() {
                 onClick={startTimerFaceEditing}
                 disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}
               >
-                {formatClock(state.timer.remainingSeconds)}
+                <TimerClockDigits timer={state.timer} formatClock={formatClock} />
               </button>
             )}
           </div>
@@ -11349,7 +11354,7 @@ function App() {
             ) : null}
           </div>
           <p className="wabi-quiet-meta">{focusMeta}</p>
-          <div className="wabi-quiet-clock">{formatClock(state.timer.remainingSeconds)}</div>
+          <div className="wabi-quiet-clock"><TimerClockDigits timer={state.timer} formatClock={formatClock} /></div>
           <div className="wabi-quiet-actions">
             <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
               {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
@@ -13602,14 +13607,14 @@ function App() {
                 </div>
               ) : null}
 
-              <div className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} data-tour="timer-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
+              <div ref={timerFaceRingRef} className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} data-tour="timer-face" style={{ "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
                 <div className="timer-phase-row">
                   <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
                   <span className="timer-context-title">{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
                 {appStyle === "modern" ? (
-                  <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+                  <strong><TimerClockDigits timer={state.timer} formatClock={formatClock} /></strong>
                 ) : timerFaceEditing ? (
                   <input
                     className="timer-face-input"
@@ -13631,7 +13636,7 @@ function App() {
                   />
                 ) : (
                   <button type="button" className="timer-face-time" onClick={startTimerFaceEditing} disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}>
-                    {formatClock(state.timer.remainingSeconds)}
+                    <TimerClockDigits timer={state.timer} formatClock={formatClock} />
                   </button>
                 )}
                 <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
@@ -16048,13 +16053,13 @@ function App() {
             Minimize
           </button>
 
-          <div className={`exam-fullscreen-face ${state.timer.running ? "running" : "paused"}`} style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
+          <div ref={examFaceRingRef} className={`exam-fullscreen-face ${state.timer.running ? "running" : "paused"}`} style={{ "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
             <div className="timer-phase-row">
               <span className="timer-phase-pill">{state.timer.phase === "exam" ? "Exam" : state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : "Study"}</span>
               <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
               <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
             </div>
-            <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+            <strong><TimerClockDigits timer={state.timer} formatClock={formatClock} /></strong>
             <p>{state.timer.running ? "In session" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
           </div>
 

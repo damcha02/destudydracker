@@ -71,3 +71,22 @@ export function getDisplayRemainingSeconds(timer: TimerState, now: Date = new Da
   if (!timer.endsAt) return timer.remainingSeconds;
   return Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - now.getTime()) / 1000));
 }
+
+/** Mirrors the formula that used to live inline in App() as the timerConfiguredSeconds const. */
+export function getTimerConfiguredSecondsForProgress(timer: Pick<TimerState, "phase" | "mode" | "studyMinutes" | "examMinutes" | "breakMinutes">): number {
+  if (timer.phase === "stopwatch") return 1;
+  if (timer.phase === "break") return Math.max(1, timer.breakMinutes * 60);
+  return Math.max(1, (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60);
+}
+
+/**
+ * Progress-ring percentage (0-100), mirroring the formula that used to live inline in App()
+ * as the timerProgress const, but deriving "seconds left" instead of reading a per-tick-
+ * written state field.
+ */
+export function getTimerProgressPercent(timer: TimerState, now: Date = new Date()): number {
+  if (timer.phase === "stopwatch") return 100;
+  const configuredSeconds = getTimerConfiguredSecondsForProgress(timer);
+  const remaining = getDisplayRemainingSeconds(timer, now);
+  return clamp(((configuredSeconds - remaining) / configuredSeconds) * 100, 0, 100);
+}

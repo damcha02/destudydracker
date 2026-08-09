@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultTimer } from "./storage";
-import { getDisplayRemainingSeconds, getTimerActiveSeconds } from "./timerDisplay";
+import { getDisplayRemainingSeconds, getTimerActiveSeconds, getTimerProgressPercent } from "./timerDisplay";
 import type { TimerState } from "../types";
 
 describe("getDisplayRemainingSeconds", () => {
@@ -63,5 +63,37 @@ describe("getDisplayRemainingSeconds", () => {
       activeSegments: [{ startedAt, endedAt: null }],
     };
     expect(getDisplayRemainingSeconds(timer, now)).toBe(90);
+  });
+});
+
+describe("getTimerProgressPercent", () => {
+  it("returns 50% at a countdown's midpoint", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "study", mode: "focus", studyMinutes: 20, running: false, remainingSeconds: 10 * 60 };
+    expect(getTimerProgressPercent(timer)).toBe(50);
+  });
+
+  it("returns 100% once a countdown has fully elapsed", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "study", mode: "focus", studyMinutes: 20, running: false, remainingSeconds: 0 };
+    expect(getTimerProgressPercent(timer)).toBe(100);
+  });
+
+  it("computes progress against breakMinutes during a break", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "break", breakMinutes: 10, running: false, remainingSeconds: 7 * 60 }; // 3 of 10 min elapsed
+    expect(getTimerProgressPercent(timer)).toBe(30);
+  });
+
+  it("is always 100% for a stopwatch, regardless of elapsed time", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "stopwatch", mode: "endless", running: false, remainingSeconds: 5 };
+    expect(getTimerProgressPercent(timer)).toBe(100);
+  });
+
+  it("clamps to 0% when remainingSeconds exceeds the configured duration", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "study", mode: "focus", studyMinutes: 10, running: false, remainingSeconds: 700 }; // > 600s configured
+    expect(getTimerProgressPercent(timer)).toBe(0);
+  });
+
+  it("clamps to 100% when remainingSeconds is negative", () => {
+    const timer: TimerState = { ...defaultTimer, phase: "study", mode: "focus", studyMinutes: 10, running: false, remainingSeconds: -50 };
+    expect(getTimerProgressPercent(timer)).toBe(100);
   });
 });
