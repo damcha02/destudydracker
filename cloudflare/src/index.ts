@@ -223,11 +223,40 @@ function parseAvatar(value: unknown, displayName: string): SocialAvatar {
   }
 }
 
-function parseListAvatar(value: unknown, displayName: string): SocialAvatar {
+export function parseListAvatar(value: unknown, displayName: string): SocialAvatar {
   const avatar = parseAvatar(value, displayName);
   if (avatar.kind !== "photo") return avatar;
   if (!avatar.url.startsWith("data:image/")) return avatar;
   return { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+}
+
+// Called on every sync so photo avatars never sit as raw base64 in avatar_json — a data: URI
+// avatar (client couldn't/didn't upload it, e.g. socialConfigured was false at save time) is
+// uploaded to R2 here instead, since parseListAvatar hides data: URIs from everyone but the
+// owner and nothing would otherwise ever retry the upload. Best-effort: on any upload failure
+// (decode error, R2 budget exceeded) falls back to a letter avatar rather than persisting the
+// base64 blob into D1, since sync must not hard-fail over an avatar issue.
+async function resolveAvatarForSync(
+  env: Env,
+  origin: string,
+  userId: string,
+  rawAvatar: unknown,
+  displayName: string,
+  existingAvatarJson: string | null | undefined,
+  existingAvatarSizeBytes: number | null | undefined,
+): Promise<{ avatarJson: string; avatarSizeBytes: number }> {
+  const avatar = cleanAvatar(rawAvatar, displayName);
+  if (avatar.kind !== "photo" || !avatar.url.startsWith("data:image/")) {
+    return { avatarJson: JSON.stringify(avatar), avatarSizeBytes: avatar.kind === "photo" ? Number(existingAvatarSizeBytes ?? 0) : 0 };
+  }
+  const image = profileAvatarBytesFromDataUrl(avatar.url);
+  const previousAvatar = parseAvatar(existingAvatarJson, displayName);
+  const uploaded = image
+    ? await uploadAvatarBytesToR2(env, origin, userId, image, avatar.name, previousAvatar, Number(existingAvatarSizeBytes ?? 0))
+    : null;
+  if (uploaded) return { avatarJson: JSON.stringify(uploaded), avatarSizeBytes: image!.bytes.byteLength };
+  const fallback: SocialAvatar = { kind: "letter", letter: firstAvatarLetter(displayName), style: "classic" };
+  return { avatarJson: JSON.stringify(fallback), avatarSizeBytes: 0 };
 }
 
 function serverDateIso(date = new Date()) {
@@ -770,7 +799,6 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const friendCode = cleanCode(payload.friendCode);
   const displayName = cleanName(payload.displayName);
-  const avatar = JSON.stringify(cleanAvatar(payload.avatar, displayName));
   const isPrivate = payload.isPrivate ? 1 : 0;
   const showHoursToFriends = payload.showHoursToFriends === false ? 0 : 1;
   const lifetimeStudyMinutes = cleanFiniteNumber(payload.lifetimeStudyMinutes, "lifetimeStudyMinutes", 10_000_000);
@@ -781,9 +809,19 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
   if (!userId || !deviceSecret || !friendCode) throw new Response("Missing user identity.", { status: 400, headers: corsHeaders });
 
   const existing = await env.DB.prepare(
-    "SELECT id, device_secret, device_secret_hash, lifetime_study_minutes, lifetime_study_sessions, updated_at FROM users WHERE id = ?"
-  ).bind(userId).first<{ id: string; device_secret: string; device_secret_hash: string | null; lifetime_study_minutes: number; lifetime_study_sessions: number; updated_at: string }>();
+    "SELECT id, device_secret, device_secret_hash, lifetime_study_minutes, lifetime_study_sessions, updated_at, avatar_json, avatar_size_bytes FROM users WHERE id = ?"
+  ).bind(userId).first<{ id: string; device_secret: string; device_secret_hash: string | null; lifetime_study_minutes: number; lifetime_study_sessions: number; updated_at: string; avatar_json: string | null; avatar_size_bytes: number | null }>();
   if (existing) await verifyDeviceSecret(env, userId, existing, deviceSecret);
+
+  const { avatarJson: avatar, avatarSizeBytes } = await resolveAvatarForSync(
+    env,
+    new URL(request.url).origin,
+    userId,
+    payload.avatar,
+    displayName,
+    existing?.avatar_json,
+    existing?.avatar_size_bytes,
+  );
 
   const flagReasons: string[] = [];
   let signupIpHash: string | null = null;
@@ -826,7 +864,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
 
     await env.DB.prepare(`
       UPDATE users
-      SET friend_code = ?, display_name = ?, avatar_json = ?, is_private = ?, show_hours_to_friends = ?,
+      SET friend_code = ?, display_name = ?, avatar_json = ?, avatar_size_bytes = ?, is_private = ?, show_hours_to_friends = ?,
         lifetime_study_minutes = ?,
         lifetime_study_sessions = ?,
         device_fingerprint_hash = COALESCE(NULLIF(?, ''), device_fingerprint_hash),
@@ -839,7 +877,7 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
         updated_at = CURRENT_TIMESTAMP, last_seen_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `)
-      .bind(friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
+      .bind(friendCode, displayName, avatar, avatarSizeBytes, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, userId)
       .run();
   } else {
     if (lifetimeStudyMinutes > MAX_INITIAL_LIFETIME_MINUTES_FLAG || lifetimeStudySessions > MAX_INITIAL_LIFETIME_SESSIONS_FLAG) {
@@ -852,10 +890,10 @@ async function upsertUser(env: Env, payload: SyncPayload["user"], request: Reque
     const deviceSecretHash = await hashDeviceSecret(env, deviceSecret);
 
     await env.DB.prepare(`
-      INSERT INTO users (id, device_secret, device_secret_hash, friend_code, display_name, avatar_json, is_private, show_hours_to_friends, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at, signup_ip_hash, signup_country, signup_asn, signup_as_organization)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?, ?)
+      INSERT INTO users (id, device_secret, device_secret_hash, friend_code, display_name, avatar_json, avatar_size_bytes, is_private, show_hours_to_friends, lifetime_study_minutes, lifetime_study_sessions, device_fingerprint_hash, device_label, device_seen_at, app_version, app_platform, app_runtime_channel, app_seen_at, signup_ip_hash, signup_country, signup_asn, signup_as_organization)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), CASE WHEN ? != '' OR ? != '' OR ? != '' THEN CURRENT_TIMESTAMP ELSE NULL END, ?, ?, ?, ?)
     `)
-      .bind(userId, deviceSecret, deviceSecretHash, friendCode, displayName, avatar, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, signupIpHash, signupGeo.country, signupGeo.asn, signupGeo.asOrganization)
+      .bind(userId, deviceSecret, deviceSecretHash, friendCode, displayName, avatar, avatarSizeBytes, isPrivate, showHoursToFriends, lifetimeStudyMinutes, lifetimeStudySessions, deviceFingerprintHash, deviceLabel, deviceFingerprintHash, app.version, app.platform, app.runtimeChannel, app.version, app.platform, app.runtimeChannel, signupIpHash, signupGeo.country, signupGeo.asn, signupGeo.asOrganization)
       .run();
   }
 
@@ -2235,8 +2273,13 @@ async function handleFeedImageGet(request: Request, env: Env, key: string) {
   });
 }
 
-function profileAvatarUrl(request: Request, key: string) {
-  return `${new URL(request.url).origin}/profile/avatar/${encodeURIComponent(key)}`;
+// Origin used for avatar URLs when no request is in hand — the scheduled() cron backfill has no
+// incoming request to derive an origin from. Matches the img-src entry in the desktop app's CSP
+// (desktop/src-tauri/tauri.conf.json) and the worker's real *.workers.dev host.
+const WORKER_ORIGIN = "https://study-tracker-social.danil-poluyanov13.workers.dev";
+
+function profileAvatarUrl(origin: string, key: string) {
+  return `${origin}/profile/avatar/${encodeURIComponent(key)}`;
 }
 
 function profileAvatarKeyFromUrl(value: string) {
@@ -2260,6 +2303,37 @@ function profileAvatarBytesFromDataUrl(value: string) {
   return { mimeType: match[1], bytes };
 }
 
+// Shared by the direct upload endpoint and the sync-time auto-upload path (upsertUser): puts
+// image bytes into R2 under a fresh key, deletes the previous key if replacing, and returns the
+// resulting photo avatar. Returns null (never throws) when the R2 budget/storage cap would be
+// exceeded, so callers can fall back instead of hard-failing.
+async function uploadAvatarBytesToR2(
+  env: Env,
+  origin: string,
+  userId: string,
+  image: { mimeType: string; bytes: Uint8Array },
+  name: string,
+  previousAvatar: SocialAvatar | null,
+  previousSizeBytes: number,
+): Promise<SocialAvatar | null> {
+  if (image.bytes.byteLength > MAX_PROFILE_AVATAR_BYTES) return null;
+  const previousKey = previousAvatar?.kind === "photo" ? profileAvatarKeyFromUrl(previousAvatar.url) : null;
+  const classAOps = previousKey ? 2 : 1;
+  let usage: Awaited<ReturnType<typeof getR2Usage>>;
+  try {
+    usage = await assertR2ClassABudget(env, classAOps);
+  } catch {
+    return null;
+  }
+  const nextStorageBytes = usage.storageBytes - previousSizeBytes + image.bytes.byteLength;
+  if (nextStorageBytes > R2_STORAGE_HARD_BYTES) return null;
+  const key = `profile-avatars/${userId}/${crypto.randomUUID()}.webp`;
+  await env.FEED_IMAGES.put(key, image.bytes, { httpMetadata: { contentType: image.mimeType } });
+  await incrementR2Usage(env, { classA: classAOps });
+  if (previousKey) await env.FEED_IMAGES.delete(previousKey).catch(() => undefined);
+  return { kind: "photo", name, url: profileAvatarUrl(origin, key), mimeType: image.mimeType };
+}
+
 async function handleProfileAvatarUpload(request: Request, env: Env) {
   const form = await request.formData();
   const userId = String(form.get("userId") ?? "").trim();
@@ -2275,26 +2349,20 @@ async function handleProfileAvatarUpload(request: Request, env: Env) {
     .bind(userId)
     .first<{ avatarJson: string; avatarSizeBytes: number }>();
   const previousAvatar = parseAvatar(existing?.avatarJson, "Student");
-  const previousKey = previousAvatar.kind === "photo" ? profileAvatarKeyFromUrl(previousAvatar.url) : null;
-  const classAOps = previousKey ? 2 : 1;
-  const usage = await assertR2ClassABudget(env, classAOps);
-  const nextStorageBytes = usage.storageBytes - Number(existing?.avatarSizeBytes ?? 0) + image.size;
-  if (nextStorageBytes > R2_STORAGE_HARD_BYTES) return text("Image uploads are paused to keep R2 storage below the free tier.", 429);
-  const key = `profile-avatars/${userId}/${crypto.randomUUID()}.webp`;
-  await env.FEED_IMAGES.put(key, image.stream(), {
-    httpMetadata: { contentType: image.type },
-  });
-  await incrementR2Usage(env, { classA: classAOps });
-  if (previousKey) await env.FEED_IMAGES.delete(previousKey).catch(() => undefined);
+  const bytes = new Uint8Array(await image.arrayBuffer());
+  const avatar = await uploadAvatarBytesToR2(
+    env,
+    new URL(request.url).origin,
+    userId,
+    { mimeType: image.type, bytes },
+    cleanText(form.get("name"), 180) || "photo",
+    previousAvatar,
+    Number(existing?.avatarSizeBytes ?? 0),
+  );
+  if (!avatar) return text("Image uploads are paused to keep R2 storage below the free tier.", 429);
 
-  const avatar: SocialAvatar = {
-    kind: "photo",
-    name: cleanText(form.get("name"), 180) || "photo",
-    url: profileAvatarUrl(request, key),
-    mimeType: image.type,
-  };
-   await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-     .bind(JSON.stringify(avatar), image.size, userId)
+  await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+    .bind(JSON.stringify(avatar), bytes.byteLength, userId)
     .run();
   return json({ avatar });
 }
@@ -2314,12 +2382,12 @@ async function handleProfileAvatarGet(env: Env, key: string) {
   });
 }
 
-async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
-  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; limit?: number }>(request);
-  const owner = await verifyUser(env, cleanUserId(payload.userId), String(payload.deviceSecret ?? ""));
-  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can migrate profile avatars.", 403);
-
-  const limit = Math.max(1, cleanFiniteNumber(payload.limit ?? 5, "limit", 10));
+// Backfills users whose avatar_json is still stuck as a raw base64 data: URI (set before the R2
+// upload path existed, or before it ever ran for them — see resolveAvatarForSync, which now
+// prevents new occurrences going forward). Safe to re-run: only touches rows still matching the
+// LIKE filter, ordered by updated_at so repeated calls make steady progress through the backlog.
+// Shared by the owner-only admin endpoint and the nightly cron in scheduled().
+async function migrateStuckProfileAvatars(env: Env, origin: string, limit: number) {
   const rows = await env.DB.prepare(`
     SELECT id AS userId, display_name AS displayName, avatar_json AS avatarJson
     FROM users
@@ -2341,30 +2409,28 @@ async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
       skipped.push({ userId: row.userId, reason: "unsupported data URL" });
       continue;
     }
-    if (image.bytes.byteLength > MAX_PROFILE_AVATAR_BYTES) {
-      skipped.push({ userId: row.userId, reason: "avatar exceeds migration size limit" });
+    const uploaded = await uploadAvatarBytesToR2(env, origin, row.userId, image, avatar.name || "photo", avatar, 0);
+    if (!uploaded) {
+      skipped.push({ userId: row.userId, reason: "upload failed or R2 budget exceeded" });
       continue;
     }
-
-    await assertR2ClassABudget(env, 1);
-    const key = `profile-avatars/${row.userId}/${crypto.randomUUID()}.webp`;
-    await env.FEED_IMAGES.put(key, image.bytes, {
-      httpMetadata: { contentType: image.mimeType },
-    });
-    await incrementR2Usage(env, { classA: 1 });
-    const nextAvatar: SocialAvatar = {
-      kind: "photo",
-      name: avatar.name || "photo",
-      url: profileAvatarUrl(request, key),
-      mimeType: image.mimeType,
-    };
-     await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-       .bind(JSON.stringify(nextAvatar), image.bytes.length, row.userId)
+    await env.DB.prepare("UPDATE users SET avatar_json = ?, avatar_size_bytes = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .bind(JSON.stringify(uploaded), image.bytes.byteLength, row.userId)
       .run();
     migrated += 1;
   }
 
-  return json({ ok: true, scanned: rows.results.length, migrated, skipped });
+  return { scanned: rows.results.length, migrated, skipped };
+}
+
+async function handleAdminMigrateProfileAvatars(request: Request, env: Env) {
+  const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; limit?: number }>(request);
+  const owner = await verifyUser(env, cleanUserId(payload.userId), String(payload.deviceSecret ?? ""));
+  if (owner.friendCode !== R2_OWNER_FRIEND_CODE) return text("Only the app owner can migrate profile avatars.", 403);
+
+  const limit = Math.max(1, cleanFiniteNumber(payload.limit ?? 5, "limit", 200));
+  const result = await migrateStuckProfileAvatars(env, new URL(request.url).origin, limit);
+  return json({ ok: true, ...result });
 }
 
 /**
@@ -3155,6 +3221,7 @@ export default {
   },
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     await purgeExpiredAbuseData(env).catch((error) => console.error("Abuse-data retention purge failed.", error));
+    await migrateStuckProfileAvatars(env, WORKER_ORIGIN, 25).catch((error) => console.error("Profile avatar migration failed.", error));
     const now = new Date().toISOString();
     const yesterday = yesterdayIso();
     const queued = await env.DB.prepare("SELECT date FROM squad_score_jobs ORDER BY created_at ASC LIMIT 7").all<{ date: string }>();
