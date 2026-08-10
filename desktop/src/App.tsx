@@ -44,7 +44,8 @@ import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, lis
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
-import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import type { PersistenceBaselines, PersistSection } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
 import { pauseCountdownTimer, pauseStopwatchTimer, resumeCountdownTimer, resumeStopwatchTimer } from "./lib/timerTransitions";
@@ -3957,6 +3958,9 @@ function HelpExampleCards({ examples }: { examples: HelpExample[] }) {
   );
 }
 
+const TIMER_ONLY_SECTION: ReadonlySet<PersistSection> = new Set(["timer"]);
+const ALL_PERSIST_SECTIONS: ReadonlySet<PersistSection> = new Set(["timer", "social", "core"]);
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -4127,6 +4131,7 @@ function App() {
   const summaryLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const latestStateRef = useRef(state);
+  const persistenceBaselinesRef = useRef<PersistenceBaselines>(createInitialPersistenceBaselines(state));
   const timerFaceRingRef = useRef<HTMLDivElement | null>(null);
   const examFaceRingRef = useRef<HTMLDivElement | null>(null);
   const saveStateTimeoutRef = useRef<number | null>(null);
@@ -4246,11 +4251,20 @@ function App() {
     };
   }
 
+  // Only sections whose reference actually changed since the last successful persist get
+  // written (see storage.ts's getChangedSections) - a section's baseline only advances once
+  // its own write succeeds, so a failed write is retried on the next call instead of being
+  // silently treated as done. See lib/storage.ts for the full section-aware design.
+  function persistState(nextState: AppState, options?: { forceSections?: ReadonlySet<PersistSection> }) {
+    const succeeded = saveAppState(nextState, persistenceBaselinesRef.current, options);
+    persistenceBaselinesRef.current = applyPersistedSections(persistenceBaselinesRef.current, nextState, succeeded);
+  }
+
   useEffect(() => {
     latestStateRef.current = state;
     if (saveStateTimeoutRef.current !== null) window.clearTimeout(saveStateTimeoutRef.current);
     saveStateTimeoutRef.current = window.setTimeout(() => {
-      saveAppState(latestStateRef.current);
+      persistState(latestStateRef.current);
       saveStateTimeoutRef.current = null;
     }, 700);
   }, [state]);
@@ -4260,7 +4274,7 @@ function App() {
 
     return startTimerPersistenceHeartbeat(
       () => latestStateRef.current,
-      saveAppState,
+      (s) => persistState(s, { forceSections: TIMER_ONLY_SECTION }),
     );
   }, [state.timer.running]);
   useEffect(() => {
@@ -4269,7 +4283,7 @@ function App() {
         window.clearTimeout(saveStateTimeoutRef.current);
         saveStateTimeoutRef.current = null;
       }
-      saveAppState(latestStateRef.current);
+      persistState(latestStateRef.current, { forceSections: ALL_PERSIST_SECTIONS });
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushState();
@@ -4613,7 +4627,7 @@ function App() {
         const pending = pendingSaveRef.current;
         if (pending) {
           pendingSaveRef.current = null;
-          saveAppState(pending);
+          persistState(pending);
         }
       }, 0);
     }, 500);
@@ -7623,8 +7637,7 @@ function App() {
     setEditingTaskId(null);
     setSelectedCalendarDate(null);
     setPersonalNameDraft("");
-    localStorage.removeItem("study-tracker-desktop-v2");
-    localStorage.removeItem("study-tracker-desktop-v1");
+    APP_STATE_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
     localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
     localStorage.removeItem(CUSTOM_DASHBOARD_LAYOUT_KEY);
     localStorage.removeItem(DISMISSED_ANNOUNCEMENTS_KEY);
@@ -8909,7 +8922,7 @@ function App() {
     endlessContinuousStartedAtRef.current = null;
     clearEndlessInactivityPrompt();
     setState(nextState);
-    saveAppState(nextState);
+    persistState(nextState);
     window.setTimeout(() => {
       sessionSavePendingRef.current = false;
     }, 750);
