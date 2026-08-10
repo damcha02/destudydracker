@@ -23,21 +23,28 @@ import {
   daysUntil,
   formatDate,
   formatMinutes,
-  getCourseHealth,
-  getCourseMinutes,
+  getCourseHealthMap,
+  getCourseMinutesMap,
   getCourseTasks,
+  getFirstSessionDate,
   getFocusMomentum,
+  getLocalMonthlyStats,
   getOverallHealth,
   getRemainingUnits,
   getSemesterCourses,
-  getSemesterHealth,
+  getSemesterHealthMap,
   getSemesterTasks,
+  getSessionDaySet,
   getStreakDays,
+  getStudySessionCount,
   getTaskProgress,
   getTodayMinutes,
   getUnitsCompletedToday,
   getUpcomingExams,
   getWeeklyActivity,
+  getWeeklyCourseCount,
+  groupTasksByCourseId,
+  groupTasksBySemesterId,
   isoDate,
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
@@ -4826,6 +4833,28 @@ function App() {
   const selectedSummaryFile = summaryFiles.find((file) => file.path === selectedSummaryPath) ?? summaryFiles[0] ?? null;
   const selectedSummaryUrl = selectedSummaryFile ? convertFileSrc(selectedSummaryFile.path) : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
+  // Single-pass grouping/aggregation maps shared by the dashboard course radar and the planner
+  // semester/course lists, instead of each course/semester re-scanning the full tasks/exams/
+  // sessions arrays on every render (see metrics.ts for the O(N*tasks) -> O(tasks) reasoning).
+  const courseTasksByCourseId = useMemo(() => groupTasksByCourseId(state.tasks), [state.tasks]);
+  const semesterTasksBySemesterId = useMemo(() => groupTasksBySemesterId(state.tasks), [state.tasks]);
+  const courseMinutesByCourseId = useMemo(() => getCourseMinutesMap(state.sessions), [state.sessions]);
+  // calendarToday is included only to force a recompute at the local day boundary - the
+  // callback doesn't read its value. calculateWorkloadHealth (via daysUntil/getExamPressure)
+  // reads the real wall clock internally, so without this the "overdue"/"due soon" status
+  // would silently freeze past midnight until courses/tasks/exams changed for some other
+  // reason. Mirrors the same pattern already used by weeklyActivity/todayMinutes/streakDays/
+  // focusMomentum below.
+  const courseHealthByCourseId = useMemo(
+    () => getCourseHealthMap(state.courses, courseTasksByCourseId, state.exams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
+    [state.courses, courseTasksByCourseId, state.exams, calendarToday],
+  );
+  const semesterHealthBySemesterId = useMemo(
+    () => getSemesterHealthMap(state.semesters, semesterTasksBySemesterId, state.exams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
+    [state.semesters, semesterTasksBySemesterId, state.exams, calendarToday],
+  );
   const calendarAddCourses = useMemo(
     () => calendarAddDraft.semesterId ? state.courses.filter((course) => course.semesterId === calendarAddDraft.semesterId) : [],
     [calendarAddDraft.semesterId, state.courses],
@@ -4995,13 +5024,11 @@ function App() {
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
   const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
   const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
-  const monthStartAnchor = new Date();
-  monthStartAnchor.setDate(1);
-  monthStartAnchor.setHours(0, 0, 0, 0);
-  const localSocialMonthly = state.sessions.filter((session) => {
-    if (session.kind !== "study" && session.kind !== "exam") return false;
-    return new Date(session.endedAt) >= monthStartAnchor;
-  }).reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
+  // calendarToday forces a recompute at the local day boundary (needed for month-boundary
+  // correctness) - getLocalMonthlyStats itself still reads the real wall clock internally at
+  // whatever moment this memo actually recomputes, same as the original inline code did.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day/month-boundary invalidation, see comment above
+  const localSocialMonthly = useMemo(() => getLocalMonthlyStats(state.sessions), [state.sessions, calendarToday]);
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
@@ -5295,7 +5322,7 @@ function App() {
       return changed ? { ...current, badgeCounts: nextCounts, badgeCountDates: nextDates } : current;
     });
   }, [badgeEarlyBird, badgeFullHouse, badgeNightOwl, badgePerfectionist, badgeSpeedrunnerToday, state.badgeCountDates, todayStr]);
-  const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
+  const openTaskCount = useMemo(() => state.tasks.filter((task) => getRemainingUnits(task) > 0).length, [state.tasks]);
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
   const completionOffset = completionCircumference - (selectedTaskProgress / 100) * completionCircumference;
@@ -5384,10 +5411,8 @@ function App() {
   );
 
   const totalAllTimeMinutes = state.lifetimeStudyMinutes;
-  const sessionDays = new Set(state.sessions.map(s => isoDate(new Date(s.endedAt))));
-  const firstSessionDate = state.sessions.length
-    ? [...state.sessions].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())[0].startedAt
-    : null;
+  const sessionDays = useMemo(() => getSessionDaySet(state.sessions), [state.sessions]);
+  const firstSessionDate = useMemo(() => getFirstSessionDate(state.sessions), [state.sessions]);
 
   const focusTimeline = useMemo(() => {
     type FossilLayer = { id: string; name: string; color: string; minutes: number };
@@ -5488,18 +5513,9 @@ function App() {
     };
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
-  const studySessionCount = state.sessions.filter((session) => session.kind === "study" || session.kind === "exam").length;
-  const weeklyCourseCount = (() => {
-    const cutoff = new Date(`${calendarToday}T00:00:00`).getTime() - 6 * 86400000;
-    const ids = new Set(
-      state.sessions
-        .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId)
-        .filter((session) => new Date(`${(session.endedAt || session.startedAt).slice(0, 10)}T00:00:00`).getTime() >= cutoff)
-        .map((session) => session.courseId),
-    );
-    return ids.size;
-  })();
-  const completedTaskCount = state.tasks.filter((task) => task.totalUnits > 0 && task.completedUnits >= task.totalUnits).length;
+  const studySessionCount = useMemo(() => getStudySessionCount(state.sessions), [state.sessions]);
+  const weeklyCourseCount = useMemo(() => getWeeklyCourseCount(state.sessions, calendarToday), [state.sessions, calendarToday]);
+  const completedTaskCount = useMemo(() => state.tasks.filter((task) => task.totalUnits > 0 && task.completedUnits >= task.totalUnits).length, [state.tasks]);
 
   const profileBadgeGroups: ProfileBadgeGroup[] = [
     {
@@ -10223,7 +10239,9 @@ function App() {
         <div className="design-course-list">
           {state.courses.length ? (
             state.courses.map((course) => {
-              const health = getCourseHealth(state, course);
+              // Non-null: courseHealthByCourseId/courseTasksByCourseId are built by iterating
+              // this same state.courses/state.tasks, so every course.id is guaranteed a key.
+              const health = courseHealthByCourseId.get(course.id)!;
               const semester = semesterLookup.get(course.semesterId);
               return (
                 <div className="design-course-row" key={course.id}>
@@ -10237,7 +10255,7 @@ function App() {
                       <div className="health-fill" style={{ width: `${health.score}%`, background: course.color }} />
                     </div>
                     <small>
-                      {semester?.name ?? "No semester"} • {getCourseTasks(state, course.id).length} tasks • {formatMinutes(getCourseMinutes(state, course.id))} • Target {formatSwissGrade(course.targetGrade)}
+                      {semester?.name ?? "No semester"} • {(courseTasksByCourseId.get(course.id) ?? []).length} tasks • {formatMinutes(courseMinutesByCourseId.get(course.id) ?? 0)} • Target {formatSwissGrade(course.targetGrade)}
                       {health.overdue ? ` • ${health.overdue} overdue` : ""}
                     </small>
                   </div>
@@ -12840,8 +12858,10 @@ function App() {
               {state.semesters.length ? (
                 state.semesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
-                  const tasks = getSemesterTasks(state, semester.id);
-                  const semesterHealth = getSemesterHealth(state, semester);
+                  const tasks = semesterTasksBySemesterId.get(semester.id) ?? [];
+                  // Non-null: semesterHealthBySemesterId is built by iterating this same
+                  // state.semesters, so every semester.id is guaranteed a key.
+                  const semesterHealth = semesterHealthBySemesterId.get(semester.id)!;
                   const semesterExpanded = expandedSemesterIds.includes(semester.id);
                   const semesterExams = state.exams.filter((exam) => exam.semesterId === semester.id);
 
@@ -12939,8 +12959,10 @@ function App() {
                           <div className="course-stack">
                             {courses.length ? (
                               courses.map((course) => {
-                                const courseTasks = getCourseTasks(state, course.id);
-                                const health = getCourseHealth(state, course);
+                                const courseTasks = courseTasksByCourseId.get(course.id) ?? [];
+                                // Non-null: courseHealthByCourseId is built by iterating this
+                                // same state.courses, so every course.id is guaranteed a key.
+                                const health = courseHealthByCourseId.get(course.id)!;
                                 const courseExpanded = expandedCourseIds.includes(course.id);
                                 const completedCourseTasks = courseTasks.filter((task) => getRemainingUnits(task) === 0).length;
                                 const courseTotalUnits = courseTasks.reduce((sum, task) => sum + Math.max(1, task.totalUnits), 0);
