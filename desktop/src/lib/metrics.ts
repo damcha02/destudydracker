@@ -253,6 +253,62 @@ export function getSemesterHealth(state: AppState, semester: Semester) {
   return calculateWorkloadHealth(tasks, exams);
 }
 
+/** Single O(tasks) pass instead of the O(courses * tasks) cost of calling getCourseTasks per course. */
+export function groupTasksByCourseId(tasks: Task[]): Map<string, Task[]> {
+  const map = new Map<string, Task[]>();
+  for (const task of tasks) {
+    const list = map.get(task.courseId);
+    if (list) list.push(task);
+    else map.set(task.courseId, [task]);
+  }
+  return map;
+}
+
+/** Single O(tasks) pass instead of the O(semesters * tasks) cost of calling getSemesterTasks per semester. */
+export function groupTasksBySemesterId(tasks: Task[]): Map<string, Task[]> {
+  const map = new Map<string, Task[]>();
+  for (const task of tasks) {
+    const list = map.get(task.semesterId);
+    if (list) list.push(task);
+    else map.set(task.semesterId, [task]);
+  }
+  return map;
+}
+
+/** Single O(sessions) pass instead of the O(courses * sessions) cost of calling getCourseMinutes per course. */
+export function getCourseMinutesMap(sessions: StudySession[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const session of sessions) {
+    if (!session.courseId) continue;
+    map.set(session.courseId, (map.get(session.courseId) ?? 0) + session.minutes);
+  }
+  return map;
+}
+
+/**
+ * `tasksByCourseId` should come from groupTasksByCourseId(state.tasks) - passing it in rather
+ * than re-deriving it here lets a caller share one grouping pass across this and other
+ * consumers (e.g. a course-tasks list needed for its own display, not just health).
+ */
+export function getCourseHealthMap(courses: Course[], tasksByCourseId: Map<string, Task[]>, exams: Exam[]): Map<string, ReturnType<typeof calculateWorkloadHealth>> {
+  const map = new Map<string, ReturnType<typeof calculateWorkloadHealth>>();
+  for (const course of courses) {
+    const courseExams = exams.filter((exam) => exam.courseId === course.id);
+    map.set(course.id, calculateWorkloadHealth(tasksByCourseId.get(course.id) ?? [], courseExams));
+  }
+  return map;
+}
+
+/** `tasksBySemesterId` should come from groupTasksBySemesterId(state.tasks) - see getCourseHealthMap. */
+export function getSemesterHealthMap(semesters: Semester[], tasksBySemesterId: Map<string, Task[]>, exams: Exam[]): Map<string, ReturnType<typeof calculateWorkloadHealth>> {
+  const map = new Map<string, ReturnType<typeof calculateWorkloadHealth>>();
+  for (const semester of semesters) {
+    const semesterExams = exams.filter((exam) => exam.semesterId === semester.id);
+    map.set(semester.id, calculateWorkloadHealth(tasksBySemesterId.get(semester.id) ?? [], semesterExams));
+  }
+  return map;
+}
+
 export function getOverallHealth(state: AppState) {
   if (!state.tasks.length) return 0;
   return calculateWorkloadHealth(state.tasks, state.exams).score;
@@ -341,6 +397,49 @@ export function getFocusMomentum(state: AppState, today = isoDate()) {
   if (average >= 70) return "Stable";
   if (average >= 35) return "Recovering";
   return "Slipping";
+}
+
+export function getSessionDaySet(sessions: StudySession[]): Set<string> {
+  return new Set(sessions.map(sessionDateKey));
+}
+
+export function getFirstSessionDate(sessions: StudySession[]): string | null {
+  let earliest: StudySession | null = null;
+  let earliestMs = Infinity;
+  for (const session of sessions) {
+    const ms = new Date(session.startedAt).getTime();
+    if (ms < earliestMs) {
+      earliestMs = ms;
+      earliest = session;
+    }
+  }
+  return earliest ? earliest.startedAt : null;
+}
+
+export function getStudySessionCount(sessions: StudySession[]): number {
+  return sessions.filter((session) => session.kind === "study" || session.kind === "exam").length;
+}
+
+/** Distinct courses with a study/exam session in the 7-day window ending `today`. */
+export function getWeeklyCourseCount(sessions: StudySession[], today = isoDate()): number {
+  const cutoff = new Date(`${today}T00:00:00`).getTime() - 6 * 86400000;
+  const ids = new Set(
+    sessions
+      .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId)
+      .filter((session) => new Date(`${(session.endedAt || session.startedAt).slice(0, 10)}T00:00:00`).getTime() >= cutoff)
+      .map((session) => session.courseId),
+  );
+  return ids.size;
+}
+
+/** `now` defaults to `new Date()` so the only behavior change from memoizing the caller is *when* this reads wall-clock time, not what it computes. */
+export function getLocalMonthlyStats(sessions: StudySession[], now: Date = new Date()): { minutes: number; sessions: number } {
+  const monthStart = new Date(now);
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  return sessions
+    .filter((session) => (session.kind === "study" || session.kind === "exam") && new Date(session.endedAt) >= monthStart)
+    .reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
 }
 
 export function buildDailyNoteMarkdown(state: AppState, noteDate = isoDate()) {

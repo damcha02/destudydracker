@@ -11,7 +11,10 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
+import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
+import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
+import { useTimerTick } from "./hooks/useTimerTick";
 import {
   buildDailyNoteMarkdown,
   calculateAggregateWorkload,
@@ -20,30 +23,40 @@ import {
   daysUntil,
   formatDate,
   formatMinutes,
-  getCourseHealth,
-  getCourseMinutes,
+  getCourseHealthMap,
+  getCourseMinutesMap,
   getCourseTasks,
+  getFirstSessionDate,
   getFocusMomentum,
+  getLocalMonthlyStats,
   getOverallHealth,
   getRemainingUnits,
   getSemesterCourses,
-  getSemesterHealth,
+  getSemesterHealthMap,
   getSemesterTasks,
+  getSessionDaySet,
   getStreakDays,
+  getStudySessionCount,
   getTaskProgress,
   getTodayMinutes,
   getUnitsCompletedToday,
   getUpcomingExams,
   getWeeklyActivity,
+  getWeeklyCourseCount,
+  groupTasksByCourseId,
+  groupTasksBySemesterId,
   isoDate,
 } from "./lib/metrics";
 import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
-import { defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import type { PersistenceBaselines, PersistSection } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerActiveSegment, TimerState } from "./types";
+import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
+import { pauseCountdownTimer, pauseStopwatchTimer, resumeCountdownTimer, resumeStopwatchTimer } from "./lib/timerTransitions";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedComment, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
@@ -2964,61 +2977,10 @@ function getTimeGreeting(date = new Date()) {
   return "Good night";
 }
 
-function getConfiguredTimerSeconds(timer: Pick<TimerState, "phase" | "mode" | "studyMinutes" | "examMinutes">) {
-  return timer.phase === "exam" || timer.mode === "exam" ? timer.examMinutes * 60 : timer.studyMinutes * 60;
-}
-
-function closeTimerSegments(timer: TimerState, endedAt: string): Array<{ startedAt: string; endedAt: string }> {
-  const fallbackSegments: TimerActiveSegment[] = [];
-  if (timer.startedAt && (timer.phase === "study" || timer.phase === "exam" || timer.phase === "stopwatch")) {
-    const startedAtMs = new Date(timer.startedAt).getTime();
-    if (Number.isFinite(startedAtMs)) {
-      const configuredSeconds = timer.phase === "stopwatch" ? Math.max(0, Math.floor(timer.remainingSeconds)) : getConfiguredTimerSeconds(timer);
-      const fallbackActiveSeconds = timer.phase === "stopwatch"
-        ? configuredSeconds
-        : clamp(configuredSeconds - timer.remainingSeconds - (timer.loggedSplitSeconds ?? 0), 0, configuredSeconds);
-      fallbackSegments.push({
-        startedAt: timer.startedAt,
-        endedAt: timer.running ? null : new Date(startedAtMs + fallbackActiveSeconds * 1000).toISOString(),
-      });
-    }
-  }
-  const segments = timer.activeSegments?.length ? timer.activeSegments : fallbackSegments;
-  const finalEndMs = new Date(endedAt).getTime();
-  return segments.flatMap((segment) => {
-    const startMs = new Date(segment.startedAt).getTime();
-    const segmentEndMs = new Date(segment.endedAt ?? endedAt).getTime();
-    const boundedEndMs = Math.min(segmentEndMs, finalEndMs);
-    if (!Number.isFinite(startMs) || !Number.isFinite(boundedEndMs) || boundedEndMs <= startMs) return [];
-    return [{ startedAt: segment.startedAt, endedAt: new Date(boundedEndMs).toISOString() }];
-  });
-}
-
-function getTimerActiveSeconds(timer: TimerState) {
-  if (timer.phase !== "study" && timer.phase !== "exam" && timer.phase !== "stopwatch") return 0;
-
-  const activeSegments = closeTimerSegments(timer, new Date().toISOString());
-  if (activeSegments.length) {
-    return activeSegments.reduce((sum, segment) => {
-      const startMs = new Date(segment.startedAt).getTime();
-      const endMs = new Date(segment.endedAt).getTime();
-      return sum + Math.max(0, Math.floor((endMs - startMs) / 1000));
-    }, 0);
-  }
-
-  const configuredSeconds = getConfiguredTimerSeconds(timer);
-  return clamp(configuredSeconds - timer.remainingSeconds - (timer.loggedSplitSeconds ?? 0), 0, configuredSeconds);
-}
-
 function getTimerMinutes(timer: TimerState) {
   const activeSeconds = getTimerActiveSeconds(timer);
   if (activeSeconds <= 0) return 0;
   return Math.max(1, Math.round(activeSeconds / 60));
-}
-
-function getIdleTimerSeconds(timer: Pick<TimerState, "mode" | "studyMinutes" | "examMinutes">) {
-  if (timer.mode === "endless") return 0;
-  return (timer.mode === "exam" ? timer.examMinutes : timer.studyMinutes) * 60;
 }
 
 function keepTimerContext(timer: TimerState) {
@@ -4003,6 +3965,9 @@ function HelpExampleCards({ examples }: { examples: HelpExample[] }) {
   );
 }
 
+const TIMER_ONLY_SECTION: ReadonlySet<PersistSection> = new Set(["timer"]);
+const ALL_PERSIST_SECTIONS: ReadonlySet<PersistSection> = new Set(["timer", "social", "core"]);
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -4173,6 +4138,9 @@ function App() {
   const summaryLoadRequestRef = useRef(0);
   const pendingUpdateRef = useRef<Update | null>(null);
   const latestStateRef = useRef(state);
+  const persistenceBaselinesRef = useRef<PersistenceBaselines>(createInitialPersistenceBaselines(state));
+  const timerFaceRingRef = useRef<HTMLDivElement | null>(null);
+  const examFaceRingRef = useRef<HTMLDivElement | null>(null);
   const saveStateTimeoutRef = useRef<number | null>(null);
   const sessionSavePendingRef = useRef(false);
   const verifiedSessionRef = useRef<string | null>(null);
@@ -4290,11 +4258,20 @@ function App() {
     };
   }
 
+  // Only sections whose reference actually changed since the last successful persist get
+  // written (see storage.ts's getChangedSections) - a section's baseline only advances once
+  // its own write succeeds, so a failed write is retried on the next call instead of being
+  // silently treated as done. See lib/storage.ts for the full section-aware design.
+  function persistState(nextState: AppState, options?: { forceSections?: ReadonlySet<PersistSection> }) {
+    const succeeded = saveAppState(nextState, persistenceBaselinesRef.current, options);
+    persistenceBaselinesRef.current = applyPersistedSections(persistenceBaselinesRef.current, nextState, succeeded);
+  }
+
   useEffect(() => {
     latestStateRef.current = state;
     if (saveStateTimeoutRef.current !== null) window.clearTimeout(saveStateTimeoutRef.current);
     saveStateTimeoutRef.current = window.setTimeout(() => {
-      saveAppState(latestStateRef.current);
+      persistState(latestStateRef.current);
       saveStateTimeoutRef.current = null;
     }, 700);
   }, [state]);
@@ -4304,7 +4281,7 @@ function App() {
 
     return startTimerPersistenceHeartbeat(
       () => latestStateRef.current,
-      saveAppState,
+      (s) => persistState(s, { forceSections: TIMER_ONLY_SECTION }),
     );
   }, [state.timer.running]);
   useEffect(() => {
@@ -4313,7 +4290,7 @@ function App() {
         window.clearTimeout(saveStateTimeoutRef.current);
         saveStateTimeoutRef.current = null;
       }
-      saveAppState(latestStateRef.current);
+      persistState(latestStateRef.current, { forceSections: ALL_PERSIST_SECTIONS });
     };
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden") flushState();
@@ -4538,7 +4515,6 @@ function App() {
         if (timer.phase === "stopwatch") {
           if (!timer.startedAt) return current;
           const now = new Date();
-          const elapsed = getTimerActiveSeconds(timer);
           const prompt = endlessInactivityPromptRef.current;
           if (prompt) {
             if (now.getTime() - new Date(prompt.promptedAt).getTime() >= ENDLESS_INACTIVITY_GRACE_MS) {
@@ -4566,8 +4542,10 @@ function App() {
               return next;
             }
 
-            if (elapsed === timer.remainingSeconds) return current;
-            return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+            // Display value is derived on demand (getDisplayRemainingSeconds) instead of
+            // being written to state every tick; this tick only needs to poll for the
+            // inactivity-grace-period transition above.
+            return current;
           }
 
           if (!endlessContinuousStartedAtRef.current) {
@@ -4580,8 +4558,7 @@ function App() {
             void sendTimerNotification("Are you still here?", "Confirm that you are still studying to keep the endless timer running.");
           }
 
-          if (elapsed === timer.remainingSeconds) return current;
-          return { ...current, timer: { ...timer, remainingSeconds: elapsed } };
+          return current;
         }
 
         const endsAt = timer.endsAt;
@@ -4590,8 +4567,9 @@ function App() {
         const now = new Date();
         const diff = Math.ceil((new Date(endsAt).getTime() - now.getTime()) / 1000);
         if (diff > 0) {
-          if (diff === timer.remainingSeconds) return current;
-          return { ...current, timer: { ...timer, remainingSeconds: diff } };
+          // Same reasoning as the stopwatch branch above: this tick only needs to detect
+          // whether endsAt has been crossed yet, not keep remainingSeconds fresh in state.
+          return current;
         }
 
         const endedAt = new Date(new Date(endsAt).getTime()).toISOString();
@@ -4656,7 +4634,7 @@ function App() {
         const pending = pendingSaveRef.current;
         if (pending) {
           pendingSaveRef.current = null;
-          saveAppState(pending);
+          persistState(pending);
         }
       }, 0);
     }, 500);
@@ -4664,21 +4642,24 @@ function App() {
     return () => window.clearInterval(interval);
   }, [state.timer.running]);
 
-  useEffect(() => {
+  // Ticks on its own (via useTimerTick, capped at 1/sec) instead of depending on a
+  // per-tick-written remainingSeconds field, and only ever calls invoke() - never setState -
+  // so it cannot itself trigger an App() re-render.
+  useTimerTick(state.timer, (timer) => {
     if (!isTauriApp()) return;
     const verifiedSessionActive = isSocialApiConfigured()
-      && state.timer.running
-      && state.timer.phase !== "idle"
-      && state.timer.phase !== "break";
+      && timer.running
+      && timer.phase !== "idle"
+      && timer.phase !== "break";
     void invoke("set_timer_tray_state", {
-      phase: state.timer.phase,
-      running: state.timer.running,
-      remainingSeconds: Math.max(0, Math.floor(state.timer.remainingSeconds)),
+      phase: timer.phase,
+      running: timer.running,
+      remainingSeconds: Math.max(0, Math.floor(getDisplayRemainingSeconds(timer))),
       verifiedSessionActive,
     }).catch((error: unknown) => {
       console.warn("Timer tray state could not be updated.", error);
     });
-  }, [state.timer.phase, state.timer.remainingSeconds, state.timer.running]);
+  }, 1000);
 
   useEffect(() => {
     if (state.timer.phase === "idle") {
@@ -4852,6 +4833,28 @@ function App() {
   const selectedSummaryFile = summaryFiles.find((file) => file.path === selectedSummaryPath) ?? summaryFiles[0] ?? null;
   const selectedSummaryUrl = selectedSummaryFile ? convertFileSrc(selectedSummaryFile.path) : null;
   const taskLookup = useMemo(() => new Map(state.tasks.map((task) => [task.id, task])), [state.tasks]);
+  // Single-pass grouping/aggregation maps shared by the dashboard course radar and the planner
+  // semester/course lists, instead of each course/semester re-scanning the full tasks/exams/
+  // sessions arrays on every render (see metrics.ts for the O(N*tasks) -> O(tasks) reasoning).
+  const courseTasksByCourseId = useMemo(() => groupTasksByCourseId(state.tasks), [state.tasks]);
+  const semesterTasksBySemesterId = useMemo(() => groupTasksBySemesterId(state.tasks), [state.tasks]);
+  const courseMinutesByCourseId = useMemo(() => getCourseMinutesMap(state.sessions), [state.sessions]);
+  // calendarToday is included only to force a recompute at the local day boundary - the
+  // callback doesn't read its value. calculateWorkloadHealth (via daysUntil/getExamPressure)
+  // reads the real wall clock internally, so without this the "overdue"/"due soon" status
+  // would silently freeze past midnight until courses/tasks/exams changed for some other
+  // reason. Mirrors the same pattern already used by weeklyActivity/todayMinutes/streakDays/
+  // focusMomentum below.
+  const courseHealthByCourseId = useMemo(
+    () => getCourseHealthMap(state.courses, courseTasksByCourseId, state.exams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
+    [state.courses, courseTasksByCourseId, state.exams, calendarToday],
+  );
+  const semesterHealthBySemesterId = useMemo(
+    () => getSemesterHealthMap(state.semesters, semesterTasksBySemesterId, state.exams),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
+    [state.semesters, semesterTasksBySemesterId, state.exams, calendarToday],
+  );
   const calendarAddCourses = useMemo(
     () => calendarAddDraft.semesterId ? state.courses.filter((course) => course.semesterId === calendarAddDraft.semesterId) : [],
     [calendarAddDraft.semesterId, state.courses],
@@ -5021,13 +5024,11 @@ function App() {
   const localSocialDaily = getLocalLeaderboardEntry(state, "daily");
   const localSocialWeekly = getLocalLeaderboardEntry(state, "weekly");
   const localSocialOverall = getLocalLeaderboardEntry(state, "overall");
-  const monthStartAnchor = new Date();
-  monthStartAnchor.setDate(1);
-  monthStartAnchor.setHours(0, 0, 0, 0);
-  const localSocialMonthly = state.sessions.filter((session) => {
-    if (session.kind !== "study" && session.kind !== "exam") return false;
-    return new Date(session.endedAt) >= monthStartAnchor;
-  }).reduce((acc, session) => ({ minutes: acc.minutes + Math.max(0, Math.round(session.minutes)), sessions: acc.sessions + 1 }), { minutes: 0, sessions: 0 });
+  // calendarToday forces a recompute at the local day boundary (needed for month-boundary
+  // correctness) - getLocalMonthlyStats itself still reads the real wall clock internally at
+  // whatever moment this memo actually recomputes, same as the original inline code did.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day/month-boundary invalidation, see comment above
+  const localSocialMonthly = useMemo(() => getLocalMonthlyStats(state.sessions), [state.sessions, calendarToday]);
   const myGlobalRank = state.social.isPrivate ? undefined : socialGlobalWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const myFriendRank = socialFriendsWeekly.find((entry) => entry.userId === state.social.userId)?.rank;
   const socialFeed = state.social.cachedFeeds[feedScope] ?? [];
@@ -5321,7 +5322,7 @@ function App() {
       return changed ? { ...current, badgeCounts: nextCounts, badgeCountDates: nextDates } : current;
     });
   }, [badgeEarlyBird, badgeFullHouse, badgeNightOwl, badgePerfectionist, badgeSpeedrunnerToday, state.badgeCountDates, todayStr]);
-  const openTaskCount = state.tasks.filter((task) => getRemainingUnits(task) > 0).length;
+  const openTaskCount = useMemo(() => state.tasks.filter((task) => getRemainingUnits(task) > 0).length, [state.tasks]);
   const completionRadius = 58;
   const completionCircumference = 2 * Math.PI * completionRadius;
   const completionOffset = completionCircumference - (selectedTaskProgress / 100) * completionCircumference;
@@ -5337,14 +5338,11 @@ function App() {
   const timerTask = state.timer.taskId ? taskLookup.get(state.timer.taskId) : null;
   const hasKnownTimerPreset = focusPresets.some((preset) => preset.label === state.timer.presetLabel);
   const isCustomTimerPreset = !hasKnownTimerPreset || state.timer.presetLabel === "Custom";
-  const timerConfiguredSeconds = state.timer.phase === "stopwatch"
-    ? 1
-    : state.timer.phase === "break"
-    ? Math.max(1, state.timer.breakMinutes * 60)
-    : Math.max(1, (state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes) * 60);
-  const timerProgress = state.timer.phase === "stopwatch"
-    ? 100
-    : clamp(((timerConfiguredSeconds - state.timer.remainingSeconds) / timerConfiguredSeconds) * 100, 0, 100);
+  // The progress ring's --timer-progress CSS variable is mutated directly on these two
+  // elements by useTimerProgressRing's own interval, instead of flowing through a per-tick
+  // root AppState field and a declarative style prop - see hooks/useTimerProgressRing.ts.
+  useTimerProgressRing(timerFaceRingRef, state.timer);
+  useTimerProgressRing(examFaceRingRef, state.timer);
 
   const calendarDays = useMemo(
     () => (calendarView === "month" ? buildMonthDays(calendarCursorDate) : buildWeekDays(calendarCursorDate)),
@@ -5413,10 +5411,8 @@ function App() {
   );
 
   const totalAllTimeMinutes = state.lifetimeStudyMinutes;
-  const sessionDays = new Set(state.sessions.map(s => isoDate(new Date(s.endedAt))));
-  const firstSessionDate = state.sessions.length
-    ? [...state.sessions].sort((a, b) => new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime())[0].startedAt
-    : null;
+  const sessionDays = useMemo(() => getSessionDaySet(state.sessions), [state.sessions]);
+  const firstSessionDate = useMemo(() => getFirstSessionDate(state.sessions), [state.sessions]);
 
   const focusTimeline = useMemo(() => {
     type FossilLayer = { id: string; name: string; color: string; minutes: number };
@@ -5517,18 +5513,9 @@ function App() {
     };
   }, [courseLookup, focusRange, state.sessions, totalAllTimeMinutes]);
 
-  const studySessionCount = state.sessions.filter((session) => session.kind === "study" || session.kind === "exam").length;
-  const weeklyCourseCount = (() => {
-    const cutoff = new Date(`${calendarToday}T00:00:00`).getTime() - 6 * 86400000;
-    const ids = new Set(
-      state.sessions
-        .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId)
-        .filter((session) => new Date(`${(session.endedAt || session.startedAt).slice(0, 10)}T00:00:00`).getTime() >= cutoff)
-        .map((session) => session.courseId),
-    );
-    return ids.size;
-  })();
-  const completedTaskCount = state.tasks.filter((task) => task.totalUnits > 0 && task.completedUnits >= task.totalUnits).length;
+  const studySessionCount = useMemo(() => getStudySessionCount(state.sessions), [state.sessions]);
+  const weeklyCourseCount = useMemo(() => getWeeklyCourseCount(state.sessions, calendarToday), [state.sessions, calendarToday]);
+  const completedTaskCount = useMemo(() => state.tasks.filter((task) => task.totalUnits > 0 && task.completedUnits >= task.totalUnits).length, [state.tasks]);
 
   const profileBadgeGroups: ProfileBadgeGroup[] = [
     {
@@ -7666,8 +7653,7 @@ function App() {
     setEditingTaskId(null);
     setSelectedCalendarDate(null);
     setPersonalNameDraft("");
-    localStorage.removeItem("study-tracker-desktop-v2");
-    localStorage.removeItem("study-tracker-desktop-v1");
+    APP_STATE_STORAGE_KEYS.forEach((key) => localStorage.removeItem(key));
     localStorage.removeItem(DASHBOARD_LAYOUT_KEY);
     localStorage.removeItem(CUSTOM_DASHBOARD_LAYOUT_KEY);
     localStorage.removeItem(DISMISSED_ANNOUNCEMENTS_KEY);
@@ -8758,7 +8744,7 @@ function App() {
         presetLabel: label,
         phase: current.timer.running ? current.timer.phase : "idle",
         remainingSeconds: current.timer.running
-          ? current.timer.remainingSeconds
+          ? getDisplayRemainingSeconds(current.timer)
           : getIdleTimerSeconds({
               mode,
               studyMinutes: mode === "exam" ? current.timer.studyMinutes : study,
@@ -8886,60 +8872,20 @@ function App() {
 
       if (timer.phase === "stopwatch") {
         if (timer.running) {
-          const pausedAt = new Date().toISOString();
           endlessContinuousStartedAtRef.current = null;
           clearEndlessInactivityPrompt();
-          return {
-            ...current,
-            timer: {
-              ...timer,
-              running: false,
-              activeSegments: (timer.activeSegments ?? []).map((segment) => segment.endedAt === null ? { ...segment, endedAt: pausedAt } : segment),
-            },
-          };
+          return { ...current, timer: pauseStopwatchTimer(timer) };
         }
-        const elapsed = getTimerActiveSeconds(timer);
-        const resumedAt = new Date().toISOString();
         endlessContinuousStartedAtRef.current = new Date().toISOString();
         clearEndlessInactivityPrompt();
-        return {
-          ...current,
-          timer: {
-            ...timer,
-            running: true,
-            startedAt: resumedAt,
-            remainingSeconds: elapsed,
-            activeSegments: [...(timer.activeSegments ?? []), { startedAt: resumedAt, endedAt: null }],
-          },
-        };
+        return { ...current, timer: resumeStopwatchTimer(timer) };
       }
 
       if (timer.running && timer.endsAt) {
-        const pausedAt = new Date().toISOString();
-        const diff = Math.max(0, Math.ceil((new Date(timer.endsAt).getTime() - Date.now()) / 1000));
-        return {
-          ...current,
-          timer: {
-            ...timer,
-            running: false,
-            endsAt: null,
-            remainingSeconds: diff,
-            activeSegments: (timer.activeSegments ?? []).map((segment) => segment.endedAt === null ? { ...segment, endedAt: pausedAt } : segment),
-          },
-        };
+        return { ...current, timer: pauseCountdownTimer(timer, timer.endsAt) };
       }
 
-      const resumedAt = new Date().toISOString();
-      return {
-        ...current,
-        timer: {
-          ...timer,
-          running: true,
-          startedAt: resumedAt,
-          endsAt: new Date(Date.now() + timer.remainingSeconds * 1000).toISOString(),
-          activeSegments: [...(timer.activeSegments ?? []), { startedAt: resumedAt, endedAt: null }],
-        },
-      };
+      return { ...current, timer: resumeCountdownTimer(timer) };
     });
   }
 
@@ -8992,7 +8938,7 @@ function App() {
     endlessContinuousStartedAtRef.current = null;
     clearEndlessInactivityPrompt();
     setState(nextState);
-    saveAppState(nextState);
+    persistState(nextState);
     window.setTimeout(() => {
       sessionSavePendingRef.current = false;
     }, 750);
@@ -10293,7 +10239,9 @@ function App() {
         <div className="design-course-list">
           {state.courses.length ? (
             state.courses.map((course) => {
-              const health = getCourseHealth(state, course);
+              // Non-null: courseHealthByCourseId/courseTasksByCourseId are built by iterating
+              // this same state.courses/state.tasks, so every course.id is guaranteed a key.
+              const health = courseHealthByCourseId.get(course.id)!;
               const semester = semesterLookup.get(course.semesterId);
               return (
                 <div className="design-course-row" key={course.id}>
@@ -10307,7 +10255,7 @@ function App() {
                       <div className="health-fill" style={{ width: `${health.score}%`, background: course.color }} />
                     </div>
                     <small>
-                      {semester?.name ?? "No semester"} • {getCourseTasks(state, course.id).length} tasks • {formatMinutes(getCourseMinutes(state, course.id))} • Target {formatSwissGrade(course.targetGrade)}
+                      {semester?.name ?? "No semester"} • {(courseTasksByCourseId.get(course.id) ?? []).length} tasks • {formatMinutes(courseMinutesByCourseId.get(course.id) ?? 0)} • Target {formatSwissGrade(course.targetGrade)}
                       {health.overdue ? ` • ${health.overdue} overdue` : ""}
                     </small>
                   </div>
@@ -10979,7 +10927,7 @@ function App() {
                         ...current,
                         timer: {
                           ...timer,
-                          remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                          remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer),
                         },
                       };
                     });
@@ -11105,7 +11053,7 @@ function App() {
                 onClick={startTimerFaceEditing}
                 disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}
               >
-                {formatClock(state.timer.remainingSeconds)}
+                <TimerClockDigits timer={state.timer} formatClock={formatClock} />
               </button>
             )}
           </div>
@@ -11173,7 +11121,7 @@ function App() {
                         };
                         return {
                           ...current,
-                          timer: { ...timer, remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer) },
+                          timer: { ...timer, remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer) },
                         };
                       });
                     }}
@@ -11398,7 +11346,7 @@ function App() {
             ) : null}
           </div>
           <p className="wabi-quiet-meta">{focusMeta}</p>
-          <div className="wabi-quiet-clock">{formatClock(state.timer.remainingSeconds)}</div>
+          <div className="wabi-quiet-clock"><TimerClockDigits timer={state.timer} formatClock={formatClock} /></div>
           <div className="wabi-quiet-actions">
             <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
               {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
@@ -12910,8 +12858,10 @@ function App() {
               {state.semesters.length ? (
                 state.semesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
-                  const tasks = getSemesterTasks(state, semester.id);
-                  const semesterHealth = getSemesterHealth(state, semester);
+                  const tasks = semesterTasksBySemesterId.get(semester.id) ?? [];
+                  // Non-null: semesterHealthBySemesterId is built by iterating this same
+                  // state.semesters, so every semester.id is guaranteed a key.
+                  const semesterHealth = semesterHealthBySemesterId.get(semester.id)!;
                   const semesterExpanded = expandedSemesterIds.includes(semester.id);
                   const semesterExams = state.exams.filter((exam) => exam.semesterId === semester.id);
 
@@ -13009,8 +12959,10 @@ function App() {
                           <div className="course-stack">
                             {courses.length ? (
                               courses.map((course) => {
-                                const courseTasks = getCourseTasks(state, course.id);
-                                const health = getCourseHealth(state, course);
+                                const courseTasks = courseTasksByCourseId.get(course.id) ?? [];
+                                // Non-null: courseHealthByCourseId is built by iterating this
+                                // same state.courses, so every course.id is guaranteed a key.
+                                const health = courseHealthByCourseId.get(course.id)!;
                                 const courseExpanded = expandedCourseIds.includes(course.id);
                                 const completedCourseTasks = courseTasks.filter((task) => getRemainingUnits(task) === 0).length;
                                 const courseTotalUnits = courseTasks.reduce((sum, task) => sum + Math.max(1, task.totalUnits), 0);
@@ -13624,7 +13576,7 @@ function App() {
                             ...current,
                             timer: {
                               ...timer,
-                              remainingSeconds: current.timer.running ? current.timer.remainingSeconds : getIdleTimerSeconds(timer),
+                              remainingSeconds: current.timer.running ? getDisplayRemainingSeconds(current.timer) : getIdleTimerSeconds(timer),
                             },
                           };
                         });
@@ -13651,14 +13603,14 @@ function App() {
                 </div>
               ) : null}
 
-              <div className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} data-tour="timer-face" style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
+              <div ref={timerFaceRingRef} className={`timer-face spacious-face ${state.timer.running ? "running" : state.timer.phase !== "idle" ? "paused" : "idle"}`} data-tour="timer-face" style={{ "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
                 <div className="timer-phase-row">
                   <span className="timer-phase-pill">{state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : state.timer.mode === "exam" ? "Exam" : "Study"}</span>
                   <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
                   <span className="timer-context-title">{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
                 </div>
                 {appStyle === "modern" ? (
-                  <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+                  <strong><TimerClockDigits timer={state.timer} formatClock={formatClock} /></strong>
                 ) : timerFaceEditing ? (
                   <input
                     className="timer-face-input"
@@ -13680,7 +13632,7 @@ function App() {
                   />
                 ) : (
                   <button type="button" className="timer-face-time" onClick={startTimerFaceEditing} disabled={state.timer.running || state.timer.phase !== "idle" || (state.timer.mode !== "exam" && !isCustomTimerPreset)}>
-                    {formatClock(state.timer.remainingSeconds)}
+                    <TimerClockDigits timer={state.timer} formatClock={formatClock} />
                   </button>
                 )}
                 <p>{state.timer.running ? "In session" : state.timer.phase === "idle" ? "Ready" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
@@ -16097,13 +16049,13 @@ function App() {
             Minimize
           </button>
 
-          <div className={`exam-fullscreen-face ${state.timer.running ? "running" : "paused"}`} style={{ "--timer-progress": `${timerProgress * 3.6}deg`, "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
+          <div ref={examFaceRingRef} className={`exam-fullscreen-face ${state.timer.running ? "running" : "paused"}`} style={{ "--aura-color": timerCourse?.color ?? "var(--accent)" } as CSSProperties}>
             <div className="timer-phase-row">
               <span className="timer-phase-pill">{state.timer.phase === "exam" ? "Exam" : state.timer.phase === "stopwatch" ? "Stopwatch" : state.timer.phase === "break" ? "Break" : "Study"}</span>
               <span className="timer-course-dot" style={{ background: timerCourse?.color ?? "var(--accent)" }} />
               <span>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</span>
             </div>
-            <strong>{formatClock(state.timer.remainingSeconds)}</strong>
+            <strong><TimerClockDigits timer={state.timer} formatClock={formatClock} /></strong>
             <p>{state.timer.running ? "In session" : "Paused"} · {formatMinutes(getTimerMinutes(state.timer))} logged</p>
           </div>
 

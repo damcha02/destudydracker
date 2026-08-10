@@ -2,9 +2,17 @@ import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzle
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
+import { getDisplayRemainingSeconds } from "./timerDisplay";
 import { getWordleAnswerForDate, getWordlePuzzleId, makeWordleSeedSalt } from "./wordle";
 
 const STORAGE_KEY = "study-tracker-desktop-v2";
+const LEGACY_V1_KEY = "study-tracker-desktop-v1";
+const TIMER_KEY = "study-tracker-desktop-v3-timer";
+const SOCIAL_KEY = "study-tracker-desktop-v3-social";
+const CORE_KEY = "study-tracker-desktop-v3-core";
+
+/** Every localStorage key that can hold part of AppState, across every format version this app has used. */
+export const APP_STATE_STORAGE_KEYS: readonly string[] = [STORAGE_KEY, LEGACY_V1_KEY, TIMER_KEY, SOCIAL_KEY, CORE_KEY];
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
 const avatarIcons = ["✦", "★", "◆", "☘", "☾", "☀", "♜", "♞", "⚡", "☕", "📚", "🧠", "🔥", "🌊", "🌿", "🪐", "🚀", "🎯", "🏆", "🛡", "🦉", "🐢", "🐺", "🐱", "🍄", "🌙", "🌸", "🍀", "💎", "🎲", "🎧", "📝", "🔮", "🧩", "🕹", "📖", "🧪", "🛰", "🌌", "🦊"];
 
@@ -997,12 +1005,75 @@ function normalizeLifetimeTotals(parsed: Partial<AppState> & Record<string, unkn
   return candidates.reduce((best, candidate) => candidate.minutes > best.minutes ? candidate : best, { minutes: 0, sessions: 0 });
 }
 
+/**
+ * Reads one v3 section key with its own fault isolation: a corrupted/unparseable key returns
+ * null (treated the same as "key absent") instead of throwing, so it can't take down loading
+ * of the other sections. Deliberately does NOT delete or rewrite the corrupted raw value here -
+ * doing so would let corruption turn into permanent data loss the moment any unrelated section
+ * gets saved next (a section that was never legitimately changed in memory is never re-written
+ * by saveAppState's dirty-check, so the corrupted-but-possibly-recoverable raw bytes on disk
+ * are left alone until that specific section changes for real).
+ */
+function readJsonSection<T>(key: string): T | null {
+  const raw = localStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch (error) {
+    console.warn(`Study Tracker: persisted ${key} could not be parsed; using existing/default data for this section without overwriting it on disk.`, error);
+    return null;
+  }
+}
+
+/**
+ * Same fault-isolation principle as readJsonSection, but for the legacy single-blob format:
+ * a corrupt v2/v1 blob must not prevent otherwise-valid v3 section data from loading (it used
+ * to, when this parse lived inside the same try/catch as the rest of the pipeline below).
+ */
+function readLegacyBlob(raw: string | null): Partial<AppState> & Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Partial<AppState> & Record<string, unknown>;
+  } catch (error) {
+    console.warn("Study Tracker: legacy persisted state could not be parsed; using v3 section data (if any) or defaults instead, without overwriting it on disk.", error);
+    return {};
+  }
+}
+
+/**
+ * readJsonSection<Partial<AppState>>(CORE_KEY) is only a TypeScript cast, not runtime
+ * validation - a corrupted-but-JSON-valid core blob could contain stray timer/social
+ * properties. Since the merge below spreads coreSection after legacyParsed, an un-sanitized
+ * coreSection could silently clobber legitimate legacy timer/social data whenever the
+ * dedicated v3 timer/social keys are absent (nothing would spread afterward to correct it).
+ * Explicitly stripping timer/social here makes core's write-side invariant (saveAppState's
+ * omitTimerAndSocial always excludes them) hold on the read side too, regardless of what a
+ * corrupted core blob might actually contain.
+ */
+function sanitizeCoreSection(section: Partial<AppState>): Partial<AppState> {
+  const { timer, social, ...core } = section;
+  void timer;
+  void social;
+  return core;
+}
+
 export function loadAppState(): AppState {
-  const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem("study-tracker-desktop-v1");
-  if (!raw) return defaultState;
+  const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_V1_KEY);
+  const legacyParsed = readLegacyBlob(raw);
+  const timerSection = readJsonSection<{ timer: TimerState }>(TIMER_KEY);
+  const socialSection = readJsonSection<{ social: SocialState }>(SOCIAL_KEY);
+  const rawCoreSection = readJsonSection<Partial<AppState>>(CORE_KEY);
+  const coreSection = rawCoreSection ? sanitizeCoreSection(rawCoreSection) : null;
+
+  if (!Object.keys(legacyParsed).length && !timerSection && !socialSection && !coreSection) return defaultState;
 
   try {
-    const parsed = JSON.parse(raw) as Partial<AppState> & Record<string, unknown>;
+    const parsed: Partial<AppState> & Record<string, unknown> = {
+      ...legacyParsed,
+      ...coreSection,
+      ...(timerSection ? { timer: timerSection.timer } : {}),
+      ...(socialSection ? { social: socialSection.social } : {}),
+    };
     const migrated = migrateSemesters(parsed);
     const sessions = Array.isArray(parsed.sessions) ? parsed.sessions : [];
     const parsedTimer = parsed.timer && typeof parsed.timer === "object" ? parsed.timer : {};
@@ -1051,7 +1122,7 @@ export function loadAppState(): AppState {
   }
 }
 
-function stripAvatarCopiesForStorage(state: AppState): AppState {
+function stripAvatarCopiesFromSocial(social: SocialState): SocialState {
   const withoutAvatar = <T extends { avatar?: unknown }>(item: T): Omit<T, "avatar"> => {
     const copy = { ...item };
     delete copy.avatar;
@@ -1059,53 +1130,167 @@ function stripAvatarCopiesForStorage(state: AppState): AppState {
   };
   const stripLeaderboard = (entry: SocialLeaderboardEntry) => withoutAvatar(entry);
   return {
-    ...state,
-    social: {
-      ...state.social,
-      avatar: state.social.avatar,
-      pendingFeedPosts: state.social.pendingFeedPosts.map((post) => withoutAvatar(post)),
-      cachedFeeds: {
-        global: state.social.cachedFeeds.global.map((post) => withoutAvatar(post)),
-        friends: state.social.cachedFeeds.friends.map((post) => withoutAvatar(post)),
-      },
-      cachedLeaderboards: {
-        global: {
-          daily: state.social.cachedLeaderboards.global.daily.map(stripLeaderboard),
-          weekly: state.social.cachedLeaderboards.global.weekly.map(stripLeaderboard),
-          overall: state.social.cachedLeaderboards.global.overall.map(stripLeaderboard),
-        },
-        friends: {
-          daily: state.social.cachedLeaderboards.friends.daily.map(stripLeaderboard),
-          weekly: state.social.cachedLeaderboards.friends.weekly.map(stripLeaderboard),
-          overall: state.social.cachedLeaderboards.friends.overall.map(stripLeaderboard),
-        },
-        squad: {
-          daily: state.social.cachedLeaderboards.squad.daily.map(stripLeaderboard),
-          weekly: state.social.cachedLeaderboards.squad.weekly.map(stripLeaderboard),
-          overall: state.social.cachedLeaderboards.squad.overall.map(stripLeaderboard),
-        },
-      },
-      squad: state.social.squad ? {
-        ...state.social.squad,
-        members: state.social.squad.members.map((member) => withoutAvatar(member)),
-      } : null,
-      squadMessages: state.social.squadMessages.map((message) => withoutAvatar(message)),
-      friends: state.social.friends.map((friend) => withoutAvatar(friend)),
+    ...social,
+    avatar: social.avatar,
+    pendingFeedPosts: social.pendingFeedPosts.map((post) => withoutAvatar(post)),
+    cachedFeeds: {
+      global: social.cachedFeeds.global.map((post) => withoutAvatar(post)),
+      friends: social.cachedFeeds.friends.map((post) => withoutAvatar(post)),
     },
+    cachedLeaderboards: {
+      global: {
+        daily: social.cachedLeaderboards.global.daily.map(stripLeaderboard),
+        weekly: social.cachedLeaderboards.global.weekly.map(stripLeaderboard),
+        overall: social.cachedLeaderboards.global.overall.map(stripLeaderboard),
+      },
+      friends: {
+        daily: social.cachedLeaderboards.friends.daily.map(stripLeaderboard),
+        weekly: social.cachedLeaderboards.friends.weekly.map(stripLeaderboard),
+        overall: social.cachedLeaderboards.friends.overall.map(stripLeaderboard),
+      },
+      squad: {
+        daily: social.cachedLeaderboards.squad.daily.map(stripLeaderboard),
+        weekly: social.cachedLeaderboards.squad.weekly.map(stripLeaderboard),
+        overall: social.cachedLeaderboards.squad.overall.map(stripLeaderboard),
+      },
+    },
+    squad: social.squad ? {
+      ...social.squad,
+      members: social.squad.members.map((member) => withoutAvatar(member)),
+    } : null,
+    squadMessages: social.squadMessages.map((message) => withoutAvatar(message)),
+    friends: social.friends.map((friend) => withoutAvatar(friend)),
   };
 }
 
-export function saveAppState(state: AppState) {
-  const stateToSave: AppState = { ...state, timer: { ...state.timer, lastAliveAt: new Date().toISOString() } };
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
-  } catch (error) {
+function omitTimerAndSocial(state: AppState): Omit<AppState, "timer" | "social"> {
+  const { timer, social, ...core } = state;
+  void timer;
+  void social;
+  return core;
+}
+
+export type PersistSection = "timer" | "social" | "core";
+
+/**
+ * What we last know to be actually persisted, per section - NOT just "the last state we tried
+ * to save." A section's baseline only advances once its own localStorage.setItem succeeds
+ * (see applyPersistedSections), so a failed write keeps that section's baseline stale and it
+ * stays flagged dirty on the next save attempt, guaranteeing a retry.
+ */
+export interface PersistenceBaselines {
+  timer: TimerState | null;
+  social: SocialState | null;
+  core: AppState | null;
+}
+
+/** Nothing has been saved yet in this session - everything is dirty relative to whatever's already on disk. */
+export function createInitialPersistenceBaselines(state: AppState): PersistenceBaselines {
+  return { timer: state.timer, social: state.social, core: state };
+}
+
+/**
+ * Reference/shallow comparison only - reliable here because every state update in this app
+ * goes through immutable spreads (`{...current, field: value}`), never in-place mutation, so
+ * an unchanged field always keeps its exact prior object reference and a changed field always
+ * gets a new one. `core` covers every AppState field except timer/social, checked dynamically
+ * via Object.keys so it can't drift out of sync if AppState gains a field later.
+ */
+export function getChangedSections(state: AppState, baselines: PersistenceBaselines): Set<PersistSection> {
+  const changed = new Set<PersistSection>();
+  if (!baselines.timer || state.timer !== baselines.timer) changed.add("timer");
+  if (!baselines.social || state.social !== baselines.social) changed.add("social");
+  const core = baselines.core;
+  if (!core || (Object.keys(state) as (keyof AppState)[]).some((key) => key !== "timer" && key !== "social" && state[key] !== core[key])) {
+    changed.add("core");
+  }
+  return changed;
+}
+
+/** Advances only the baselines for sections that actually persisted successfully; the rest are left untouched so they stay dirty. */
+export function applyPersistedSections(baselines: PersistenceBaselines, state: AppState, succeeded: ReadonlySet<PersistSection>): PersistenceBaselines {
+  return {
+    timer: succeeded.has("timer") ? state.timer : baselines.timer,
+    social: succeeded.has("social") ? state.social : baselines.social,
+    core: succeeded.has("core") ? state : baselines.core,
+  };
+}
+
+/**
+ * Writes only the sections that changed since `baselines` (plus anything in
+ * options.forceSections, e.g. the timer heartbeat forcing a fresh lastAliveAt/remainingSeconds
+ * even when nothing else about the timer changed) into three independent localStorage keys.
+ * Returns exactly which sections were actually persisted - a section's write can fail (quota,
+ * serialization) independently of the others, and the caller must only advance that section's
+ * baseline (via applyPersistedSections) when it's in the returned set, so a failed write is
+ * retried on the next save rather than being silently treated as done.
+ */
+export function saveAppState(
+  state: AppState,
+  baselines: PersistenceBaselines,
+  options: { forceSections?: ReadonlySet<PersistSection> } = {},
+): Set<PersistSection> {
+  const now = new Date();
+  const sectionsToWrite = new Set<PersistSection>([...getChangedSections(state, baselines), ...(options.forceSections ?? [])]);
+
+  // Not yet (or only partially) migrated to the v3 split - force a full write of all three
+  // sections so migration can complete, and don't remove the legacy v2 blob below until it does.
+  const migrationPending = !localStorage.getItem(TIMER_KEY) || !localStorage.getItem(SOCIAL_KEY) || !localStorage.getItem(CORE_KEY);
+  if (migrationPending) {
+    sectionsToWrite.add("timer");
+    sectionsToWrite.add("social");
+    sectionsToWrite.add("core");
+  }
+
+  const succeeded = new Set<PersistSection>();
+
+  if (sectionsToWrite.has("timer")) {
+    const timerToSave: TimerState = {
+      ...state.timer,
+      // Steady 500ms ticks no longer write remainingSeconds into React state (Phase 1 perf
+      // change) to avoid re-rendering the whole app every tick. Persistence still needs an
+      // accurate snapshot for force-close recovery — storage.ts's rehydrateTimer "stale but
+      // not abandoned" branch (5min-6h heartbeat gap) trusts this field as-is for study/exam
+      // timers rather than recomputing it — so derive it fresh at write time instead.
+      remainingSeconds: state.timer.running ? getDisplayRemainingSeconds(state.timer, now) : state.timer.remainingSeconds,
+      lastAliveAt: now.toISOString(),
+    };
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(stripAvatarCopiesForStorage(stateToSave)));
-    } catch {
-      console.warn("Study Tracker state could not be saved.", error);
+      localStorage.setItem(TIMER_KEY, JSON.stringify({ timer: timerToSave }));
+      succeeded.add("timer");
+    } catch (error) {
+      console.warn("Study Tracker timer state could not be saved; it will be retried on the next save.", error);
     }
   }
+
+  if (sectionsToWrite.has("social")) {
+    try {
+      localStorage.setItem(SOCIAL_KEY, JSON.stringify({ social: state.social }));
+      succeeded.add("social");
+    } catch (error) {
+      try {
+        localStorage.setItem(SOCIAL_KEY, JSON.stringify({ social: stripAvatarCopiesFromSocial(state.social) }));
+        succeeded.add("social");
+      } catch (fallbackError) {
+        console.warn("Study Tracker social state could not be saved; it will be retried on the next save.", fallbackError ?? error);
+      }
+    }
+  }
+
+  if (sectionsToWrite.has("core")) {
+    try {
+      localStorage.setItem(CORE_KEY, JSON.stringify(omitTimerAndSocial(state)));
+      succeeded.add("core");
+    } catch (error) {
+      console.warn("Study Tracker data could not be saved; it will be retried on the next save.", error);
+    }
+  }
+
+  if (migrationPending && succeeded.has("timer") && succeeded.has("social") && succeeded.has("core")) {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  return succeeded;
 }
 
 export function downloadBackup(state: AppState) {
