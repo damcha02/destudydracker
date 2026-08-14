@@ -82,4 +82,94 @@ describe("verified leaderboard sessions", () => {
     expect(Number(row?.minutes)).toBeGreaterThan(0);
     expect(Number(row?.minutes)).toBeLessThanOrEqual(20);
   });
+
+  it("settles a stale active session before returning the leaderboard", async () => {
+    await createUser("stale-user", "stale-secret", "BCDH-2347");
+    await env.DB.prepare("INSERT INTO leaderboard_baselines (user_id, minutes, sessions) VALUES (?, 0, 0)")
+      .bind("stale-user").run();
+
+    const start = await request("/verified-session/start", { userId: "stale-user", deviceSecret: "stale-secret" });
+    expect(start.status).toBe(200);
+    const { sessionId } = await start.json<{ sessionId: string }>();
+    const now = Date.now();
+    await env.DB.prepare("UPDATE verified_study_sessions SET started_at = ?, last_heartbeat_at = ? WHERE id = ?")
+      .bind(new Date(now - 120 * 60_000).toISOString(), new Date(now - 110 * 60_000).toISOString(), sessionId).run();
+
+    const response = await request("/leaderboard", {
+      userId: "stale-user",
+      deviceSecret: "stale-secret",
+      scope: "global",
+      period: "daily",
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json<{ entries: Array<{ userId: string; minutes: number; sessions: number }> }>();
+    const self = payload.entries.find((entry) => entry.userId === "stale-user");
+
+    expect(self?.minutes).toBeGreaterThan(0);
+    expect(self?.minutes).toBeLessThanOrEqual(120);
+    expect(self?.sessions).toBe(1);
+    const session = await env.DB.prepare("SELECT status, credited_minutes AS creditedMinutes FROM verified_study_sessions WHERE id = ?")
+      .bind(sessionId).first<{ status: string; creditedMinutes: number }>();
+    expect(session?.status).toBe("finished");
+    expect(Number(session?.creditedMinutes)).toBe(self?.minutes);
+  });
+
+  it("does not settle a fresh active session before returning the leaderboard", async () => {
+    await createUser("fresh-user", "fresh-secret", "BCDJ-2348");
+    await env.DB.prepare("INSERT INTO leaderboard_baselines (user_id, minutes, sessions) VALUES (?, 0, 0)")
+      .bind("fresh-user").run();
+
+    const start = await request("/verified-session/start", { userId: "fresh-user", deviceSecret: "fresh-secret" });
+    expect(start.status).toBe(200);
+    const { sessionId } = await start.json<{ sessionId: string }>();
+    const now = Date.now();
+    await env.DB.prepare("UPDATE verified_study_sessions SET started_at = ?, last_heartbeat_at = ? WHERE id = ?")
+      .bind(new Date(now - 10 * 60_000).toISOString(), new Date(now - 5 * 60_000).toISOString(), sessionId).run();
+
+    const response = await request("/leaderboard", {
+      userId: "fresh-user",
+      deviceSecret: "fresh-secret",
+      scope: "global",
+      period: "daily",
+    });
+    expect(response.status).toBe(200);
+
+    const session = await env.DB.prepare("SELECT status, credited_minutes AS creditedMinutes FROM verified_study_sessions WHERE id = ?")
+      .bind(sessionId).first<{ status: string; creditedMinutes: number }>();
+    expect(session?.status).toBe("active");
+    expect(Number(session?.creditedMinutes)).toBe(0);
+  });
+
+  it("settles a stale active session before returning a sync snapshot", async () => {
+    await createUser("sync-stale-user", "sync-stale-secret", "BCDK-2349");
+    await env.DB.prepare("INSERT INTO leaderboard_baselines (user_id, minutes, sessions) VALUES (?, 0, 0)")
+      .bind("sync-stale-user").run();
+
+    const start = await request("/verified-session/start", { userId: "sync-stale-user", deviceSecret: "sync-stale-secret" });
+    expect(start.status).toBe(200);
+    const { sessionId } = await start.json<{ sessionId: string }>();
+    const now = Date.now();
+    await env.DB.prepare("UPDATE verified_study_sessions SET started_at = ?, last_heartbeat_at = ? WHERE id = ?")
+      .bind(new Date(now - 90 * 60_000).toISOString(), new Date(now - 70 * 60_000).toISOString(), sessionId).run();
+
+    const sync = await request("/sync", {
+      user: {
+        userId: "sync-stale-user",
+        deviceSecret: "sync-stale-secret",
+        friendCode: "BCDK-2349",
+        displayName: "sync-stale-user",
+        lifetimeStudyMinutes: 90,
+        lifetimeStudySessions: 1,
+      },
+      stats: [],
+    });
+    expect(sync.status).toBe(200);
+    const payload = await sync.json<{ social: { cachedLeaderboards: { global: { daily: Array<{ userId: string; minutes: number }> } } } }>();
+    const self = payload.social.cachedLeaderboards.global.daily.find((entry) => entry.userId === "sync-stale-user");
+
+    expect(self?.minutes).toBeGreaterThan(0);
+    const session = await env.DB.prepare("SELECT status FROM verified_study_sessions WHERE id = ?")
+      .bind(sessionId).first<{ status: string }>();
+    expect(session?.status).toBe("finished");
+  });
 });

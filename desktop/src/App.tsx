@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ChangeEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
@@ -9,7 +9,6 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
-import type { PDFDocumentProxy } from "pdfjs-dist";
 import "./App.css";
 import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
@@ -47,7 +46,7 @@ import {
   groupTasksBySemesterId,
   isoDate,
 } from "./lib/metrics";
-import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, readSummaryPdf, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
+import { createVault, deleteNote, importSummaryFiles, isTauriApp, linkVault, listNotes, listSummaryFiles, pickExistingVaultDirectory, pickSummaryFiles, pickVaultParentDirectory, readDailyNote, readNote, readReferenceNote, writeDailyNote, writeNote, writeReferenceNote } from "./lib/obsidian";
 import type { SummaryFile, VaultNoteFile } from "./lib/obsidian";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
@@ -66,7 +65,7 @@ import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTrav
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 import privacyPolicyText from "../../PRIVACY.md?raw";
 
-type PdfJsModule = typeof import("pdfjs-dist");
+const SummaryPdfViewer = lazy(() => import("./components/SummaryPdfViewer").then((module) => ({ default: module.SummaryPdfViewer })));
 
 type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode" | "avatar"> & { lastSeenAt?: string | null };
 type ProfileBadge = {
@@ -3743,128 +3742,6 @@ function SquadArenaRow({ entry, period, isSelf, onOpen }: { entry: SocialSquadSc
   );
 }
 
-function SummaryPdfViewer({ vaultPath, path, title }: { vaultPath: string; path: string; title: string }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const renderTaskRef = useRef<{ cancel: () => void } | null>(null);
-  const [documentProxy, setDocumentProxy] = useState<PDFDocumentProxy | null>(null);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pageCount, setPageCount] = useState(0);
-  const [scale, setScale] = useState(1.25);
-  const [loading, setLoading] = useState(false);
-  const [rendering, setRendering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    let loadingTask: ReturnType<PdfJsModule["getDocument"]> | null = null;
-    setLoading(true);
-    setError(null);
-    setDocumentProxy(null);
-    setPageNumber(1);
-    setPageCount(0);
-
-    void Promise.all([
-      import("pdfjs-dist"),
-      import("pdfjs-dist/build/pdf.worker.mjs?url"),
-      readSummaryPdf(vaultPath, path),
-    ])
-      .then(([pdfjsLib, workerModule, bytes]) => {
-        if (cancelled) return null;
-        pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
-        loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(bytes) });
-        return loadingTask.promise;
-      })
-      .then((pdf) => {
-        if (!pdf) return;
-        return pdf;
-      })
-      .then((pdf) => {
-        if (!pdf) return;
-        if (cancelled) {
-          void pdf.cleanup();
-          return;
-        }
-        setDocumentProxy(pdf);
-        setPageCount(pdf.numPages);
-      })
-      .catch((loadError: unknown) => {
-        if (!cancelled) setError(getErrorMessage(loadError, "Could not load this PDF."));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-      renderTaskRef.current?.cancel();
-      renderTaskRef.current = null;
-      void loadingTask?.destroy();
-    };
-  }, [path, vaultPath]);
-
-  useEffect(() => {
-    if (!documentProxy || !canvasRef.current) return undefined;
-    let cancelled = false;
-    setRendering(true);
-    setError(null);
-    renderTaskRef.current?.cancel();
-
-    void documentProxy.getPage(pageNumber)
-      .then((page) => {
-        if (cancelled || !canvasRef.current) return;
-        const canvas = canvasRef.current;
-        const context = canvas.getContext("2d");
-        if (!context) throw new Error("Could not prepare PDF canvas.");
-
-        const viewport = page.getViewport({ scale });
-        const pixelRatio = window.devicePixelRatio || 1;
-        canvas.width = Math.floor(viewport.width * pixelRatio);
-        canvas.height = Math.floor(viewport.height * pixelRatio);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
-        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        context.clearRect(0, 0, viewport.width, viewport.height);
-
-        const renderTask = page.render({ canvas, canvasContext: context, viewport });
-        renderTaskRef.current = renderTask;
-        return renderTask.promise;
-      })
-      .catch((renderError: unknown) => {
-        if (cancelled) return;
-        if (renderError instanceof Error && renderError.name === "RenderingCancelledException") return;
-        setError(getErrorMessage(renderError, "Could not render this PDF page."));
-      })
-      .finally(() => {
-        if (!cancelled) setRendering(false);
-      });
-
-    return () => {
-      cancelled = true;
-      renderTaskRef.current?.cancel();
-      renderTaskRef.current = null;
-    };
-  }, [documentProxy, pageNumber, scale]);
-
-  return (
-    <div className="summary-pdf-viewer">
-      <div className="summary-pdf-controls">
-        <button type="button" className="ghost-button small-button" onClick={() => setPageNumber((current) => Math.max(1, current - 1))} disabled={!documentProxy || pageNumber <= 1}>Prev</button>
-        <span>Page {pageCount ? pageNumber : "-"} / {pageCount || "-"}</span>
-        <button type="button" className="ghost-button small-button" onClick={() => setPageNumber((current) => Math.min(pageCount, current + 1))} disabled={!documentProxy || pageNumber >= pageCount}>Next</button>
-        <button type="button" className="ghost-button small-button" onClick={() => setScale((current) => Math.max(0.7, Number((current - 0.15).toFixed(2))))} disabled={!documentProxy}>-</button>
-        <span>{Math.round(scale * 100)}%</span>
-        <button type="button" className="ghost-button small-button" onClick={() => setScale((current) => Math.min(2.5, Number((current + 0.15).toFixed(2))))} disabled={!documentProxy}>+</button>
-      </div>
-      <div className="summary-pdf-canvas-wrap" aria-busy={loading || rendering}>
-        {loading ? <p className="summary-pdf-status">Loading PDF...</p> : null}
-        {error ? <p className="summary-pdf-error">{error}</p> : null}
-        <canvas ref={canvasRef} aria-label={title} />
-        {rendering && !loading ? <p className="summary-pdf-status floating">Rendering page...</p> : null}
-      </div>
-    </div>
-  );
-}
-
 function GuidedTourOverlay({ help, stepIndex, onBack, onNext, onClose }: { help: PageHelp; stepIndex: number; onBack: () => void; onNext: () => void; onClose: () => void }) {
   const step = help.tour[stepIndex];
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -5093,17 +4970,22 @@ function App() {
       maybeReconcileOffline(previousAnchor, confirmedAt);
     };
 
-    const attemptHeartbeat = (sessionId: string) => {
+    function attemptHeartbeat(sessionId: string) {
       void heartbeatVerifiedSession(social, sessionId)
         .then(() => confirmAnchor(sessionId))
-        .catch(() => undefined);
-    };
+        .catch((error: unknown) => {
+          if (getErrorMessage(error, "").includes("Verified session not found")) {
+            verifiedSessionRef.current = null;
+            attemptStart();
+          }
+        });
+    }
 
-    const scheduleHeartbeats = (sessionId: string) => {
+    function scheduleHeartbeats(sessionId: string) {
       heartbeatInterval = window.setInterval(() => attemptHeartbeat(sessionId), VERIFIED_SESSION_HEARTBEAT_MS);
-    };
+    }
 
-    const attemptStart = () => {
+    function attemptStart() {
       void startVerifiedSession(social)
         .then(({ sessionId }) => {
           if (disposed || !timerRunningRef.current) {
@@ -5115,7 +4997,7 @@ function App() {
           return undefined;
         })
         .catch(() => undefined);
-    };
+    }
 
     // Ground-truth reconnect detection is "the next verified-session call actually succeeds" —
     // the `online` listener below just calls this sooner as a latency optimization; it never
@@ -8732,6 +8614,7 @@ function App() {
   }
 
   function applyPreset(label: string, study: number, breakMinutes: number, mode: "focus" | "exam" | "endless") {
+    if (state.timer.phase !== "idle") return;
     setTimerFaceEditing(false);
     setState((current) => ({
       ...current,
@@ -8856,7 +8739,9 @@ function App() {
       },
     }));
 
-    setFullscreen(true);
+    if (appStyle !== "wabi-sabi") {
+      setFullscreen(true);
+    }
   }
 
   function pauseTimer() {
@@ -11066,7 +10951,7 @@ function App() {
                   key={preset.label}
                   type="button"
                   className={`wabi-timer-mode-card ${state.timer.presetLabel === preset.label ? "active" : ""}`}
-                  disabled={state.timer.running}
+                  disabled={state.timer.phase !== "idle"}
                   onClick={() => applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode)}
                 >
                   <strong>{preset.label.replace(" 25/5", "").replace(" 52/17", "").replace(" 90/20", "")}</strong>
@@ -11076,7 +10961,7 @@ function App() {
               <button
                 type="button"
                 className={`wabi-timer-mode-card ${isCustomTimerPreset ? "active" : ""}`}
-                disabled={state.timer.running}
+                disabled={state.timer.phase !== "idle"}
                 onClick={() =>
                   setState((current) => ({
                     ...current,
@@ -11109,7 +10994,7 @@ function App() {
                     type="number"
                     min="1"
                     value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
-                    disabled={state.timer.running}
+                    disabled={state.timer.phase !== "idle"}
                     onChange={(event) => {
                       const next = Math.max(1, Number(event.target.value) || 1);
                       setState((current) => {
@@ -11133,7 +11018,7 @@ function App() {
                     <input
                       type="number"
                       min="0"
-                      disabled={state.timer.running}
+                      disabled={state.timer.phase !== "idle"}
                       value={state.timer.breakMinutes}
                       onChange={(event) =>
                         setState((current) => ({
@@ -13516,7 +13401,7 @@ function App() {
                     key={preset.label}
                     type="button"
                     className={`timer-preset-card ${state.timer.presetLabel === preset.label ? "active" : ""}`}
-                    disabled={state.timer.running}
+                    disabled={state.timer.phase !== "idle"}
                     onClick={() => applyPreset(preset.label, preset.study, preset.breakMinutes, preset.mode)}
                   >
                     <strong>{preset.label.replace(" 25/5", "").replace(" 52/17", "").replace(" 90/20", "")}</strong>
@@ -13526,7 +13411,7 @@ function App() {
                 <button
                   type="button"
                   className={`timer-preset-card ${isCustomTimerPreset ? "active" : ""}`}
-                  disabled={state.timer.running}
+                  disabled={state.timer.phase !== "idle"}
                   onClick={() =>
                     setState((current) => ({
                       ...current,
@@ -13562,7 +13447,7 @@ function App() {
                       type="number"
                       min="1"
                       value={state.timer.mode === "exam" ? state.timer.examMinutes : state.timer.studyMinutes}
-                      disabled={state.timer.running}
+                      disabled={state.timer.phase !== "idle"}
                       onChange={(event) => {
                         const next = Math.max(1, Number(event.target.value) || 1);
                         setState((current) => {
@@ -13589,7 +13474,7 @@ function App() {
                       <input
                         type="number"
                         min="0"
-                        disabled={state.timer.running}
+                        disabled={state.timer.phase !== "idle"}
                         value={state.timer.breakMinutes}
                         onChange={(event) =>
                           setState((current) => ({
@@ -14263,7 +14148,9 @@ function App() {
                               <button type="button" className="ghost-button small-button" onClick={() => revealItemInDir(selectedSummaryFile.path)}>Show file</button>
                             </div>
                             {selectedSummaryFile.kind === "pdf" ? (
-                              <SummaryPdfViewer vaultPath={state.settings.vaultPath} path={selectedSummaryFile.path} title={selectedSummaryFile.name} />
+                              <Suspense fallback={<p className="summary-pdf-status">Preparing PDF viewer...</p>}>
+                                <SummaryPdfViewer vaultPath={state.settings.vaultPath} path={selectedSummaryFile.path} title={selectedSummaryFile.name} />
+                              </Suspense>
                             ) : (
                               <div className="summary-image-viewer">
                                 <img src={selectedSummaryUrl} alt={selectedSummaryFile.name} />
@@ -16039,7 +15926,7 @@ function App() {
       ) : null}
       </>, document.body) : null}
 
-      {fullscreen && state.timer.phase !== "idle" ? (
+      {appStyle !== "wabi-sabi" && fullscreen && state.timer.phase !== "idle" ? (
         <div className="exam-fullscreen-overlay">
           <button
             type="button"

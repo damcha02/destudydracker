@@ -574,6 +574,25 @@ async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now 
   return { creditedMinutes, finishedAt: now.toISOString() };
 }
 
+async function settleStaleVerifiedSession(env: Env, userId: string, now = new Date()) {
+  const active = await env.DB.prepare(`
+    SELECT id, user_id AS userId, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt
+    FROM verified_study_sessions WHERE user_id = ? AND status = 'active'
+  `).bind(userId).first<VerifiedSessionRow>();
+  if (!active) return { settled: false, creditedMinutes: 0 };
+
+  const startedAt = parseServerTimestamp(active.startedAt);
+  const lastHeartbeatAt = parseServerTimestamp(active.lastHeartbeatAt);
+  if (!startedAt || !lastHeartbeatAt) return { settled: false, creditedMinutes: 0 };
+
+  const isPastMax = now.getTime() - startedAt.getTime() >= VERIFIED_SESSION_MAX_MS;
+  const isPastHeartbeatGrace = now.getTime() - lastHeartbeatAt.getTime() >= VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS;
+  if (!isPastMax && !isPastHeartbeatGrace) return { settled: false, creditedMinutes: 0 };
+
+  const result = await finishVerifiedSession(env, active, now);
+  return { settled: true, creditedMinutes: result.creditedMinutes };
+}
+
 async function handleVerifiedSessionStart(request: Request, env: Env) {
   const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
   const userId = cleanUserId(payload.userId);
@@ -2139,6 +2158,7 @@ async function handleSync(request: Request, env: Env, lightweight = false) {
   await upsertUser(env, payload.user, request);
   const userId = cleanUserId(payload.user.userId);
   const changedStatDates = await upsertStats(env, userId, payload.stats);
+  await settleStaleVerifiedSession(env, userId);
   await reconcileLifetimeTotals(env, userId);
   await upsertFeedPosts(env, userId, payload.feedPosts);
   const today = todayIso();
@@ -2704,6 +2724,7 @@ async function handleLeaderboard(request: Request, env: Env) {
   const payload = await readParamsOrJson<{ userId: string; deviceSecret: string; scope?: LeaderboardScope; period?: LeaderboardPeriod }>(request);
   const userId = cleanUserId(payload.userId);
   await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  await settleStaleVerifiedSession(env, userId);
   const scope = payload.scope === "friends" || payload.scope === "squad" ? payload.scope : "global";
   const period = payload.period === "daily" || payload.period === "overall" ? payload.period : "weekly";
   return json({ entries: await getLeaderboard(env, userId, scope, period) });
@@ -2731,6 +2752,7 @@ async function handlePlayerStats(request: Request, env: Env) {
   const deviceSecret = cleanDeviceSecret(payload.deviceSecret);
   const targetUserId = cleanUserId(payload.targetUserId);
   await verifyUser(env, userId, deviceSecret);
+  if (targetUserId === userId) await settleStaleVerifiedSession(env, userId);
 
   const targetUser = await env.DB.prepare("SELECT id, display_name AS displayName, friend_code AS friendCode, avatar_json AS avatarJson, last_seen_at AS lastSeenAt, show_hours_to_friends AS showHoursToFriends FROM users WHERE id = ?")
     .bind(targetUserId).first<{ id: string; displayName: string; friendCode: string; avatarJson: string; lastSeenAt: string | null; showHoursToFriends: number }>();
