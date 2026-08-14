@@ -137,30 +137,4 @@ describe("daily skribbl", () => {
     expect(payload.winner!.userId).toBe("skribbl-a");
     expect(payload.winner!.score).toBe(2);
   });
-
-  it("reset clears today's submissions and assigns a fresh theme", async () => {
-    await createUser("skribbl-a", "a-secret", "AAAA-1111");
-
-    const before = await SELF.fetch("https://test.local/skribbl/theme?userId=skribbl-a&deviceSecret=a-secret")
-      .then((response) => response.json<{ theme: string; submitted: boolean }>());
-    expect(before.submitted).toBe(false);
-
-    expect((await submitDrawing("skribbl-a", "a-secret")).status).toBe(200);
-
-    const afterSubmit = await SELF.fetch("https://test.local/skribbl/theme?userId=skribbl-a&deviceSecret=a-secret")
-      .then((response) => response.json<{ submitted: boolean }>());
-    expect(afterSubmit.submitted).toBe(true);
-
-    const reset = await postJson("/skribbl/reset", { userId: "skribbl-a", deviceSecret: "a-secret" });
-    expect(reset.status).toBe(200);
-
-    const afterReset = await SELF.fetch("https://test.local/skribbl/theme?userId=skribbl-a&deviceSecret=a-secret")
-      .then((response) => response.json<{ theme: string; submitted: boolean }>());
-    expect(afterReset.submitted).toBe(false);
-    expect(afterReset.theme).not.toBe(before.theme);
-
-    const gallery = await postJson("/skribbl/gallery", { userId: "skribbl-a", deviceSecret: "a-secret" });
-    const page = await gallery.json<{ drawings: unknown[] }>();
-    expect(page.drawings.length).toBe(0);
-  });
 });

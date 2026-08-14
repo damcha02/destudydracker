@@ -3394,46 +3394,6 @@ async function handleSkribblVote(request: Request, env: Env) {
   });
 }
 
-async function handleSkribblReset(request: Request, env: Env) {
-  const payload = await readJson<{ userId?: unknown; deviceSecret?: unknown }>(request);
-  const userId = String(payload.userId ?? "").trim();
-  await verifyUser(env, userId, String(payload.deviceSecret ?? ""));
-
-  const today = todayIso();
-  const current = await env.DB.prepare("SELECT theme_id AS themeId FROM skribbl_daily_themes WHERE date = ?")
-    .bind(today)
-    .first<{ themeId: number }>();
-  if (!current) return text("Nothing to reset. Today's theme is not assigned yet.", 400);
-
-  const drawings = await env.DB.prepare("SELECT id, r2_object_key AS r2ObjectKey, size_bytes AS sizeBytes FROM skribbl_drawings WHERE date = ?")
-    .bind(today)
-    .all<{ id: string; r2ObjectKey: string; sizeBytes: number }>();
-
-  let releasedBytes = 0;
-  for (const drawing of drawings.results) {
-    await env.FEED_IMAGES.delete(drawing.r2ObjectKey).catch(() => undefined);
-    await incrementR2Usage(env, { classA: 1 });
-    releasedBytes += Number(drawing.sizeBytes ?? 0);
-  }
-  if (drawings.results.length) {
-    await env.DB.prepare("DELETE FROM skribbl_votes WHERE drawing_id IN (SELECT id FROM skribbl_drawings WHERE date = ?)").bind(today).run();
-    await env.DB.prepare("DELETE FROM skribbl_drawings WHERE date = ?").bind(today).run();
-    const usage = await getR2Usage(env);
-    const nextStorageBytes = Math.max(0, usage.storageBytes - releasedBytes);
-    await env.DB.prepare(`
-      INSERT INTO r2_usage_monthly (month, storage_bytes, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(month) DO UPDATE SET storage_bytes = ?, updated_at = CURRENT_TIMESTAMP
-    `).bind(usageMonth(), nextStorageBytes, nextStorageBytes).run();
-  }
-
-  // The previously used theme keeps last_used_date = today, which the theme pool
-  // excludes, so the next assignment is guaranteed to be a different theme.
-  await env.DB.prepare("DELETE FROM skribbl_daily_themes WHERE date = ?").bind(today).run();
-
-  return json({ ok: true });
-}
-
 async function getSkribblWinnerForDate(env: Env, date: string) {
   return env.DB.prepare(`
     SELECT d.id AS drawingId, d.user_id AS userId, u.display_name AS displayName,
@@ -3603,7 +3563,6 @@ export default {
       if ((request.method === "GET" || request.method === "POST") && url.pathname === "/skribbl/gallery") return await handleSkribblGallery(request, env);
       if (request.method === "POST" && url.pathname === "/skribbl/submit") return await handleSkribblSubmit(request, env);
       if (request.method === "POST" && url.pathname === "/skribbl/vote") return await handleSkribblVote(request, env);
-      if (request.method === "POST" && url.pathname === "/skribbl/reset") return await handleSkribblReset(request, env);
       if (request.method === "GET" && url.pathname === "/skribbl/leaderboard") return await handleSkribblLeaderboard(request, env);
       if (request.method === "GET" && url.pathname.startsWith("/skribbl/drawing/")) return await handleSkribblDrawingGet(request, env, decodeURIComponent(url.pathname.slice("/skribbl/drawing/".length)));
       return text("Not found.", 404);
