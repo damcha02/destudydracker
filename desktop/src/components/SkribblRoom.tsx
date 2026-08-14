@@ -137,6 +137,7 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
   const [galleryOffset, setGalleryOffset] = useState(0);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [winner, setWinner] = useState<SkribblWinner | null>(null);
+  const [expandedDrawing, setExpandedDrawing] = useState<SkribblDrawing | null>(null);
 
   const loadGallery = useCallback(async (offset: number) => {
     if (!socialConfigured) return;
@@ -188,6 +189,15 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
       void getSkribblLeaderboard(social).then((data) => setWinner(data.winner)).catch(() => undefined);
     }
   }, [socialConfigured, social, themeDate]);
+
+  useEffect(() => {
+    if (!expandedDrawing) return;
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setExpandedDrawing(null);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedDrawing]);
 
   const snapshotForUndo = useCallback(() => {
     const canvas = canvasRef.current;
@@ -470,19 +480,24 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
               <div className="skribbl-gallery">
                 <div className="skribbl-gallery-head">
                   <h3>Gallery</h3>
-                <span className="skribbl-gallery-count">{drawings.length} drawing{drawings.length === 1 ? "" : "s"}</span>
-              </div>
+                  <span className="skribbl-gallery-count">{drawings.length} drawing{drawings.length === 1 ? "" : "s"}</span>
+                  <button type="button" className="skribbl-refresh-btn" onClick={() => void loadGallery(0)} disabled={galleryLoading} aria-label="Refresh gallery" title="Refresh gallery">
+                    <span className={galleryLoading ? "skribbl-refresh-spin" : ""}>{'↻'}</span>
+                  </button>
+                </div>
               {drawings.length ? (
                 <div className="skribbl-gallery-grid">
                   {drawings.map((drawing) => (
                     <div key={drawing.id} className="skribbl-drawing-card">
-                      <img src={drawing.imageUrl} alt={`Drawing by ${drawing.displayName}`} loading="lazy" />
+                      <button type="button" className="skribbl-drawing-thumb-btn" onClick={() => setExpandedDrawing(drawing)} aria-label={`Expand drawing by ${drawing.isSelf ? "you" : drawing.displayName}`}>
+                        <img src={drawing.imageUrl} alt={`Drawing by ${drawing.displayName}`} loading="lazy" />
+                      </button>
                       <div className="skribbl-drawing-meta">
                         <span className="skribbl-drawing-name">{drawing.isSelf ? "You" : drawing.displayName}</span>
                         <div className="skribbl-vote-row">
-                          <button type="button" className={`skribbl-vote-btn ${drawing.myVote === 1 ? "up active" : "up"}`} onClick={() => void castVote(drawing, 1)} disabled={drawing.isSelf} aria-label="Upvote">▲</button>
+                          <button type="button" className={`skribbl-vote-btn ${drawing.myVote === 1 ? "up active" : "up"}`} onClick={() => void castVote(drawing, 1)} disabled={drawing.isSelf} aria-label="Upvote">👍</button>
                           <span className="skribbl-vote-score">{drawing.voteScore}</span>
-                          <button type="button" className={`skribbl-vote-btn ${drawing.myVote === -1 ? "down active" : "down"}`} onClick={() => void castVote(drawing, -1)} disabled={drawing.isSelf} aria-label="Downvote">▼</button>
+                          <button type="button" className={`skribbl-vote-btn ${drawing.myVote === -1 ? "down active" : "down"}`} onClick={() => void castVote(drawing, -1)} disabled={drawing.isSelf} aria-label="Downvote">👎</button>
                         </div>
                       </div>
                     </div>
@@ -519,6 +534,14 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
             </div>
           </div>
         )}
+
+        {expandedDrawing ? (
+          <div className="skribbl-lightbox" onClick={() => setExpandedDrawing(null)} role="presentation">
+            <div className="skribbl-lightbox-frame">
+              <img src={expandedDrawing.imageUrl} alt={`Drawing by ${expandedDrawing.isSelf ? "you" : expandedDrawing.displayName}`} />
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

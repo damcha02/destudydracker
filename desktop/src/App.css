@@ -21265,6 +21265,77 @@ input[type="color"] {
   font-size: 1.15rem;
 }
 
+.skribbl-refresh-btn {
+  margin-left: auto;
+  border: 1px solid var(--line, var(--border));
+  border-radius: var(--r-pill, 999px);
+  padding: 4px 9px;
+  background: var(--surface-2, transparent);
+  color: var(--ink-3, var(--muted));
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skribbl-refresh-btn:hover:not(:disabled) {
+  background: var(--surface-raised, color-mix(in oklch, var(--accent) 14%, transparent));
+  color: var(--ink, var(--text));
+}
+
+.skribbl-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.skribbl-refresh-spin {
+  display: inline-block;
+  animation: skribbl-spin 0.8s linear infinite;
+}
+
+@keyframes skribbl-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.skribbl-drawing-thumb-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
+.skribbl-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: color-mix(in oklch, #000 72%, transparent);
+  backdrop-filter: blur(10px);
+  cursor: zoom-out;
+}
+
+.skribbl-lightbox-frame {
+  max-width: 94vw;
+  max-height: 90vh;
+  border: 1px solid color-mix(in oklch, white 18%, transparent);
+  border-radius: 22px;
+  padding: 10px;
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow-lg);
+}
+
+.skribbl-lightbox-frame img {
+  display: block;
+  max-width: calc(94vw - 20px);
+  max-height: calc(90vh - 20px);
+  object-fit: contain;
+  border-radius: 14px;
+}
+
 .skribbl-gallery-count {
   color: var(--muted);
   font-size: 0.78rem;
@@ -21318,10 +21389,10 @@ input[type="color"] {
 .skribbl-vote-btn {
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 2px 6px;
+  padding: 3px 7px;
   background: transparent;
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -21407,46 +21478,3 @@ input[type="color"] {
   font-size: 0.8rem;
 }
 
-/* --- Daily Skribbl game card testing hooks --- */
-.wabi-game-cell,
-.break-game-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-
-.wabi-game-cell > .wabi-game-card,
-.break-game-cell > .break-game-card {
-  flex: 1;
-}
-
-.game-reset-btn {
-  align-self: flex-start;
-  border: 1px dashed var(--border, var(--line));
-  border-radius: 10px;
-  padding: 5px 12px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 0.76rem;
-  cursor: pointer;
-}
-
-.game-reset-btn:hover {
-  border-color: var(--accent-line);
-  color: var(--text);
-}
-
-.game-reset-notice {
-  font-size: 0.74rem;
-  color: var(--muted);
-}
-
-.game-reset-notice.ok {
-  color: #43a047;
-}
-
-.game-reset-notice.no {
-  color: #e53935;
-}

@@ -13,7 +13,6 @@ import "./App.css";
 import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import SkribblRoom from "./components/SkribblRoom";
-import { resetSkribbl } from "./lib/skribbl";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
 import {
@@ -4112,17 +4111,6 @@ function App() {
   const [showFlagglePuzzle, setShowFlagglePuzzle] = useState(false);
   const [showTravlePuzzle, setShowTravlePuzzle] = useState(false);
   const [showSkribblPuzzle, setShowSkribblPuzzle] = useState(false);
-  const [skribblResetNotice, setSkribblResetNotice] = useState<{ ok: boolean; message: string } | null>(null);
-
-  const handleSkribblReset = async () => {
-    setSkribblResetNotice(null);
-    try {
-      await resetSkribbl(state.social);
-      setSkribblResetNotice({ ok: true, message: "Theme reset. Open Daily Skribbl for a fresh theme." });
-    } catch (resetError) {
-      setSkribblResetNotice({ ok: false, message: resetError instanceof Error ? resetError.message : "Reset failed." });
-    }
-  };
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
   const [wordleDraft, setWordleDraft] = useState("");
@@ -11162,7 +11150,7 @@ function App() {
               <div className="wabi-games-grid" data-tour="break-games">
                 {studyBreakGames.map((game) => {
                   const unlocked = effectiveUnlocked.includes(game.name);
-                  const playable = unlocked || game.name === "Daily Skribbl";
+                  const playable = unlocked;
                   const card = (
                     <div key={game.name} className={`wabi-game-card ${playable ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`} onAnimationEnd={() => setCelebrating(null)}>
                       <div className="wabi-game-head"><strong>{game.name}</strong>{playable ? <span className="wabi-game-tag">READY</span> : null}</div>
@@ -11180,13 +11168,7 @@ function App() {
                       </div>
                     </div>
                   );
-                  return game.name === "Daily Skribbl" ? (
-                    <div key={game.name} className="wabi-game-cell">
-                      {card}
-                      <button type="button" className="game-reset-btn" data-tour="break-game-action" onClick={() => void handleSkribblReset()}>Reset theme</button>
-                      {skribblResetNotice ? <span className={`game-reset-notice ${skribblResetNotice.ok ? "ok" : "no"}`}>{skribblResetNotice.message}</span> : null}
-                    </div>
-                  ) : card;
+                  return card;
                 })}
               </div>
             </div>
@@ -15331,9 +15313,10 @@ function App() {
             <div className="break-card-grid" data-tour="break-games">
               {studyBreakGames.map((game) => {
                 const unlocked = effectiveUnlocked.includes(game.name);
-                const playable = unlocked || game.name === "Daily Skribbl";
+                const playable = unlocked;
                 const card = (
                   <div
+                    key={game.name}
                     className={`break-game-card ${playable ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
                     onAnimationEnd={() => setCelebrating(null)}
                   >
@@ -15400,13 +15383,7 @@ function App() {
                     </div>
                   </div>
                 );
-                return game.name === "Daily Skribbl" ? (
-                  <div key={game.name} className="break-game-cell">
-                    {card}
-                    <button type="button" className="game-reset-btn" data-tour="break-game-action" onClick={() => void handleSkribblReset()}>Reset theme</button>
-                    {skribblResetNotice ? <span className={`game-reset-notice ${skribblResetNotice.ok ? "ok" : "no"}`}>{skribblResetNotice.message}</span> : null}
-                  </div>
-                ) : card;
+                return card;
               })}
             </div>
 

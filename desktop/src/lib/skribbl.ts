@@ -110,10 +110,3 @@ export function voteSkribblDrawing(social: SocialState, drawingId: string, vote:
     jsonBody({ userId: social.userId, deviceSecret: social.deviceSecret, drawingId, vote }),
   );
 }
-
-export function resetSkribbl(social: SocialState) {
-  return requestSkribbl<{ ok: boolean }>(
-    "/skribbl/reset",
-    jsonBody({ userId: social.userId, deviceSecret: social.deviceSecret }),
-  );
-}
