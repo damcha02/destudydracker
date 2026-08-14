@@ -153,26 +153,35 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
     }
   }, [socialConfigured, social, themeDate]);
 
+  const loadTheme = useCallback(async () => {
+    if (!socialConfigured) return;
+    setError(null);
+    try {
+      const data = await getSkribblTheme(social);
+      setTheme(data.theme);
+      setThemeDate(data.date);
+      setSubmitted(data.submitted);
+      setMyImageUrl(data.imageUrl);
+      setPhase("intro");
+      if (data.submitted) await loadGallery(0);
+    } catch (requestError) {
+      setTheme("");
+      setSubmitted(false);
+      const message = requestError instanceof Error ? requestError.message : "";
+      setError(/Not found/i.test(message)
+        ? "Daily Skribbl isn't live on the server yet. If this keeps happening, re-deploy the worker."
+        : message || "Could not reach the Daily Skribbl server.");
+      setPhase("intro");
+    }
+  }, [socialConfigured, social, loadGallery]);
+
   useEffect(() => {
     if (!socialConfigured) {
       setPhase("intro");
       return;
     }
-    void (async () => {
-      try {
-        const data = await getSkribblTheme(social);
-        setTheme(data.theme);
-        setThemeDate(data.date);
-        setSubmitted(data.submitted);
-        setMyImageUrl(data.imageUrl);
-        setPhase("intro");
-        if (data.submitted) await loadGallery(0);
-      } catch (requestError) {
-        setError(requestError instanceof Error ? requestError.message : "Could not reach the Daily Skribbl server.");
-        setPhase("intro");
-      }
-    })();
-  }, [socialConfigured, social, loadGallery]);
+    void loadTheme();
+  }, [socialConfigured, social, loadTheme]);
 
   useEffect(() => {
     if (socialConfigured && themeDate) {
@@ -368,7 +377,12 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
           <button type="button" className="skribbl-close-btn" onClick={onClose} aria-label="Close Daily Skribbl">✕</button>
         </div>
 
-        {error ? <div className="skribbl-error" role="alert">{error}</div> : null}
+        {error ? (
+          <div className="skribbl-error" role="alert">
+            <p>{error}</p>
+            <button type="button" className="skribbl-retry-btn" onClick={() => void loadTheme()}>Try again</button>
+          </div>
+        ) : null}
 
         {!socialConfigured ? (
           <div className="skribbl-empty">
@@ -452,9 +466,10 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
               </div>
             )}
 
-            <div className="skribbl-gallery">
-              <div className="skribbl-gallery-head">
-                <h3>Gallery</h3>
+            {submitted ? (
+              <div className="skribbl-gallery">
+                <div className="skribbl-gallery-head">
+                  <h3>Gallery</h3>
                 <span className="skribbl-gallery-count">{drawings.length} drawing{drawings.length === 1 ? "" : "s"}</span>
               </div>
               {drawings.length ? (
@@ -481,7 +496,10 @@ export default function SkribblRoom({ state, onClose }: SkribblRoomProps) {
                   {galleryLoading ? "Loading…" : "Load more"}
                 </button>
               ) : null}
-            </div>
+              </div>
+            ) : (
+              <p className="skribbl-intro-note">The gallery unlocks after you submit your drawing today.</p>
+            )}
 
             <div className="skribbl-leaderboard">
               <div className="skribbl-gallery-head">

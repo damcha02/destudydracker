@@ -20984,6 +20984,30 @@ input[type="color"] {
   background: color-mix(in oklch, var(--danger, #e53935) 12%, transparent);
   color: var(--text);
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.skribbl-error p {
+  margin: 0;
+}
+
+.skribbl-retry-btn {
+  border: 1px solid color-mix(in oklch, var(--danger, #e53935) 45%, transparent);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.skribbl-retry-btn:hover {
+  background: color-mix(in oklch, var(--danger, #e53935) 12%, transparent);
 }
 
 .skribbl-empty {
