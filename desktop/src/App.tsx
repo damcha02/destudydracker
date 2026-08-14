@@ -12,6 +12,8 @@ import { isPermissionGranted, requestPermission, sendNotification } from "@tauri
 import "./App.css";
 import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
+import SkribblRoom from "./components/SkribblRoom";
+import { resetSkribbl } from "./lib/skribbl";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
 import {
@@ -346,7 +348,7 @@ const studyBreakGames = [
   { name: "Wordle", url: "https://www.nytimes.com/games/wordle", desc: "Guess the 5-letter word in 6 tries" },
   { name: "Travle", url: "", desc: "Build a border route between countries" },
   { name: "Flaggle", url: "", desc: "Guess the flag from shared colors" },
-  { name: "Strands", url: "https://www.nytimes.com/games/strands", desc: "Find hidden words in a grid" },
+  { name: "Daily Skribbl", url: "", desc: "Draw today's theme, then vote on the gallery" },
   { name: "Geodle", url: "", desc: "Guess the country from geography clues" },
 ];
 const STUDY_BREAK_GAME_COUNT = studyBreakGames.length;
@@ -4109,6 +4111,18 @@ function App() {
   const [showGeodlePuzzle, setShowGeodlePuzzle] = useState(false);
   const [showFlagglePuzzle, setShowFlagglePuzzle] = useState(false);
   const [showTravlePuzzle, setShowTravlePuzzle] = useState(false);
+  const [showSkribblPuzzle, setShowSkribblPuzzle] = useState(false);
+  const [skribblResetNotice, setSkribblResetNotice] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleSkribblReset = async () => {
+    setSkribblResetNotice(null);
+    try {
+      await resetSkribbl(state.social);
+      setSkribblResetNotice({ ok: true, message: "Theme reset. Open Daily Skribbl for a fresh theme." });
+    } catch (resetError) {
+      setSkribblResetNotice({ ok: false, message: resetError instanceof Error ? resetError.message : "Reset failed." });
+    }
+  };
   const [durakGameState, setDurakGameState] = useState<DurakGameState | null>(null);
   const [durakSelected, setDurakSelected] = useState<number[]>([]);
   const [wordleDraft, setWordleDraft] = useState("");
@@ -11148,20 +11162,31 @@ function App() {
               <div className="wabi-games-grid" data-tour="break-games">
                 {studyBreakGames.map((game) => {
                   const unlocked = effectiveUnlocked.includes(game.name);
-                  return <div key={game.name} className={`wabi-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`} onAnimationEnd={() => setCelebrating(null)}>
-                    <div className="wabi-game-head"><strong>{game.name}</strong>{unlocked ? <span className="wabi-game-tag">READY</span> : null}</div>
-                    <span className="wabi-game-desc">{game.desc}</span>
-                    <div className="wabi-game-foot">
-                      {unlocked ? (
-                        game.name === "Daily Durak" ? <><span className="wabi-game-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span><button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>PLAY</button></>
-                          : game.name === "Wordle" ? <>{wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="wabi-game-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>PLAY</button></>
-                            : game.name === "Travle" ? <>{travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="wabi-game-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>PLAY</button></>
-                              : game.name === "Geodle" ? <>{geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="wabi-game-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>PLAY</button></>
-                                : game.name === "Flaggle" ? <>{flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="wabi-game-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>PLAY</button></>
-                                  : <a href={game.url} target="_blank" rel="noreferrer" className="wabi-text-link" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>PLAY</a>
-                      ) : canUnlockMore ? <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>UNLOCK</button> : <span className="wabi-game-progress">~{minsUntilNext} min</span>}
+                  const playable = unlocked || game.name === "Daily Skribbl";
+                  const card = (
+                    <div key={game.name} className={`wabi-game-card ${playable ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`} onAnimationEnd={() => setCelebrating(null)}>
+                      <div className="wabi-game-head"><strong>{game.name}</strong>{playable ? <span className="wabi-game-tag">READY</span> : null}</div>
+                      <span className="wabi-game-desc">{game.desc}</span>
+                      <div className="wabi-game-foot">
+                        {playable ? (
+                          game.name === "Daily Durak" ? <><span className="wabi-game-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span><button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowDurakPuzzle(true); }}>PLAY</button></>
+                            : game.name === "Wordle" ? <>{wordlePuzzleIsToday && state.wordlePuzzle.completed ? <span className="wabi-game-progress">{state.wordlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowWordlePuzzle(true); }}>PLAY</button></>
+                              : game.name === "Travle" ? <>{travlePuzzleIsToday && state.travlePuzzle.completed ? <span className="wabi-game-progress">{state.travlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowTravlePuzzle(true); }}>PLAY</button></>
+                                : game.name === "Geodle" ? <>{geodlePuzzleIsToday && state.geodlePuzzle.completed ? <span className="wabi-game-progress">{state.geodlePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowGeodlePuzzle(true); }}>PLAY</button></>
+                                  : game.name === "Flaggle" ? <>{flagglePuzzleIsToday && state.flagglePuzzle.completed ? <span className="wabi-game-progress">{state.flagglePuzzle.won ? "Solved" : "Failed"}</span> : <span />}<button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowFlagglePuzzle(true); }}>PLAY</button></>
+                                    : game.name === "Daily Skribbl" ? <><span className="wabi-game-progress">Daily</span><button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowSkribblPuzzle(true); }}>PLAY</button></>
+                                      : <a href={game.url} target="_blank" rel="noreferrer" className="wabi-text-link" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>PLAY</a>
+                        ) : canUnlockMore ? <button type="button" className="wabi-text-link" data-tour="break-game-action" onClick={() => { unlockGame(game.name); setCelebrating(game.name); }}>UNLOCK</button> : <span className="wabi-game-progress">~{minsUntilNext} min</span>}
+                      </div>
                     </div>
-                  </div>;
+                  );
+                  return game.name === "Daily Skribbl" ? (
+                    <div key={game.name} className="wabi-game-cell">
+                      {card}
+                      <button type="button" className="game-reset-btn" data-tour="break-game-action" onClick={() => void handleSkribblReset()}>Reset theme</button>
+                      {skribblResetNotice ? <span className={`game-reset-notice ${skribblResetNotice.ok ? "ok" : "no"}`}>{skribblResetNotice.message}</span> : null}
+                    </div>
+                  ) : card;
                 })}
               </div>
             </div>
@@ -15306,10 +15331,10 @@ function App() {
             <div className="break-card-grid" data-tour="break-games">
               {studyBreakGames.map((game) => {
                 const unlocked = effectiveUnlocked.includes(game.name);
-                return (
+                const playable = unlocked || game.name === "Daily Skribbl";
+                const card = (
                   <div
-                    key={game.name}
-                    className={`break-game-card ${unlocked ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
+                    className={`break-game-card ${playable ? "unlocked" : "locked"} ${celebrating === game.name ? "celebrating" : ""}`}
                     onAnimationEnd={() => setCelebrating(null)}
                   >
                     <div className="break-game-main">
@@ -15317,7 +15342,7 @@ function App() {
                       <span>{game.desc}</span>
                     </div>
                     <div className="break-game-side">
-                      {unlocked ? (
+                      {playable ? (
                         game.name === "Daily Durak" ? (
                           <div className="break-game-durak">
                             <span className="break-durak-progress">{(state.durakPuzzle.solvedCount || 0)}/3</span>
@@ -15353,6 +15378,13 @@ function App() {
                               Play
                             </button>
                           </div>
+                        ) : game.name === "Daily Skribbl" ? (
+                          <div className="break-game-durak">
+                            <span className="break-durak-progress">Daily</span>
+                            <button type="button" className="design-chip" data-tour="break-game-action" onClick={() => { logPlayedBreak(game.name); setShowSkribblPuzzle(true); }}>
+                              Play
+                            </button>
+                          </div>
                         ) : (
                           <a href={game.url} target="_blank" rel="noreferrer" className="design-chip" data-tour="break-game-action" onClick={() => logPlayedBreak(game.name)}>
                             Play
@@ -15368,6 +15400,13 @@ function App() {
                     </div>
                   </div>
                 );
+                return game.name === "Daily Skribbl" ? (
+                  <div key={game.name} className="break-game-cell">
+                    {card}
+                    <button type="button" className="game-reset-btn" data-tour="break-game-action" onClick={() => void handleSkribblReset()}>Reset theme</button>
+                    {skribblResetNotice ? <span className={`game-reset-notice ${skribblResetNotice.ok ? "ok" : "no"}`}>{skribblResetNotice.message}</span> : null}
+                  </div>
+                ) : card;
               })}
             </div>
 
@@ -15413,7 +15452,7 @@ function App() {
         </section>
       ) : null}
 
-      {(showTravlePuzzle || showFlagglePuzzle || showGeodlePuzzle || showWordlePuzzle || showDurakPuzzle) ? createPortal(<>
+      {(showTravlePuzzle || showFlagglePuzzle || showGeodlePuzzle || showWordlePuzzle || showDurakPuzzle || showSkribblPuzzle) ? createPortal(<>
       {showTravlePuzzle ? (
         <div className="travle-overlay" onClick={() => setShowTravlePuzzle(false)} role="presentation">
           <div className="travle-modal" onClick={(event) => event.stopPropagation()} role="dialog" aria-label="Daily Travle puzzle">
@@ -15923,6 +15962,10 @@ function App() {
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {showSkribblPuzzle ? (
+        <SkribblRoom state={state} onClose={() => setShowSkribblPuzzle(false)} />
       ) : null}
       </>, document.body) : null}
 

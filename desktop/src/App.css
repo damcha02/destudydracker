@@ -20909,3 +20909,520 @@ input[type="color"] {
     gap: 8px;
   }
 }
+
+/* --- Daily Skribbl --- */
+.skribbl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.58);
+}
+
+.skribbl-modal {
+  width: min(960px, 100%);
+  max-height: 94vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 12% 0%, color-mix(in oklch, var(--accent) 20%, transparent), transparent 36%),
+    var(--surface);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.42);
+}
+
+.skribbl-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skribbl-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: clamp(1.45rem, 4vw, 2.1rem);
+  letter-spacing: -0.04em;
+}
+
+.skribbl-kicker {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 900;
+}
+
+.skribbl-close-btn {
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 10px;
+  padding: 5px 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.skribbl-close-btn:hover {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+.skribbl-error {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in oklch, var(--danger, #e53935) 45%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--danger, #e53935) 12%, transparent);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.skribbl-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.skribbl-body {
+  display: grid;
+  gap: 14px;
+}
+
+.skribbl-theme-card {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+.skribbl-theme-card strong {
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+}
+
+.skribbl-theme-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.skribbl-intro {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 12px 0;
+}
+
+.skribbl-intro-note {
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+  max-width: 42ch;
+}
+
+.skribbl-start-btn,
+.skribbl-submit-btn,
+.skribbl-more-btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 22px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.skribbl-start-btn:hover,
+.skribbl-submit-btn:hover,
+.skribbl-more-btn:hover {
+  background: var(--accent-strong);
+}
+
+.skribbl-start-btn:disabled,
+.skribbl-submit-btn:disabled,
+.skribbl-more-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.skribbl-thumb {
+  max-width: 240px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+}
+
+.skribbl-draw-area {
+  display: grid;
+  gap: 10px;
+}
+
+.skribbl-toolbar,
+.skribbl-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.skribbl-tool-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border);
+}
+
+.skribbl-tool-btn {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.skribbl-tool-btn:hover {
+  border-color: var(--accent-line);
+}
+
+.skribbl-tool-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
+.skribbl-tool-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.skribbl-size-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.skribbl-size-btn::after {
+  content: "";
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.skribbl-size-btn.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.skribbl-color-row {
+  flex-wrap: wrap;
+}
+
+.skribbl-color-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 2px solid var(--surface);
+  cursor: pointer;
+  padding: 0;
+}
+
+.skribbl-color-btn.active {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.skribbl-custom-color {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 2px dashed var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.skribbl-custom-color input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.skribbl-custom-color span {
+  position: absolute;
+  inset: 0;
+}
+
+.skribbl-canvas-wrap {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.skribbl-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  background: #fff;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.skribbl-timer {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface) 85%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.skribbl-canvas-wrap[data-low="true"] .skribbl-timer {
+  color: #e53935;
+}
+
+.skribbl-submit-btn {
+  justify-self: center;
+}
+
+.skribbl-gallery,
+.skribbl-leaderboard {
+  display: grid;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.skribbl-gallery-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.skribbl-gallery-head h3 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+}
+
+.skribbl-gallery-count {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.skribbl-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.skribbl-drawing-card {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--surface) 96%, transparent);
+}
+
+.skribbl-drawing-card img {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.skribbl-drawing-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.skribbl-drawing-name {
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skribbl-vote-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.skribbl-vote-btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.skribbl-vote-btn:hover:not(:disabled) {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+.skribbl-vote-btn.up.active {
+  background: color-mix(in oklch, #43a047 18%, transparent);
+  border-color: #43a047;
+  color: #43a047;
+}
+
+.skribbl-vote-btn.down.active {
+  background: color-mix(in oklch, #e53935 18%, transparent);
+  border-color: #e53935;
+  color: #e53935;
+}
+
+.skribbl-vote-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.skribbl-vote-score {
+  min-width: 24px;
+  text-align: center;
+  color: var(--text);
+  font-weight: 800;
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.skribbl-gallery-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+}
+
+.skribbl-more-btn {
+  justify-self: center;
+  background: transparent;
+  color: var(--accent-strong);
+  border: 1px solid var(--accent-line);
+}
+
+.skribbl-more-btn:hover {
+  background: var(--accent-soft);
+}
+
+.skribbl-winner-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(120deg, color-mix(in oklch, #f9a825 18%, transparent), color-mix(in oklch, var(--surface) 92%, transparent));
+}
+
+.skribbl-winner-trophy {
+  font-size: 1.6rem;
+}
+
+.skribbl-winner-card div {
+  display: grid;
+  gap: 2px;
+}
+
+.skribbl-winner-card strong {
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+}
+
+.skribbl-winner-score {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+/* --- Daily Skribbl game card testing hooks --- */
+.wabi-game-cell,
+.break-game-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wabi-game-cell > .wabi-game-card,
+.break-game-cell > .break-game-card {
+  flex: 1;
+}
+
+.game-reset-btn {
+  align-self: flex-start;
+  border: 1px dashed var(--border, var(--line));
+  border-radius: 10px;
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+
+.game-reset-btn:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+.game-reset-notice {
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.game-reset-notice.ok {
+  color: #43a047;
+}
+
+.game-reset-notice.no {
+  color: #e53935;
+}
