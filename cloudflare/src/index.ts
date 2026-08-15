@@ -120,7 +120,15 @@ const MAX_USER_AGENT_LENGTH = 300;
 const MAX_LOG_PATH_LENGTH = 200;
 const MAX_LOG_DETAIL_LENGTH = 300;
 const VERIFIED_SESSION_HEARTBEAT_MS = 15 * 60 * 1000;
+// Heartbeat staleness tolerance: how long past the expected cadence a session must go silent
+// before settleStaleVerifiedSession treats it as abandoned and finalizes it. This is a liveness
+// check only — it decides *when* a session gets settled, not how much gets credited once it does.
 const VERIFIED_SESSION_GRACE_MS = 5 * 60 * 1000;
+// Normal-credit disconnect grace: how long past the last confirmed heartbeat a session keeps
+// earning full-weight ("normal") credit before the remainder of a gap falls back to the
+// lower-trust offline-reconciliation path. Deliberately a separate constant from
+// VERIFIED_SESSION_GRACE_MS so liveness detection and credit policy can be tuned independently.
+const VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS = 2 * 60 * 60 * 1000;
 const VERIFIED_SESSION_MAX_MS = 4 * 60 * 60 * 1000;
 // Hard ceiling per offline-credit reconciliation call, independent of the plausibility-rate cap
 // below — bounds worst-case payload/claim size (e.g. a multi-day trip) rather than daily rate.
@@ -541,16 +549,26 @@ function verifiedSessionCredits(startedAt: Date, creditedMinutes: number) {
   return credits;
 }
 
+/**
+ * The instant past which a verified session stops earning full-weight credit: bounded by the
+ * hard per-session cap (VERIFIED_SESSION_MAX_MS) and by how far past the last confirmed heartbeat
+ * normal-credit grace extends (VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS). Shared by finishVerifiedSession
+ * (what actually gets written to verified_daily_stats) and handleVerifiedSessionReconcileOffline's
+ * still-active branch (where the lower-trust offline path should pick up from) so the two never drift.
+ */
+function normalCreditBoundary(startedAt: Date, lastHeartbeatAt: Date) {
+  return Math.min(
+    startedAt.getTime() + VERIFIED_SESSION_MAX_MS,
+    lastHeartbeatAt.getTime() + VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS,
+  );
+}
+
 async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now = new Date()) {
   const startedAt = parseServerTimestamp(session.startedAt);
   const lastHeartbeatAt = parseServerTimestamp(session.lastHeartbeatAt);
   if (!startedAt || !lastHeartbeatAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
 
-  const creditedEnd = Math.min(
-    now.getTime(),
-    startedAt.getTime() + VERIFIED_SESSION_MAX_MS,
-    lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS,
-  );
+  const creditedEnd = Math.min(now.getTime(), normalCreditBoundary(startedAt, lastHeartbeatAt));
   const creditedMinutes = Math.max(0, Math.floor((creditedEnd - startedAt.getTime()) / 60_000));
   const credits = verifiedSessionCredits(startedAt, creditedMinutes);
   const finishedDate = serverDateIso(new Date(creditedEnd));
@@ -743,10 +761,20 @@ async function handleVerifiedSessionReconcileOffline(request: Request, env: Env)
   } else {
     const lastHeartbeatAt = parseServerTimestamp(anchor.lastHeartbeatAt);
     if (!lastHeartbeatAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
-    gapStart = new Date(Math.min(
-      anchorStartedAt.getTime() + VERIFIED_SESSION_MAX_MS,
-      lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS,
-    ));
+    gapStart = new Date(normalCreditBoundary(anchorStartedAt, lastHeartbeatAt));
+  }
+
+  // A prior reconciliation call for this same anchor already credited (or deliberately declined,
+  // via capping) everything up through its own call-time instant — never re-open that window.
+  // This is what makes duplicate/overlapping/reordered reconcile-offline requests for the same
+  // anchor a no-op past whatever the earliest call already covered, without needing a schema
+  // change: `gap_ended_at` in the audit ledger already records exactly that instant per call.
+  const priorReconciliation = await env.DB.prepare(`
+    SELECT MAX(gap_ended_at) AS coveredUntil FROM verified_offline_reconciliations WHERE anchor_session_id = ?
+  `).bind(anchorSessionId).first<{ coveredUntil: string | null }>();
+  const priorCoveredUntil = priorReconciliation?.coveredUntil ? parseServerTimestamp(priorReconciliation.coveredUntil) : null;
+  if (priorCoveredUntil && priorCoveredUntil.getTime() > gapStart.getTime()) {
+    gapStart = priorCoveredUntil;
   }
 
   const now = new Date();
