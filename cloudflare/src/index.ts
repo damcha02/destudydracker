@@ -1287,9 +1287,19 @@ async function canViewFeedPost(env: Env, userId: string, postId: string) {
   return { allowed: Boolean(friendship), missing: false };
 }
 
-function leaderboardWhere(period: LeaderboardPeriod) {
-  if (period === "daily") return { clause: "WHERE ds.date = ?", params: [todayIso()] };
-  if (period === "weekly") return { clause: "WHERE ds.date >= ?", params: [weekStartIso()] };
+/**
+ * Date/week filter for competitive_daily_stats — a fragment for the LEFT JOIN's ON condition,
+ * NOT a bare WHERE clause. Appending it to WHERE instead silently turns the LEFT JOIN into an
+ * INNER JOIN for any user with zero matching daily-stats rows for the period (no study time
+ * today, or none this week): the join produces a row with ds.* all NULL, `ds.date = ?` is never
+ * true against NULL, so the user's entire row — including the COALESCE(SUM(...), 0) that's
+ * supposed to give them a correct 0 — gets dropped from the result set instead. Keeping it in
+ * the ON clause filters which `ds` rows the JOIN attaches, before COALESCE ever runs, so a user
+ * with no matching rows still gets exactly one output row with 0 minutes/sessions.
+ */
+function leaderboardDailyStatsJoinFilter(period: LeaderboardPeriod) {
+  if (period === "daily") return { clause: "AND ds.date = ?", params: [todayIso()] };
+  if (period === "weekly") return { clause: "AND ds.date >= ?", params: [weekStartIso()] };
   return { clause: "", params: [] };
 }
 
@@ -1397,10 +1407,7 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
       isSelf: row.userId === userId,
     }));
   }
-  const periodFilter = leaderboardWhere(period);
-  const clauses = [`u.id IN (${memberIds.map(() => "?").join(",")})`];
-  const params = [...memberIds, ...periodFilter.params];
-  if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
+  const periodFilter = leaderboardDailyStatsJoinFilter(period);
   const rows = await env.DB.prepare(`
     SELECT u.id AS userId, u.display_name AS displayName, u.friend_code AS friendCode, u.avatar_json AS avatarJson,
       sm.role AS role,
@@ -1409,12 +1416,12 @@ async function getSquadLeaderboardForMemberIds(env: Env, userId: string, memberI
       MAX(ds.date) AS lastActiveDate
     FROM users u
     JOIN squad_members sm ON sm.user_id = u.id
-    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
-    WHERE ${clauses.join(" AND ")}
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id ${periodFilter.clause}
+    WHERE u.id IN (${memberIds.map(() => "?").join(",")})
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, sm.role, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
     LIMIT 50
-  `).bind(...params).all<{
+  `).bind(...periodFilter.params, ...memberIds).all<{
     userId: string;
     displayName: string;
     friendCode: string;
@@ -1885,10 +1892,9 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
       isSelf: row.userId === userId,
     }));
   }
-  const periodFilter = leaderboardWhere(period);
+  const periodFilter = leaderboardDailyStatsJoinFilter(period);
   const clauses = [];
   const params = [...periodFilter.params];
-  if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
   if (scope === "global") clauses.push("u.is_private = 0");
   if (allowedIds.length) {
     clauses.push(`u.id IN (${allowedIds.map(() => "?").join(",")})`);
@@ -1905,7 +1911,7 @@ async function getLeaderboard(env: Env, userId: string, scope: LeaderboardScope,
       COALESCE(SUM(ds.sessions), 0) AS sessions,
       MAX(ds.date) AS lastActiveDate
     FROM users u
-    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
+    LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id ${periodFilter.clause}
     ${whereClause}
     GROUP BY u.id, u.display_name, u.friend_code, u.avatar_json, u.lifetime_study_minutes, u.lifetime_study_sessions
     ORDER BY minutes DESC, displayName ASC
@@ -2807,17 +2813,14 @@ async function handlePlayerStats(request: Request, env: Env) {
       `).bind(targetUserId).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
       return row ?? { minutes: 0, sessions: 0, lastActiveDate: null };
     }
-    const periodFilter = leaderboardWhere(period);
-    const clauses = [`u.id = ?`];
-    const params: string[] = [targetUserId, ...periodFilter.params];
-    if (periodFilter.clause) clauses.push(periodFilter.clause.replace(/^WHERE\s+/, ""));
+    const periodFilter = leaderboardDailyStatsJoinFilter(period);
     const row = await env.DB.prepare(`
       SELECT COALESCE(SUM(ds.minutes), 0) AS minutes, COALESCE(SUM(ds.sessions), 0) AS sessions, MAX(ds.date) AS lastActiveDate
       FROM users u
-      LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id
-      WHERE ${clauses.join(" AND ")}
+      LEFT JOIN competitive_daily_stats ds ON ds.user_id = u.id ${periodFilter.clause}
+      WHERE u.id = ?
       GROUP BY u.id
-    `).bind(...params).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
+    `).bind(...periodFilter.params, targetUserId).first<{ minutes: number; sessions: number; lastActiveDate: string | null }>();
     return row ?? { minutes: 0, sessions: 0, lastActiveDate: null };
   }
 
