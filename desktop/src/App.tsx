@@ -3317,11 +3317,12 @@ function formatFeedPostedAt(value: string) {
 }
 
 const WABI_ATTENDANCE_WINDOW_MS = 48 * 60 * 60 * 1000;
-// Must match VERIFIED_SESSION_HEARTBEAT_MS / VERIFIED_SESSION_GRACE_MS in cloudflare/src/index.ts —
-// used client-side only to decide when a gap is worth reconciling, not as an authoritative bound
-// (the server independently derives and enforces its own boundary).
+// Must match VERIFIED_SESSION_HEARTBEAT_MS / VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS in
+// cloudflare/src/index.ts — used client-side only to decide when a gap is worth attempting to
+// reconcile, not as an authoritative bound (the server independently derives and enforces its own
+// boundary regardless of what the client thinks or sends).
 const VERIFIED_SESSION_HEARTBEAT_MS = 15 * 60 * 1000;
-const VERIFIED_SESSION_GRACE_MS = 5 * 60 * 1000;
+const VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS = 2 * 60 * 60 * 1000;
 
 function isRecentlyActive(value: string | null | undefined, maxAgeMs = 45 * 60 * 1000) {
   const timestamp = parseSocialTimestamp(value);
@@ -3630,12 +3631,6 @@ async function minimizeWindow() {
 async function toggleMaximizeWindow() {
   if (!isTauriApp()) return;
   await getCurrentWindow().toggleMaximize();
-}
-
-async function toggleFullscreenWindow() {
-  if (!isTauriApp()) return;
-  const window = getCurrentWindow();
-  await window.setFullscreen(!(await window.isFullscreen()));
 }
 
 async function closeWindow() {
@@ -4287,6 +4282,17 @@ function App() {
   }, [appStyle, menuOpen]);
 
   useEffect(() => {
+    if (!menuOpen) return undefined;
+    function handleOutsidePointerDown(event: globalThis.MouseEvent) {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest(".topbar-menu, .topbar-menu-wrap, .wabi-toolbar-menu-wrap")) return;
+      setMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleOutsidePointerDown);
+    return () => document.removeEventListener("mousedown", handleOutsidePointerDown);
+  }, [menuOpen]);
+
+  useEffect(() => {
     localStorage.setItem(WABI_CIRCLE_COMPETITIVE_KEY, String(wabiCircleCompetitive));
   }, [wabiCircleCompetitive]);
 
@@ -4545,6 +4551,11 @@ function App() {
       setFullscreen(false);
     }
   }, [state.timer.phase]);
+
+  useEffect(() => {
+    if (!isTauriApp()) return;
+    void getCurrentWindow().setFullscreen(fullscreen).catch(() => undefined);
+  }, [fullscreen]);
 
   useEffect(() => {
     if (!isTauriApp()) return;
@@ -4942,12 +4953,12 @@ function App() {
 
     // Offline credit is measured from the PREVIOUS anchor (the last point the server actually
     // acknowledged) forward to the moment a call succeeds again — i.e. only triggers once a real
-    // gap (longer than the heartbeat+grace window) is confirmed to have closed, never on the
-    // ordinary 15-minute cadence.
+    // gap (longer than the normal-credit grace window) is confirmed to have closed, never for
+    // gaps the server will already fully credit as normal verified time.
     const maybeReconcileOffline = (previousAnchor: SocialState["verifiedAnchor"], confirmedAt: string) => {
       if (!previousAnchor || reconcilingOfflineCreditRef.current) return;
       const staleMs = new Date(confirmedAt).getTime() - new Date(previousAnchor.confirmedAt).getTime();
-      if (staleMs <= VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS) return;
+      if (staleMs <= VERIFIED_SESSION_NORMAL_CREDIT_GRACE_MS) return;
 
       const intervals = computeOfflineIntervals(latestStateRef.current, previousAnchor.confirmedAt, confirmedAt);
       if (!intervals.length) return;
@@ -12000,7 +12011,8 @@ function App() {
   }
 
   // Keep macOS traffic lights native; Linux and Windows use the compact app bar.
-  const showWindowTitlebar = isTauriApp() && !/Macintosh|Mac OS X/.test(navigator.userAgent);
+  // Hidden while the timer's real fullscreen overlay is active — there's no window chrome to control then.
+  const showWindowTitlebar = isTauriApp() && !/Macintosh|Mac OS X/.test(navigator.userAgent) && !fullscreen;
   const openHelp = helpTab ? pageHelp[helpTab] : null;
   const activeTourHelp = tourState ? pageHelp[tourState.tab] : null;
 
@@ -12015,9 +12027,6 @@ function App() {
             </button>
             <button type="button" onClick={() => void toggleMaximizeWindow()} aria-label={windowMaximized ? "Restore window" : "Maximize window"} title={windowMaximized ? "Restore window" : "Maximize window"}>
               <span aria-hidden="true">{windowMaximized ? "❐" : "□"}</span>
-            </button>
-            <button type="button" onClick={() => void toggleFullscreenWindow()} aria-label="Enter or exit fullscreen" title="Enter or exit fullscreen">
-              <span aria-hidden="true">⛶</span>
             </button>
             <button type="button" className="window-close-button" onClick={() => void closeWindow()} aria-label="Close window" title="Close">
               <span aria-hidden="true">×</span>
