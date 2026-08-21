@@ -13,6 +13,7 @@ import "./App.css";
 import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import SkribblRoom from "./components/SkribblRoom";
+import { SakuraScatter } from "./components/SakuraScatter";
 import type { VaultScreenHandle } from "./features/vault/VaultScreen";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
@@ -511,7 +512,8 @@ type ThemePalette =
   | "lavender"
   | "gpt"
   | "claude"
-  | "cute";
+  | "cute"
+  | "sakura";
 type AppStyle = "modern" | "field-notebook" | "wabi-sabi";
 type ThemePanelView = "themes" | "styles";
 type FieldDashboardLayout = "quiet" | "full";
@@ -2635,6 +2637,7 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
   { id: "gpt", name: "GPT", desc: "Monochrome graphite and grey.", swatch: "#949494" },
   { id: "claude", name: "Claude", desc: "Clay-orange on warm charcoal.", swatch: "#c6613f" },
   { id: "cute", name: "Cute", desc: "Kawaii pastel pinks.", swatch: "#ff6b9d" },
+  { id: "sakura", name: "Sakura", desc: "Whitish-pink notebook — fallen petals.", swatch: "linear-gradient(135deg, #f7eeed 0%, #f191ac 100%)" },
 ];
 
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
@@ -10995,14 +10998,14 @@ function App() {
                 ))}
               </div>
               {themePanelView === "themes" ? (
-                appStyle !== "modern" ? (
+                appStyle === "wabi-sabi" ? (
                   <div className="arena-empty">
                     <strong>Coming soon</strong>
-                    <span>{appStyle === "field-notebook" ? "Field Notebook" : "Wabi-Sabi"} doesn't support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
+                    <span>Wabi-Sabi doesn&apos;t support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
                   </div>
                 ) : (
                   <div className="theme-choice-grid">
-                    {themePalettes.map((p) => (
+                    {(appStyle === "field-notebook" ? themePalettes.filter((p) => p.id === "sakura" || p.id === "default") : themePalettes.filter((p) => p.id !== "sakura")).map((p) => (
                       <button
                         key={p.id}
                         type="button"
@@ -11341,6 +11344,7 @@ function App() {
       ) : null}
 
       <div className={`shell ${showWindowTitlebar ? "with-window-titlebar" : ""}`} style={{ "--accent": state.settings.accent } as CSSProperties}>
+      {appStyle === "field-notebook" && palette === "sakura" ? <SakuraScatter /> : null}
       {appStyle === "wabi-sabi" ? renderWabiSidebar() : null}
       {appStyle === "wabi-sabi" && wabiQuietMode ? renderWabiQuietMode() : null}
       <header className="topbar">
@@ -13618,6 +13622,7 @@ function App() {
 
       {appStyle !== "wabi-sabi" && fullscreen && state.timer.phase !== "idle" ? (
         <div className="exam-fullscreen-overlay">
+          {appStyle === "field-notebook" && palette === "sakura" ? <SakuraScatter /> : null}
           <button
             type="button"
             className="exam-fullscreen-exit"
