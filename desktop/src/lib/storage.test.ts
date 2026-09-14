@@ -352,4 +352,57 @@ describe("loadAppState - migration and corruption", () => {
   it("returns defaultState when nothing is persisted at all", () => {
     expect(loadAppState()).toEqual(defaultState);
   });
+
+  it("backfills phase/archived/date defaults on an old-shape semester and course", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      semesters: [{ id: "sem1", name: "Old Semester", createdAt: "2026-01-01T00:00:00.000Z" }],
+      courses: [{ id: "course1", semesterId: "sem1", name: "Old Course", color: "#fff", targetGrade: 5, createdAt: "2026-01-01T00:00:00.000Z" }],
+    }));
+    const result = loadAppState();
+    expect(result.semesters[0]).toMatchObject({ startDate: null, endDate: null, phase: "semester", archived: false, archivedAt: null });
+    expect(result.courses[0]).toMatchObject({ externalUrl: null });
+  });
+
+  it("defaults the new planner arrays to [] when the stored blob predates them", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({ waterGlasses: 1 }));
+    const result = loadAppState();
+    expect(result.timetableEvents).toEqual([]);
+    expect(result.holidays).toEqual([]);
+    expect(result.dailyTodos).toEqual([]);
+    expect(result.studyUnits).toEqual([]);
+  });
+
+  it("round-trips populated timetable events, holidays, todos, and study units", () => {
+    const state: AppState = {
+      ...defaultState,
+      timetableEvents: [{
+        id: "ev1", semesterId: "sem1", courseId: "course1", kind: "lecture", label: "Lecture",
+        date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null,
+        completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z",
+      }],
+      holidays: [{ id: "holiday1", semesterId: "sem1", startDate: "2026-12-20", endDate: "2027-01-05", label: "Winter break", createdAt: "2026-01-01T00:00:00.000Z" }],
+      dailyTodos: [{ id: "todo1", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
+      studyUnits: [{ id: "unit1", semesterId: "sem1", courseId: "course1", date: "2026-10-01", title: "Revise chapter 3", startTime: "09:00", endTime: "10:00", notes: "", completed: false, createdAt: "2026-01-01T00:00:00.000Z" }],
+    };
+    saveAppState(state, createInitialPersistenceBaselines(defaultState));
+    const loaded = loadAppState();
+    expect(loaded.timetableEvents).toEqual(state.timetableEvents);
+    expect(loaded.holidays).toEqual(state.holidays);
+    expect(loaded.dailyTodos).toEqual(state.dailyTodos);
+    expect(loaded.studyUnits).toEqual(state.studyUnits);
+  });
+
+  it("migrates a legacy recurring-class-event and exercise-sheet-series blob into unified timetable events", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      semesters: [{ id: "sem1", name: "WS", createdAt: "2026-01-01T00:00:00.000Z", startDate: "2026-09-07", endDate: "2026-12-31", phase: "semester", archived: false, archivedAt: null }],
+      recurringClassEvents: [{ id: "ev1", semesterId: "sem1", courseId: "course1", label: "Lecture", weekday: 1, startTime: "10:00", endTime: "12:00", createdAt: "2026-01-01T00:00:00.000Z" }],
+      exerciseSheetSeries: [{ id: "series1", semesterId: "sem1", courseId: "course1", label: "Sheet", releaseWeekday: 1, releaseTime: "20:00", deadlineWeekday: 0, deadlineTime: "23:59", url: "https://example.com", createdAt: "2026-01-01T00:00:00.000Z" }],
+    }));
+    const result = loadAppState();
+    expect(result.timetableEvents).toEqual([
+      { id: "ev1", semesterId: "sem1", courseId: "course1", kind: "lecture", label: "Lecture", date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "series1-release", semesterId: "sem1", courseId: "course1", kind: "sheet-release", label: "Sheet", date: "2026-09-07", time: "20:00", endTime: null, repeatWeekly: true, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "series1-deadline", semesterId: "sem1", courseId: "course1", kind: "sheet-deadline", label: "Sheet", date: "2026-09-13", time: "23:59", endTime: null, repeatWeekly: true, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+  });
 });

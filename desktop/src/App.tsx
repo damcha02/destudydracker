@@ -13,6 +13,7 @@ import "./App.css";
 import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import SkribblRoom from "./components/SkribblRoom";
+import { SakuraScatter } from "./components/SakuraScatter";
 import type { VaultScreenHandle } from "./features/vault/VaultScreen";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
@@ -54,7 +55,7 @@ import type { PersistenceBaselines, PersistSection } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
 import { pauseCountdownTimer, pauseStopwatchTimer, resumeCountdownTimer, resumeStopwatchTimer } from "./lib/timerTransitions";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SemesterPhase, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
@@ -63,6 +64,12 @@ import { TRAVLE_MAP_COUNTRIES } from "./lib/travleMapData";
 import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTravleGuessStates, getTravlePuzzleForDate, getTravlePuzzleId, getTravleShortestPath, getTravleSolvedPath, isTravleRouteSolved, makeTravleSeedSalt, TRAVLE_COUNTRY_COUNT, TRAVLE_MAX_GUESSES } from "./lib/travle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 import { isTauriApp } from "./lib/obsidian";
+import { buildDailyTimeline, expandTimetableEvents, getSemesterWeekNumber, timetableEventKindLabels } from "./lib/plannerSchedule";
+import type { DailyTimelineRow } from "./lib/plannerSchedule";
+import { SemesterActionsMenu } from "./features/planner/SemesterActionsMenu";
+import { SemesterArchiveButton, SemesterSetupWizardButton } from "./features/planner/SemesterBoardControls";
+import { TimetableEventModal } from "./features/planner/TimetableEventModal";
+import type { TimetableModalState } from "./features/planner/TimetableEventModal";
 import privacyPolicyText from "../../PRIVACY.md?raw";
 
 const LazyVaultScreen = lazy(() => import("./features/vault/VaultScreen").then((module) => ({ default: module.VaultScreen })));
@@ -511,7 +518,8 @@ type ThemePalette =
   | "lavender"
   | "gpt"
   | "claude"
-  | "cute";
+  | "cute"
+  | "sakura";
 type AppStyle = "modern" | "field-notebook" | "wabi-sabi";
 type ThemePanelView = "themes" | "styles";
 type FieldDashboardLayout = "quiet" | "full";
@@ -2635,6 +2643,7 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
   { id: "gpt", name: "GPT", desc: "Monochrome graphite and grey.", swatch: "#949494" },
   { id: "claude", name: "Claude", desc: "Clay-orange on warm charcoal.", swatch: "#c6613f" },
   { id: "cute", name: "Cute", desc: "Kawaii pastel pinks.", swatch: "#ff6b9d" },
+  { id: "sakura", name: "Sakura", desc: "Whitish-pink notebook — fallen petals.", swatch: "linear-gradient(135deg, #f7eeed 0%, #f191ac 100%)" },
 ];
 
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
@@ -3013,11 +3022,21 @@ function formatFileSize(bytes: number) {
   return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+function sanitizeExternalUrl(url: string): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  // Accept bare domains/paths (e.g. "example.com") by defaulting to https:// - anything that
+  // isn't http(s) after that (mailto:, javascript:, relative app paths, etc.) is rejected so it
+  // can never fall through to the app's own router.
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  return /^https?:\/\//i.test(withProtocol) ? withProtocol : null;
+}
+
 function openExternalLink(url: string) {
-  const target = url.trim();
-  if (!/^https?:\/\//i.test(target)) return;
+  const target = sanitizeExternalUrl(url);
+  if (!target) return;
   if (isTauriApp()) void openUrl(target);
-  else window.open(target, "_blank", "noreferrer");
+  else window.open(target, "_blank", "noopener,noreferrer");
 }
 
 
@@ -3773,6 +3792,8 @@ function App() {
     priority: "medium",
     notes: "",
   });
+  const [editingExamId, setEditingExamId] = useState<string | null>(null);
+  const [examEditDraft, setExamEditDraft] = useState({ title: "", examDate: "", weight: "40", preparedness: "35", location: "" });
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
   const [timerFaceEditing, setTimerFaceEditing] = useState(false);
@@ -3786,6 +3807,8 @@ function App() {
   const [calendarView, setCalendarView] = useState<CalendarView>("week");
   const [calendarCursorDate, setCalendarCursorDate] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [timetableModalState, setTimetableModalState] = useState<TimetableModalState>(null);
+  const [timetableEditMode, setTimetableEditMode] = useState(false);
   const [calendarAddOpen, setCalendarAddOpen] = useState(false);
   const [calendarAddDraft, setCalendarAddDraft] = useState<CalendarAddDraft>({
     semesterId: "",
@@ -4495,6 +4518,7 @@ function App() {
     () => new Map(state.semesters.map((semester) => [semester.id, semester])),
     [state.semesters],
   );
+  const activeSemesters = useMemo(() => state.semesters.filter((semester) => !semester.archived), [state.semesters]);
   const courseLookup = useMemo(
     () => new Map(state.courses.map((course) => [course.id, course])),
     [state.courses],
@@ -4941,6 +4965,14 @@ function App() {
     () => formatCalendarTitle(calendarCursorDate, calendarView),
     [calendarCursorDate, calendarView],
   );
+  const calendarWeekNumber = useMemo(() => {
+    const cursorIso = localIsoDate(calendarCursorDate);
+    const matches = activeSemesters.filter(
+      (semester) => semester.startDate && semester.endDate && cursorIso >= semester.startDate && cursorIso <= semester.endDate,
+    );
+    if (matches.length !== 1) return null;
+    return getSemesterWeekNumber(matches[0], cursorIso);
+  }, [activeSemesters, calendarCursorDate]);
   const calendarEntriesByDate = useMemo(() => {
     const map = new Map<string, CalendarEntry[]>();
     state.calendarEntries.forEach((entry) => {
@@ -4970,6 +5002,20 @@ function App() {
     });
     return map;
   }, [state.tasks]);
+  const timetableOccurrencesByDate = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof expandTimetableEvents>>();
+    if (!calendarDays.length) return map;
+    const rangeStart = calendarDays[0].iso;
+    const rangeEnd = calendarDays[calendarDays.length - 1].iso;
+    for (const semester of activeSemesters) {
+      for (const occurrence of expandTimetableEvents(state.timetableEvents, state.holidays, semester, rangeStart, rangeEnd)) {
+        const list = map.get(occurrence.date) ?? [];
+        list.push(occurrence);
+        map.set(occurrence.date, list);
+      }
+    }
+    return map;
+  }, [calendarDays, activeSemesters, state.timetableEvents, state.holidays]);
   const scheduledIncompleteByTask = useMemo(() => {
     const map = new Map<string, number>();
     state.calendarEntries.forEach((entry) => {
@@ -5232,10 +5278,10 @@ function App() {
 
       const semesters = hasSemester
         ? current.semesters
-        : [{ id: TUTORIAL_SEMESTER_ID, name: TUTORIAL_SEMESTER_NAME, createdAt }, ...current.semesters];
+        : [{ id: TUTORIAL_SEMESTER_ID, name: TUTORIAL_SEMESTER_NAME, createdAt, startDate: null, endDate: null, phase: "semester" as SemesterPhase, archived: false, archivedAt: null }, ...current.semesters];
       const courses = hasCourse
         ? current.courses
-        : [{ id: TUTORIAL_COURSE_ID, semesterId: TUTORIAL_SEMESTER_ID, name: TUTORIAL_COURSE_NAME, targetGrade: 5, color: "#8fb4ff", createdAt }, ...current.courses];
+        : [{ id: TUTORIAL_COURSE_ID, semesterId: TUTORIAL_SEMESTER_ID, name: TUTORIAL_COURSE_NAME, targetGrade: 5, color: "#8fb4ff", createdAt, externalUrl: null, completedSheetCount: 0 }, ...current.courses];
       const tasks = hasTask
         ? current.tasks
         : [{
@@ -7257,6 +7303,11 @@ function App() {
       id: makeId(),
       name,
       createdAt: new Date().toISOString(),
+      startDate: null,
+      endDate: null,
+      phase: "semester",
+      archived: false,
+      archivedAt: null,
     };
 
     setState((current) => ({ ...current, semesters: [...current.semesters, semester] }));
@@ -7284,6 +7335,8 @@ function App() {
       color: courseDraft.color,
       targetGrade: Number(courseDraft.targetGrade) || 4,
       createdAt: new Date().toISOString(),
+      externalUrl: null,
+      completedSheetCount: 0,
     };
 
     setState((current) => ({ ...current, courses: [...current.courses, course] }));
@@ -7465,6 +7518,7 @@ function App() {
       examDate: examDraft.examDate,
       weight: clamp(Number(examDraft.weight) || 0, 0, 100),
       preparedness: clamp(Number(examDraft.preparedness) || 0, 0, 100),
+      location: "",
     };
 
     setState((current) => ({ ...current, exams: [exam, ...current.exams] }));
@@ -7472,6 +7526,7 @@ function App() {
     setAddingExamCourseId(null);
     setMessage(`${exam.title} added to the runway.`);
   }
+
 
   function adjustTask(taskId: string, delta: number) {
     setState((current) => ({
@@ -7504,6 +7559,8 @@ function App() {
       courses: current.courses.filter((course) => course.id !== courseId),
       tasks: current.tasks.filter((task) => task.courseId !== courseId),
       exams: current.exams.filter((exam) => exam.courseId !== courseId),
+      timetableEvents: current.timetableEvents.filter((event) => event.courseId !== courseId),
+      studyUnits: current.studyUnits.filter((unit) => unit.courseId !== courseId),
       timer:
         current.timer.courseId === courseId
           ? { ...current.timer, courseId: null, taskId: null }
@@ -7531,6 +7588,9 @@ function App() {
       courses: current.courses.filter((course) => course.semesterId !== semesterId),
       tasks: current.tasks.filter((task) => task.semesterId !== semesterId),
       exams: current.exams.filter((exam) => exam.semesterId !== semesterId),
+      timetableEvents: current.timetableEvents.filter((event) => event.semesterId !== semesterId),
+      holidays: current.holidays.filter((holiday) => holiday.semesterId !== semesterId),
+      studyUnits: current.studyUnits.filter((unit) => unit.semesterId !== semesterId),
       timer:
         current.timer.semesterId === semesterId || courseIds.includes(current.timer.courseId ?? "")
           ? { ...current.timer, semesterId: null, courseId: null, taskId: null }
@@ -7551,6 +7611,38 @@ function App() {
 
   function removeExam(examId: string) {
     setState((current) => ({ ...current, exams: current.exams.filter((exam) => exam.id !== examId) }));
+  }
+
+  function startEditingExam(exam: Exam) {
+    setEditingExamId(exam.id);
+    setExamEditDraft({
+      title: exam.title,
+      examDate: exam.examDate,
+      weight: String(exam.weight),
+      preparedness: String(exam.preparedness),
+      location: exam.location,
+    });
+  }
+
+  function saveExamEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingExamId) return;
+    setState((current) => ({
+      ...current,
+      exams: current.exams.map((exam) =>
+        exam.id === editingExamId
+          ? {
+              ...exam,
+              title: examEditDraft.title.trim() || exam.title,
+              examDate: examEditDraft.examDate || exam.examDate,
+              weight: clamp(Number(examEditDraft.weight) || 0, 0, 100),
+              preparedness: clamp(Number(examEditDraft.preparedness) || 0, 0, 100),
+              location: examEditDraft.location,
+            }
+          : exam,
+      ),
+    }));
+    setEditingExamId(null);
   }
 
   function removeSession(sessionId: string) {
@@ -8719,6 +8811,139 @@ function App() {
     );
   }
 
+  function toggleGeneratedRowDone(row: DailyTimelineRow) {
+    if (row.kind === "todo") {
+      setState((current) => ({
+        ...current,
+        dailyTodos: current.dailyTodos.map((todo) =>
+          todo.id === row.refId ? { ...todo, completed: !todo.completed, completedAt: !todo.completed ? new Date().toISOString() : null } : todo,
+        ),
+      }));
+      return;
+    }
+    if (row.kind === "study-unit") {
+      setState((current) => ({
+        ...current,
+        studyUnits: current.studyUnits.map((unit) => (unit.id === row.refId ? { ...unit, completed: !unit.completed } : unit)),
+      }));
+      return;
+    }
+    setState((current) => {
+      const event = current.timetableEvents.find((item) => item.id === row.refId);
+      if (!event) return current;
+      const wasCompleted = event.completedOccurrences.includes(row.occurrenceDate);
+      const timetableEvents = current.timetableEvents.map((item) =>
+        item.id === row.refId
+          ? {
+              ...item,
+              completedOccurrences: wasCompleted
+                ? item.completedOccurrences.filter((date) => date !== row.occurrenceDate)
+                : [...item.completedOccurrences, row.occurrenceDate],
+            }
+          : item,
+      );
+      // Checking a Sheet Release marks that unit worked on for the course; unchecking backs it out.
+      if (event.kind !== "sheet-release") return { ...current, timetableEvents };
+      return {
+        ...current,
+        timetableEvents,
+        courses: current.courses.map((course) =>
+          course.id === event.courseId
+            ? { ...course, completedSheetCount: Math.max(0, course.completedSheetCount + (wasCompleted ? -1 : 1)) }
+            : course,
+        ),
+      };
+    });
+  }
+
+  function removeGeneratedRow(row: DailyTimelineRow) {
+    if (row.kind === "todo") {
+      setState((current) => ({ ...current, dailyTodos: current.dailyTodos.filter((todo) => todo.id !== row.refId) }));
+      return;
+    }
+    if (row.kind === "study-unit") {
+      setState((current) => ({ ...current, studyUnits: current.studyUnits.filter((unit) => unit.id !== row.refId) }));
+      return;
+    }
+    setState((current) => {
+      const event = current.timetableEvents.find((item) => item.id === row.refId);
+      const timetableEvents = current.timetableEvents.filter((item) => item.id !== row.refId);
+      if (!event || event.kind !== "sheet-release" || !event.completedOccurrences.length) {
+        return { ...current, timetableEvents };
+      }
+      const completedCount = event.completedOccurrences.length;
+      return {
+        ...current,
+        timetableEvents,
+        courses: current.courses.map((course) =>
+          course.id === event.courseId
+            ? { ...course, completedSheetCount: Math.max(0, course.completedSheetCount - completedCount) }
+            : course,
+        ),
+      };
+    });
+  }
+
+  function openEditModalForRow(row: DailyTimelineRow) {
+    if (row.kind === "todo") {
+      const todo = state.dailyTodos.find((item) => item.id === row.refId);
+      if (todo) setTimetableModalState({ mode: "edit", entityKind: "todo", todo });
+      return;
+    }
+    const event = state.timetableEvents.find((item) => item.id === row.refId);
+    if (event) setTimetableModalState({ mode: "edit", entityKind: "event", event });
+  }
+
+  function renderTimetableTimelineEntry(row: DailyTimelineRow) {
+    const course = row.courseId ? courseLookup.get(row.courseId) : null;
+    const startMinutes = row.time ? timeToMinutes(row.time) : calendarTimelineStartMinutes;
+    const endMinutes = row.endTime ? timeToMinutes(row.endTime) : startMinutes + 60;
+    const top = ((startMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
+    const height = Math.max(58, ((endMinutes - startMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+    const style = {
+      "--entry-color": course?.color ?? "var(--accent)",
+      top: `${Math.max(4, top + 4)}px`,
+      height: `${height}px`,
+    } as CSSProperties;
+    const isSolvedSheet = row.kind === "sheet-deadline" && row.completed;
+    const editable = row.kind !== "study-unit";
+    return (
+      <div key={row.id} className={`calendar-timeline-entry scheduled generated ${row.completed ? "done" : ""}`} style={style}>
+        <div className="calendar-timeline-entry-copy">
+          <strong>{row.title}</strong>
+          <span>{course?.name ?? "General"}{isSolvedSheet ? <em className="timetable-solved-badge">Solved</em> : null}</span>
+          <small>{row.time ?? ""}{row.endTime ? `–${row.endTime}` : ""}</small>
+        </div>
+        <input
+          className="calendar-timeline-checkbox"
+          type="checkbox"
+          checked={Boolean(row.completed)}
+          onChange={() => toggleGeneratedRowDone(row)}
+          title={row.kind === "sheet-deadline" ? "Mark solved" : row.kind === "sheet-release" ? "Mark done" : "Mark done"}
+        />
+        {timetableEditMode || row.url ? (
+          <div className="calendar-timeline-entry-actions">
+            {row.url ? (
+              <button type="button" className="ghost-button small-button" onClick={() => openExternalLink(row.url!)}>
+                Open
+              </button>
+            ) : null}
+            {timetableEditMode && editable ? (
+              <button type="button" className="ghost-button small-button" onClick={() => openEditModalForRow(row)}>
+                Edit
+              </button>
+            ) : null}
+            {timetableEditMode ? (
+              <button type="button" className="ghost-button small-button" onClick={() => removeGeneratedRow(row)}>
+                Remove
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   function renderCalendarDayOverlay() {
     const selectedDate = selectedCalendarDate ? parseCalendarDate(selectedCalendarDate) : null;
     if (!selectedCalendarDate || !selectedDate) return null;
@@ -8731,16 +8956,51 @@ function App() {
       .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
     const unscheduledEntries = selectedEntries.filter((entry) => !entry.startTime);
 
+    // A semester's own startDate/endDate may be unset (quick "+ Add semester" doesn't ask for
+    // dates) - expandTimetableEvents already clamps gracefully when they're null, so occurrences
+    // are gathered across every active semester rather than gating on a single date-range match.
+    const dayEventOccurrences = activeSemesters.flatMap((semester) =>
+      expandTimetableEvents(state.timetableEvents, state.holidays, semester, selectedCalendarDate, selectedCalendarDate),
+    );
+    const generatedRows = buildDailyTimeline(selectedCalendarDate, {
+      eventOccurrences: dayEventOccurrences,
+      exams: [],
+      calendarEntries: [],
+      dailyTodos: state.dailyTodos,
+      studyUnits: state.studyUnits,
+    });
+    const dateRangeSemester = activeSemesters.find(
+      (semester) => semester.startDate && semester.endDate && selectedCalendarDate >= semester.startDate && selectedCalendarDate <= semester.endDate,
+    ) ?? null;
+    const weekNumber = dateRangeSemester ? getSemesterWeekNumber(dateRangeSemester, selectedCalendarDate) : null;
+    const modalSemesterId = dateRangeSemester?.id ?? dayEventOccurrences[0]?.event.semesterId ?? null;
+
+    function openCreateModalAt(hour: number, event: MouseEvent<HTMLDivElement>) {
+      const rect = event.currentTarget.getBoundingClientRect();
+      const fraction = clamp((event.clientY - rect.top) / rect.height, 0, 1);
+      const minutes = snapCalendarMinutes(Math.round(fraction * 60));
+      const time = `${String(hour).padStart(2, "0")}:${String(minutes === 60 ? 0 : minutes).padStart(2, "0")}`;
+      setTimetableModalState({ mode: "create", prefill: { date: selectedCalendarDate!, time, semesterId: modalSemesterId } });
+    }
+
     return (
       <div className="calendar-drawer-backdrop calendar-day-view-backdrop" onMouseDown={closeCalendarDrawer}>
         <aside className="calendar-day-view" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day view">
           <div className="calendar-day-view-head">
             <div>
-              <p className="eyebrow">Day view</p>
+              <p className="eyebrow">Day view{weekNumber ? ` · Week ${weekNumber}` : ""}</p>
               <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
-              <p className="section-note">Click + to assign planner tasks or create calendar-only tasks.</p>
+              <p className="section-note">Click + to assign planner tasks, or click a time slot to create a timetable item.</p>
             </div>
             <div className="calendar-day-view-actions">
+              <button
+                type="button"
+                className={`ghost-button small-button timetable-edit-toggle ${timetableEditMode ? "active" : ""}`}
+                aria-pressed={timetableEditMode}
+                onClick={() => setTimetableEditMode((current) => !current)}
+              >
+                {timetableEditMode ? "Done editing" : "Edit"}
+              </button>
               <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
                 + Add task
               </button>
@@ -8758,7 +9018,13 @@ function App() {
                 style={{ height: `${calendarTimelineHeight}px` }}
               >
                 {calendarTimelineHours.map((hour) => (
-                  <div key={hour} className="calendar-timeline-hour" style={{ height: `${calendarTimelineHourHeight}px` }}>
+                  <div
+                    key={hour}
+                    className="calendar-timeline-hour calendar-timeline-hour--clickable"
+                    style={{ height: `${calendarTimelineHourHeight}px` }}
+                    onClick={(event) => openCreateModalAt(hour, event)}
+                    title="Click to create a timetable item"
+                  >
                     <div className="calendar-timeline-time">{String(hour).padStart(2, "0")}:00</div>
                   </div>
                 ))}
@@ -8768,6 +9034,7 @@ function App() {
                   </div>
                 ) : null}
                 {timedEntries.map(renderCalendarTimelineEntry)}
+                {generatedRows.map(renderTimetableTimelineEntry)}
               </div>
             </div>
 
@@ -8843,7 +9110,7 @@ function App() {
                       onChange={(event) => setCalendarAddDraft((current) => ({ ...current, semesterId: event.target.value, courseId: "", taskId: "" }))}
                     >
                       <option value="">No semester</option>
-                      {state.semesters.map((semester) => (
+                      {activeSemesters.map((semester) => (
                         <option key={semester.id} value={semester.id}>{semester.name}</option>
                       ))}
                     </select>
@@ -8990,7 +9257,7 @@ function App() {
       <article className="panel-card planner-calendar-card" data-tour="planner-calendar">
         <div className="section-head planner-calendar-head">
           <div>
-            <p className="eyebrow">Calendar</p>
+            <p className="eyebrow">Calendar{calendarWeekNumber ? ` · Week ${calendarWeekNumber}` : ""}</p>
             <h2>{calendarTitle}</h2>
             <p className="section-note">Plan one task unit at a time. Exams and task deadlines appear automatically.</p>
           </div>
@@ -9032,6 +9299,7 @@ function App() {
             const entries = calendarEntriesByDate.get(day.iso) ?? [];
             const exams = examsByDate.get(day.iso) ?? [];
             const deadlines = deadlinesByDate.get(day.iso) ?? [];
+            const timetableOccurrences = timetableOccurrencesByDate.get(day.iso) ?? [];
             const isSelected = selectedCalendarDate === day.iso;
             const isToday = day.iso === calendarToday;
             const fieldNotebookWeek = appStyle === "field-notebook" && calendarView === "week";
@@ -9039,8 +9307,13 @@ function App() {
             const visibleEntryLimit = wabiWeek ? entries.length : fieldNotebookWeek ? 8 : 3;
             const visibleExamLimit = wabiWeek ? exams.length : fieldNotebookWeek ? 4 : 2;
             const visibleDeadlineLimit = wabiWeek ? deadlines.length : fieldNotebookWeek ? 4 : 2;
-            const visibleItemCount = Math.min(entries.length, visibleEntryLimit) + Math.min(exams.length, visibleExamLimit) + Math.min(deadlines.length, visibleDeadlineLimit);
-            const hiddenItemCount = entries.length + exams.length + deadlines.length - visibleItemCount;
+            const visibleTimetableLimit = wabiWeek ? timetableOccurrences.length : fieldNotebookWeek ? 6 : 3;
+            const visibleItemCount =
+              Math.min(entries.length, visibleEntryLimit) +
+              Math.min(exams.length, visibleExamLimit) +
+              Math.min(deadlines.length, visibleDeadlineLimit) +
+              Math.min(timetableOccurrences.length, visibleTimetableLimit);
+            const hiddenItemCount = entries.length + exams.length + deadlines.length + timetableOccurrences.length - visibleItemCount;
 
             return (
               <section
@@ -9058,7 +9331,6 @@ function App() {
               >
                 <div className="calendar-day-top">
                   <span>{day.date.getDate()}</span>
-                  <small>{new Intl.DateTimeFormat("en", { month: "short", year: "numeric" }).format(day.date)}</small>
                 </div>
 
                 <div className="calendar-day-items">
@@ -9093,6 +9365,18 @@ function App() {
                     return (
                       <div key={task.id} className="calendar-pill deadline-pill" style={{ "--pill-color": course?.color ?? "var(--warn)" } as CSSProperties}>
                         <span>Due: {task.title}</span>
+                      </div>
+                    );
+                  })}
+                  {timetableOccurrences.slice(0, visibleTimetableLimit).map((occurrence) => {
+                    const course = courseLookup.get(occurrence.event.courseId);
+                    return (
+                      <div
+                        key={`${occurrence.event.id}:${occurrence.date}`}
+                        className={`calendar-pill timetable-pill timetable-pill--${occurrence.event.kind}`}
+                        style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}
+                      >
+                        <span>{timetableEventKindLabels[occurrence.event.kind]}: {occurrence.event.label}</span>
                       </div>
                     );
                   })}
@@ -10000,7 +10284,7 @@ function App() {
             }}
           >
             <option value="">Any semester</option>
-            {state.semesters.map((semester) => (
+            {activeSemesters.map((semester) => (
               <option key={semester.id} value={semester.id}>{semester.name}</option>
             ))}
           </select>
@@ -10096,7 +10380,7 @@ function App() {
                   }}
                 >
                   <option value="">Any semester</option>
-                  {state.semesters.map((semester) => (
+                  {activeSemesters.map((semester) => (
                     <option key={semester.id} value={semester.id}>
                       {semester.name}
                     </option>
@@ -10995,14 +11279,14 @@ function App() {
                 ))}
               </div>
               {themePanelView === "themes" ? (
-                appStyle !== "modern" ? (
+                appStyle === "wabi-sabi" ? (
                   <div className="arena-empty">
                     <strong>Coming soon</strong>
-                    <span>{appStyle === "field-notebook" ? "Field Notebook" : "Wabi-Sabi"} doesn't support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
+                    <span>Wabi-Sabi doesn&apos;t support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
                   </div>
                 ) : (
                   <div className="theme-choice-grid">
-                    {themePalettes.map((p) => (
+                    {(appStyle === "field-notebook" ? themePalettes.filter((p) => p.id === "sakura" || p.id === "default") : themePalettes.filter((p) => p.id !== "sakura")).map((p) => (
                       <button
                         key={p.id}
                         type="button"
@@ -11341,6 +11625,7 @@ function App() {
       ) : null}
 
       <div className={`shell ${showWindowTitlebar ? "with-window-titlebar" : ""}`} style={{ "--accent": state.settings.accent } as CSSProperties}>
+      {appStyle === "field-notebook" && palette === "sakura" ? <SakuraScatter /> : null}
       {appStyle === "wabi-sabi" ? renderWabiSidebar() : null}
       {appStyle === "wabi-sabi" && wabiQuietMode ? renderWabiQuietMode() : null}
       <header className="topbar">
@@ -11539,6 +11824,16 @@ function App() {
       {message ? <div className="message-banner">{message}</div> : null}
 
       {renderCalendarDayOverlay()}
+
+      {timetableModalState ? (
+        <TimetableEventModal
+          state={state}
+          setState={setState}
+          setMessage={setMessage}
+          target={timetableModalState}
+          onClose={() => setTimetableModalState(null)}
+        />
+      ) : null}
 
       {openHelp ? (
         <div className="help-modal-backdrop" onMouseDown={() => setHelpTab(null)}>
@@ -11897,16 +12192,48 @@ function App() {
             <aside className="fn-planner-rail" aria-label="Planner folders">
               <div className="fn-rail-section">
                 <div className="fn-rail-label">Semesters</div>
-                {state.semesters.map((semester) => {
+                {activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
                   const tasks = getSemesterTasks(state, semester.id);
                   const active = expandedSemesterIds.includes(semester.id);
                   return (
                     <div key={semester.id} className="fn-semester-tree">
-                      <button type="button" className={`fn-rail-row fn-semester-folder ${active ? "active" : ""}`} onClick={() => toggleSemester(semester.id)}>
-                        <strong>{semester.name}</strong>
-                        <span>{courses.length} courses · {tasks.length} tasks</span>
-                      </button>
+                      <div className={`fn-rail-row fn-semester-folder ${active ? "active" : ""}`}>
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className="fn-semester-folder-toggle"
+                          onClick={() => toggleSemester(semester.id)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              toggleSemester(semester.id);
+                            }
+                          }}
+                        >
+                          <strong>{semester.name}</strong>
+                          <span>{courses.length} courses · {tasks.length} tasks</span>
+                        </div>
+                        <SemesterActionsMenu
+                          state={state}
+                          setState={setState}
+                          semester={semester}
+                          setMessage={setMessage}
+                          extraActions={{
+                            onAddCourse: () => {
+                              if (!active) toggleSemester(semester.id);
+                              setCourseDraft((current) => ({ ...current, semesterId: semester.id }));
+                              setAddingCourseSemesterId(semester.id);
+                            },
+                            onEditSemester: () => {
+                              if (!active) toggleSemester(semester.id);
+                              startEditingSemester(semester);
+                            },
+                            onNewSemester: () => setShowSemesterForm((current) => !current),
+                            onRemoveSemester: () => setFieldPlannerDeleteTarget({ type: "semester", id: semester.id, name: semester.name }),
+                          }}
+                        />
+                      </div>
                       {active ? (
                         <div className="fn-course-tree">
                           {courses.map((course) => {
@@ -11916,7 +12243,7 @@ function App() {
                               <div key={course.id} className="fn-course-tree-item">
                                 <button type="button" className={`fn-course-folder ${courseActive ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => toggleCourse(course.id)}>
                                   <strong>{course.name}</strong>
-                                  <span>{courseTasks.length}</span>
+                                  <span>{courseTasks.length}{course.completedSheetCount ? ` · ${course.completedSheetCount} sheets` : ""}</span>
                                 </button>
                                 {courseActive ? (
                                   <div className="fn-task-tree">
@@ -11974,14 +12301,6 @@ function App() {
                               </div>
                             </form>
                           ) : null}
-                          <button type="button" className="fn-rail-link fn-sidebar-add-course" onClick={() => {
-                            setCourseDraft((current) => ({ ...current, semesterId: semester.id }));
-                            setAddingCourseSemesterId((current) => (current === semester.id ? null : semester.id));
-                          }}>+ add course</button>
-                          <div className="fn-sidebar-actions fn-semester-actions">
-                            <button type="button" onClick={() => startEditingSemester(semester)}>edit semester</button>
-                            <button type="button" className="danger" onClick={() => setFieldPlannerDeleteTarget({ type: "semester", id: semester.id, name: semester.name })}>remove semester</button>
-                          </div>
                           {editingSemesterId === semester.id ? (
                             <form className="fn-sidebar-form" onSubmit={updateSemester}>
                               <input value={semesterEditName} onChange={(event) => setSemesterEditName(event.target.value)} placeholder="Semester name" />
@@ -12004,8 +12323,9 @@ function App() {
                       <button type="button" onClick={() => setShowSemesterForm(false)}>Cancel</button>
                     </div>
                   </form>
+                ) : !activeSemesters.length ? (
+                  <button type="button" className="fn-rail-link" onClick={() => setShowSemesterForm(true)}>+ new semester</button>
                 ) : null}
-                <button type="button" className="fn-rail-link" onClick={() => setShowSemesterForm((current) => !current)}>+ new semester</button>
                 <section className="fn-sidebar-workload" aria-label="Workload calculator">
                   <div className="fn-rail-label">Workload</div>
                   <label>
@@ -12044,6 +12364,8 @@ function App() {
                 <p className="section-note">{appStyle === "wabi-sabi" ? "Open a semester to manage its courses. Select a course to edit it." : "Click a semester or course to expand it. Click it again to collapse."}</p>
               </div>
               <div className="page-head-actions">
+                <SemesterSetupWizardButton state={state} setState={setState} setMessage={setMessage} />
+                <SemesterArchiveButton state={state} setState={setState} setMessage={setMessage} />
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
                   {showSemesterForm ? "Close" : "+ Add semester"}
                 </button>
@@ -12061,8 +12383,8 @@ function App() {
             ) : null}
 
             <div className="semester-board roomy-top">
-              {state.semesters.length ? (
-                state.semesters.map((semester) => {
+              {activeSemesters.length ? (
+                activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
                   const tasks = semesterTasksBySemesterId.get(semester.id) ?? [];
                   // Non-null: semesterHealthBySemesterId is built by iterating this same
@@ -12070,6 +12392,7 @@ function App() {
                   const semesterHealth = semesterHealthBySemesterId.get(semester.id)!;
                   const semesterExpanded = expandedSemesterIds.includes(semester.id);
                   const semesterExams = state.exams.filter((exam) => exam.semesterId === semester.id);
+                  const semesterWeekNumber = getSemesterWeekNumber(semester, calendarToday);
 
                   return (
                     <section key={semester.id} className={`semester-card ${semesterExpanded ? "open" : ""}`} data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester" : undefined}>
@@ -12079,11 +12402,13 @@ function App() {
                             <strong>{semester.name}</strong>
                             <small>
                               {courses.length} courses • {tasks.length} tasks • {tasks.filter((task) => getRemainingUnits(task) > 0).length} active • {semesterHealth.label}
+                              {semester.phase === "exam-prep" ? " • Exam Prep" : semesterWeekNumber ? ` • Week ${semesterWeekNumber}` : ""}
                             </small>
                           </span>
                         </button>
 
                         <div className="accordion-actions">
+                          <SemesterActionsMenu state={state} setState={setState} semester={semester} setMessage={setMessage} />
                           <div className="mini-health" data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester-health" : undefined}>
                             <strong>{semesterHealth.score}</strong>
                             <span>{semesterHealth.label}</span>
@@ -12184,7 +12509,9 @@ function App() {
                                            <span className="accordion-title-group">
                                              <strong>{course.name}</strong>
                                              <small>
-                                              {appStyle === "wabi-sabi" ? `${completedCourseTasks} of ${courseTasks.length} done` : `Target ${formatSwissGrade(course.targetGrade)} • ${courseTasks.length} tasks • ${health.label}`}
+                                              {appStyle === "wabi-sabi"
+                                                ? `${completedCourseTasks} of ${courseTasks.length} done${course.completedSheetCount ? ` • ${course.completedSheetCount} sheets` : ""}`
+                                                : `Target ${formatSwissGrade(course.targetGrade)} • ${courseTasks.length} tasks • ${health.label}${course.completedSheetCount ? ` • ${course.completedSheetCount} sheets` : ""}`}
                                              </small>
                                            </span>
                                            {appStyle === "wabi-sabi" ? <span className="wabi-course-progress" aria-label={`${courseProgress}% complete`}><i style={{ width: `${courseProgress}%`, background: course.color }} /></span> : null}
@@ -12506,19 +12833,34 @@ function App() {
                             <div className="stack-list compact">
                               {semesterExams.length ? (
                                 semesterExams.map((exam) => (
-                                  <div key={exam.id} className="exam-row detailed">
-                                    <div>
-                                      <strong>{exam.title}</strong>
-                                      <p>{courseLookup.get(exam.courseId)?.name ?? "No course"}</p>
+                                  editingExamId === exam.id ? (
+                                    <form key={exam.id} className="exam-row detailed exam-row-edit" onSubmit={saveExamEdit}>
+                                      <input value={examEditDraft.title} onChange={(event) => setExamEditDraft((current) => ({ ...current, title: event.target.value }))} placeholder="Exam title" />
+                                      <input type="date" value={examEditDraft.examDate} onChange={(event) => setExamEditDraft((current) => ({ ...current, examDate: event.target.value }))} />
+                                      <input type="number" min="0" max="100" value={examEditDraft.weight} onChange={(event) => setExamEditDraft((current) => ({ ...current, weight: event.target.value }))} placeholder="Weight %" />
+                                      <input type="number" min="0" max="100" value={examEditDraft.preparedness} onChange={(event) => setExamEditDraft((current) => ({ ...current, preparedness: event.target.value }))} placeholder="Prepared %" />
+                                      <input value={examEditDraft.location} onChange={(event) => setExamEditDraft((current) => ({ ...current, location: event.target.value }))} placeholder="Location" />
+                                      <button type="submit">Save</button>
+                                      <button type="button" className="ghost-button" onClick={() => setEditingExamId(null)}>Cancel</button>
+                                    </form>
+                                  ) : (
+                                    <div key={exam.id} className="exam-row detailed">
+                                      <div>
+                                        <strong>{exam.title}</strong>
+                                        <p>{courseLookup.get(exam.courseId)?.name ?? "No course"}{exam.location ? ` · ${exam.location}` : ""}</p>
+                                      </div>
+                                      <div className="exam-side">
+                                        <span>{daysUntil(exam.examDate)} days</span>
+                                        <small>{exam.weight}% of grade</small>
+                                      </div>
+                                      <button type="button" className="ghost-button" onClick={() => startEditingExam(exam)}>
+                                        Edit
+                                      </button>
+                                      <button type="button" className="mini-danger" onClick={() => removeExam(exam.id)}>
+                                        Remove
+                                      </button>
                                     </div>
-                                    <div className="exam-side">
-                                      <span>{daysUntil(exam.examDate)} days</span>
-                                      <small>{exam.weight}% of grade</small>
-                                    </div>
-                                    <button type="button" className="mini-danger" onClick={() => removeExam(exam.id)}>
-                                      Remove
-                                    </button>
-                                  </div>
+                                  )
                                 ))
                               ) : (
                                 <p className="empty-copy compact-empty">No exams added for this semester.</p>
@@ -12670,8 +13012,8 @@ function App() {
             </div>
 
             <div className="stack-list compact">
-              {state.semesters.length ? (
-                state.semesters.map((semester) => {
+              {activeSemesters.length ? (
+                activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
                   const exams = state.exams.filter((exam) => exam.semesterId === semester.id);
                   const nextExam = [...exams].filter((exam) => daysUntil(exam.examDate) >= 0).sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))[0] ?? null;
@@ -13618,6 +13960,7 @@ function App() {
 
       {appStyle !== "wabi-sabi" && fullscreen && state.timer.phase !== "idle" ? (
         <div className="exam-fullscreen-overlay">
+          {appStyle === "field-notebook" && palette === "sakura" ? <SakuraScatter /> : null}
           <button
             type="button"
             className="exam-fullscreen-exit"

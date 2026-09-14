@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialLeaderboardEntry, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TimerState, TravlePuzzleState, WordlePuzzleState } from "../types";
+import type { AppState, CalendarEntry, Course, DailyTodo, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Holiday, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialLeaderboardEntry, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, StudyUnit, TabKey, Task, TimerState, TimetableEvent, TravlePuzzleState, WordlePuzzleState } from "../types";
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
@@ -342,6 +342,10 @@ export const defaultState: AppState = {
   tasks: [],
   exams: [],
   calendarEntries: [],
+  timetableEvents: [],
+  holidays: [],
+  dailyTodos: [],
+  studyUnits: [],
   sessions: [],
   lifetimeStudyMinutes: 0,
   lifetimeStudySessions: 0,
@@ -789,6 +793,11 @@ function migrateSemesters(parsed: Record<string, unknown>) {
     id: importedSemesterId,
     name: "Imported Semester",
     createdAt: new Date().toISOString(),
+    startDate: null,
+    endDate: null,
+    phase: "semester",
+    archived: false,
+    archivedAt: null,
   };
 
   const courseSemesterLookup = new Map<string, string>();
@@ -844,6 +853,220 @@ function normalizeCalendarEntries(entries: unknown): CalendarEntry[] {
       adHocTitle: typeof record.adHocTitle === "string" ? record.adHocTitle : undefined,
       adHocSemesterId: typeof record.adHocSemesterId === "string" ? record.adHocSemesterId : undefined,
       adHocCourseId: typeof record.adHocCourseId === "string" ? record.adHocCourseId : undefined,
+    }];
+  });
+}
+
+function normalizeSemesters(semesters: unknown): Semester[] {
+  if (!Array.isArray(semesters)) return [];
+  return semesters.flatMap((semester) => {
+    if (!semester || typeof semester !== "object") return [];
+    const record = semester as Partial<Semester> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.name !== "string") return [];
+    return [{
+      id: record.id,
+      name: record.name,
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+      startDate: typeof record.startDate === "string" ? record.startDate : null,
+      endDate: typeof record.endDate === "string" ? record.endDate : null,
+      phase: record.phase === "exam-prep" ? "exam-prep" : "semester",
+      archived: Boolean(record.archived),
+      archivedAt: typeof record.archivedAt === "string" ? record.archivedAt : null,
+    }];
+  });
+}
+
+function normalizeExams(exams: unknown): Exam[] {
+  if (!Array.isArray(exams)) return [];
+  return exams.flatMap((exam) => {
+    if (!exam || typeof exam !== "object") return [];
+    const record = exam as Partial<Exam> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.courseId !== "string" || typeof record.title !== "string" || typeof record.examDate !== "string") return [];
+    return [{
+      id: record.id,
+      semesterId: record.semesterId,
+      courseId: record.courseId,
+      title: record.title,
+      examDate: record.examDate,
+      weight: typeof record.weight === "number" ? record.weight : 0,
+      preparedness: typeof record.preparedness === "number" ? record.preparedness : 0,
+      location: typeof record.location === "string" ? record.location : "",
+    }];
+  });
+}
+
+function normalizeTimetableEvents(events: unknown): TimetableEvent[] {
+  if (!Array.isArray(events)) return [];
+  return events.flatMap((event) => {
+    if (!event || typeof event !== "object") return [];
+    const record = event as Record<string, unknown> & { kind?: unknown };
+    // "class" is the pre-split kind value (before Lecture/Exercise session became distinct
+    // kinds) - normalize it forward to "lecture" so older stored data keeps rendering.
+    const kind = record.kind === "class" ? "lecture" : record.kind;
+    if (
+      typeof record.id !== "string" ||
+      typeof record.semesterId !== "string" ||
+      typeof record.courseId !== "string" ||
+      typeof record.date !== "string" ||
+      typeof record.time !== "string" ||
+      (kind !== "lecture" && kind !== "exercise-session" && kind !== "sheet-release" && kind !== "sheet-deadline")
+    ) return [];
+    return [{
+      id: record.id,
+      semesterId: record.semesterId,
+      courseId: record.courseId,
+      kind,
+      label: typeof record.label === "string" ? record.label : "Lecture",
+      date: record.date,
+      time: record.time,
+      endTime: typeof record.endTime === "string" ? record.endTime : null,
+      repeatWeekly: Boolean(record.repeatWeekly),
+      url: typeof record.url === "string" ? record.url : null,
+      completedOccurrences: Array.isArray(record.completedOccurrences)
+        ? record.completedOccurrences.filter((item): item is string => typeof item === "string")
+        : [],
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+}
+
+function normalizeHolidays(holidays: unknown): Holiday[] {
+  if (!Array.isArray(holidays)) return [];
+  return holidays.flatMap((holiday) => {
+    if (!holiday || typeof holiday !== "object") return [];
+    const record = holiday as Partial<Holiday> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.startDate !== "string" || typeof record.endDate !== "string") return [];
+    return [{
+      id: record.id,
+      semesterId: record.semesterId,
+      startDate: record.startDate,
+      endDate: record.endDate,
+      label: typeof record.label === "string" ? record.label : "Holiday",
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+}
+
+function firstWeekdayOnOrAfter(startIso: string, weekday: number): string {
+  const [year, month, day] = startIso.split("-").map(Number);
+  const start = new Date(year, (month || 1) - 1, day || 1);
+  const offset = (weekday - start.getDay() + 7) % 7;
+  start.setDate(start.getDate() + offset);
+  const resultYear = start.getFullYear();
+  const resultMonth = String(start.getMonth() + 1).padStart(2, "0");
+  const resultDay = String(start.getDate()).padStart(2, "0");
+  return `${resultYear}-${resultMonth}-${resultDay}`;
+}
+
+/** Converts the pre-unification RecurringClassEvent/ExerciseSheetSeries arrays (if present in a legacy blob) into TimetableEvent rows. */
+function migrateLegacyTimetableEvents(parsed: Record<string, unknown>, semesters: Semester[]): TimetableEvent[] {
+  const semesterLookup = new Map(semesters.map((semester) => [semester.id, semester]));
+  const anchorFor = (semesterId: string, weekday: number) => {
+    const semester = semesterLookup.get(semesterId);
+    return firstWeekdayOnOrAfter(semester?.startDate ?? todayIso(), weekday);
+  };
+
+  const legacyClasses = Array.isArray(parsed.recurringClassEvents) ? (parsed.recurringClassEvents as Array<Record<string, unknown>>) : [];
+  const classEvents: TimetableEvent[] = legacyClasses.flatMap((record) => {
+    if (
+      typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.courseId !== "string" ||
+      typeof record.startTime !== "string" || typeof record.endTime !== "string" || typeof record.weekday !== "number"
+    ) return [];
+    return [{
+      id: record.id,
+      semesterId: record.semesterId,
+      courseId: record.courseId,
+      kind: "lecture",
+      label: typeof record.label === "string" ? record.label : "Lecture",
+      date: anchorFor(record.semesterId, record.weekday),
+      time: record.startTime,
+      endTime: record.endTime,
+      repeatWeekly: true,
+      url: null,
+      completedOccurrences: [],
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+
+  const legacySheets = Array.isArray(parsed.exerciseSheetSeries) ? (parsed.exerciseSheetSeries as Array<Record<string, unknown>>) : [];
+  const sheetEvents: TimetableEvent[] = legacySheets.flatMap((record) => {
+    if (
+      typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.courseId !== "string" ||
+      typeof record.releaseTime !== "string" || typeof record.deadlineTime !== "string" ||
+      typeof record.releaseWeekday !== "number" || typeof record.deadlineWeekday !== "number"
+    ) return [];
+    const label = typeof record.label === "string" ? record.label : "Exercise Sheet";
+    const url = typeof record.url === "string" ? record.url : null;
+    const createdAt = typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString();
+    return [
+      {
+        id: `${record.id}-release`,
+        semesterId: record.semesterId,
+        courseId: record.courseId,
+        kind: "sheet-release",
+        label,
+        date: anchorFor(record.semesterId, record.releaseWeekday),
+        time: record.releaseTime,
+        endTime: null,
+        repeatWeekly: true,
+        url,
+        completedOccurrences: [],
+        createdAt,
+      },
+      {
+        id: `${record.id}-deadline`,
+        semesterId: record.semesterId,
+        courseId: record.courseId,
+        kind: "sheet-deadline",
+        label,
+        date: anchorFor(record.semesterId, record.deadlineWeekday),
+        time: record.deadlineTime,
+        endTime: null,
+        repeatWeekly: true,
+        url,
+        completedOccurrences: [],
+        createdAt,
+      },
+    ];
+  });
+
+  return [...classEvents, ...sheetEvents];
+}
+
+function normalizeDailyTodos(todos: unknown): DailyTodo[] {
+  if (!Array.isArray(todos)) return [];
+  return todos.flatMap((todo) => {
+    if (!todo || typeof todo !== "object") return [];
+    const record = todo as Partial<DailyTodo> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.date !== "string" || typeof record.title !== "string") return [];
+    return [{
+      id: record.id,
+      date: record.date,
+      title: record.title,
+      completed: Boolean(record.completed),
+      completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+    }];
+  });
+}
+
+function normalizeStudyUnits(units: unknown): StudyUnit[] {
+  if (!Array.isArray(units)) return [];
+  return units.flatMap((unit) => {
+    if (!unit || typeof unit !== "object") return [];
+    const record = unit as Partial<StudyUnit> & Record<string, unknown>;
+    if (typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.date !== "string" || typeof record.title !== "string") return [];
+    return [{
+      id: record.id,
+      semesterId: record.semesterId,
+      courseId: typeof record.courseId === "string" ? record.courseId : null,
+      date: record.date,
+      title: record.title,
+      startTime: typeof record.startTime === "string" ? record.startTime : null,
+      endTime: typeof record.endTime === "string" ? record.endTime : null,
+      notes: typeof record.notes === "string" ? record.notes : "",
+      completed: Boolean(record.completed),
+      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
     }];
   });
 }
@@ -1080,21 +1303,31 @@ export function loadAppState(): AppState {
     const timerRecovery = recoverExpiredTimer({ ...defaultTimer, ...parsedTimer }, sessions);
     const visibleTabs = normalizeVisibleTabs(parsed.settings?.visibleTabs);
     const lifetimeTotals = normalizeLifetimeTotals(parsed, timerRecovery.sessions);
+    const normalizedSemesters = normalizeSemesters(migrated.semesters);
+    const timetableEvents = Array.isArray(parsed.timetableEvents)
+      ? normalizeTimetableEvents(parsed.timetableEvents)
+      : migrateLegacyTimetableEvents(parsed, normalizedSemesters);
 
     return {
       ...defaultState,
       ...parsed,
       activeTab: normalizeActiveTab(parsed.activeTab, visibleTabs),
-      semesters: migrated.semesters,
+      semesters: normalizedSemesters,
       courses: Array.isArray(migrated.courses)
         ? migrated.courses.map((course) => ({
             ...course,
             targetGrade: typeof course.targetGrade === "number" && course.targetGrade >= 4 && course.targetGrade <= 6 ? course.targetGrade : 4,
+            externalUrl: typeof (course as Partial<Course>).externalUrl === "string" ? (course as Partial<Course>).externalUrl! : null,
+            completedSheetCount: typeof (course as Partial<Course>).completedSheetCount === "number" ? (course as Partial<Course>).completedSheetCount! : 0,
           }))
         : [],
       tasks: Array.isArray(migrated.tasks) ? migrated.tasks.map((task) => ({ ...task, unitLabel: normalizeTaskUnitLabel(task) })) : [],
-      exams: Array.isArray(migrated.exams) ? migrated.exams : [],
+      exams: normalizeExams(migrated.exams),
       calendarEntries: normalizeCalendarEntries(parsed.calendarEntries),
+      timetableEvents,
+      holidays: normalizeHolidays(parsed.holidays),
+      dailyTodos: normalizeDailyTodos(parsed.dailyTodos),
+      studyUnits: normalizeStudyUnits(parsed.studyUnits),
       settings: {
         ...defaultState.settings,
         ...parsed.settings,

@@ -3,7 +3,7 @@ import type { SocialState } from "../types";
 const DEFAULT_SOCIAL_API_URL = "https://study-tracker-social.danil-poluyanov13.workers.dev";
 const SOCIAL_API_URL = (import.meta.env.VITE_SOCIAL_API_URL || DEFAULT_SOCIAL_API_URL).replace(/\/$/, "");
 
-export const SKRIBBL_DRAW_SECONDS = 2 * 60;
+export const SKRIBBL_DRAW_SECONDS = 3 * 60;
 export const SKRIBBL_GALLERY_PAGE_SIZE = 16;
 
 export interface SkribblTheme {
