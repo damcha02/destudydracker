@@ -16,10 +16,17 @@ export type SocialAvatar =
   | { kind: "icon"; icon: string }
   | { kind: "photo"; name: string; url: string; mimeType: string };
 
+export type SemesterPhase = "semester" | "exam-prep";
+
 export interface Semester {
   id: string;
   name: string;
   createdAt: string;
+  startDate: string | null;
+  endDate: string | null;
+  phase: SemesterPhase;
+  archived: boolean;
+  archivedAt: string | null;
 }
 
 export interface Course {
@@ -29,6 +36,8 @@ export interface Course {
   color: string;
   targetGrade: number;
   createdAt: string;
+  externalUrl: string | null;
+  completedSheetCount: number;
 }
 
 export interface Task {
@@ -53,6 +62,57 @@ export interface Exam {
   examDate: string;
   weight: number;
   preparedness: number;
+  location: string;
+}
+
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
+export type TimetableEventKind = "lecture" | "exercise-session" | "sheet-release" | "sheet-deadline";
+
+export interface TimetableEvent {
+  id: string;
+  semesterId: string;
+  courseId: string;
+  kind: TimetableEventKind;
+  label: string;
+  date: string;
+  time: string;
+  endTime: string | null;
+  repeatWeekly: boolean;
+  url: string | null;
+  completedOccurrences: string[];
+  createdAt: string;
+}
+
+export interface Holiday {
+  id: string;
+  semesterId: string;
+  startDate: string;
+  endDate: string;
+  label: string;
+  createdAt: string;
+}
+
+export interface DailyTodo {
+  id: string;
+  date: string;
+  title: string;
+  completed: boolean;
+  completedAt: string | null;
+  createdAt: string;
+}
+
+export interface StudyUnit {
+  id: string;
+  semesterId: string;
+  courseId: string | null;
+  date: string;
+  title: string;
+  startTime: string | null;
+  endTime: string | null;
+  notes: string;
+  completed: boolean;
+  createdAt: string;
 }
 
 export interface CalendarEntry {
@@ -405,6 +465,10 @@ export interface AppState {
   tasks: Task[];
   exams: Exam[];
   calendarEntries: CalendarEntry[];
+  timetableEvents: TimetableEvent[];
+  holidays: Holiday[];
+  dailyTodos: DailyTodo[];
+  studyUnits: StudyUnit[];
   sessions: StudySession[];
   lifetimeStudyMinutes: number;
   lifetimeStudySessions: number;

@@ -41,6 +41,8 @@ function course(overrides: Partial<Course>): Course {
     color: "#8fb4ff",
     targetGrade: 4,
     createdAt: "2026-08-01T00:00:00.000Z",
+    externalUrl: null,
+    completedSheetCount: 0,
     ...overrides,
   };
 }
@@ -50,6 +52,11 @@ function semester(overrides: Partial<Semester>): Semester {
     id: "semester",
     name: "Semester",
     createdAt: "2026-08-01T00:00:00.000Z",
+    startDate: null,
+    endDate: null,
+    phase: "semester",
+    archived: false,
+    archivedAt: null,
     ...overrides,
   };
 }
@@ -63,6 +70,7 @@ function exam(overrides: Partial<Exam>): Exam {
     examDate: "2026-08-15",
     weight: 40,
     preparedness: 35,
+    location: "",
     ...overrides,
   };
 }
