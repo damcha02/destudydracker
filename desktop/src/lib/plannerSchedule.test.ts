@@ -231,7 +231,7 @@ describe("buildDailyTimeline", () => {
       ],
       exams: [{ id: "exam", semesterId: "semester", courseId: "course", title: "Midterm", examDate: "2026-09-07", weight: 30, preparedness: 0, location: "" }],
       calendarEntries: [],
-      dailyTodos: [{ id: "todo", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
+      dailyTodos: [{ id: "todo", date: "2026-09-07", time: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
       studyUnits: [],
     });
 

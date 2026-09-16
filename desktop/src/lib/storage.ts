@@ -1190,7 +1190,9 @@ function normalizeDailyTodos(todos: unknown): DailyTodo[] {
     return [{
       id: record.id,
       date: record.date,
+      time: typeof record.time === "string" ? record.time : null,
       title: record.title,
+      notes: typeof record.notes === "string" ? record.notes : "",
       completed: Boolean(record.completed),
       completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),

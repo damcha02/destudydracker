@@ -8858,6 +8858,23 @@ input[type="color"] {
   text-decoration: line-through;
 }
 
+/* Standalone Daily To-Dos aren't tied to a subject's color, so they get a neutral dashed
+   treatment instead of the solid course-colored left bar used by subject-bound items - keeps
+   them visually distinct from Lecture/Session/Sheet occurrences at a glance. */
+.calendar-timeline-entry.standalone-todo {
+  border-style: dashed;
+  border-color: color-mix(in oklch, var(--ink-4) 55%, transparent);
+  background: color-mix(in oklch, var(--surface-raised) 92%, var(--ink-4) 8%);
+}
+
+.timetable-todo-icon {
+  display: inline-block;
+  margin-right: 5px;
+  font-size: 0.5rem;
+  vertical-align: middle;
+  color: var(--ink-4);
+}
+
 .calendar-timeline-entry-copy {
   align-self: start;
   display: grid;
@@ -21597,6 +21614,31 @@ input[type="color"] {
 .timetable-modal-course-row input {
   flex: 1;
   min-width: 0;
+}
+
+.timetable-modal-subtype-badge {
+  align-self: center;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--r-pill, 999px);
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.timetable-modal-manage-link {
+  justify-self: center;
+  font-size: 0.78rem;
+  color: var(--ink-4);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.timetable-modal-manage-link:hover {
+  color: var(--accent);
 }
 
 .timetable-modal-toggle {

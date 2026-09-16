@@ -108,7 +108,9 @@ export interface Holiday {
 export interface DailyTodo {
   id: string;
   date: string;
+  time: string | null;
   title: string;
+  notes: string;
   completed: boolean;
   completedAt: string | null;
   createdAt: string;

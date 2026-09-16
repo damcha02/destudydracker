@@ -363,6 +363,14 @@ describe("loadAppState - migration and corruption", () => {
     expect(result.courses[0]).toMatchObject({ externalUrl: null });
   });
 
+  it("defaults a legacy daily todo's missing time/notes fields", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      dailyTodos: [{ id: "todo1", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
+    }));
+    const result = loadAppState();
+    expect(result.dailyTodos[0]).toMatchObject({ time: null, notes: "" });
+  });
+
   it("defaults the new planner arrays to [] when the stored blob predates them", () => {
     storage.setItem(CORE_KEY, JSON.stringify({ waterGlasses: 1 }));
     const result = loadAppState();
@@ -385,7 +393,7 @@ describe("loadAppState - migration and corruption", () => {
         completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z",
       }],
       holidays: [{ id: "holiday1", semesterId: "sem1", startDate: "2026-12-20", endDate: "2027-01-05", label: "Winter break", createdAt: "2026-01-01T00:00:00.000Z" }],
-      dailyTodos: [{ id: "todo1", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
+      dailyTodos: [{ id: "todo1", date: "2026-09-07", time: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
       studyUnits: [{ id: "unit1", semesterId: "sem1", courseId: "course1", date: "2026-10-01", title: "Revise chapter 3", startTime: "09:00", endTime: "10:00", notes: "", completed: false, createdAt: "2026-01-01T00:00:00.000Z" }],
     };
     saveAppState(state, createInitialPersistenceBaselines(defaultState));
