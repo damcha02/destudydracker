@@ -283,9 +283,9 @@ export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs)
     rows.push({
       id: `todo:${todo.id}`,
       kind: "todo",
-      time: null,
+      time: todo.time,
       endTime: null,
-      sortMinutes: timeToSortMinutes(null),
+      sortMinutes: timeToSortMinutes(todo.time),
       title: todo.title,
       courseId: null,
       completed: todo.completed,

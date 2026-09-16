@@ -4444,8 +4444,12 @@ function App() {
   }, [selectedTaskId, state.tasks]);
 
   useEffect(() => {
-    if (!calendarAddDraft.semesterId && state.semesters[0]?.id) {
-      setCalendarAddDraft((current) => ({ ...current, semesterId: state.semesters[0].id }));
+    // Default to the first ACTIVE semester - falling back to state.semesters[0] here would
+    // silently default this drawer's subject list to an archived semester's subjects whenever
+    // the very first semester ever created happened to be archived.
+    const firstActiveSemesterId = state.semesters.find((semester) => !semester.archived)?.id;
+    if (!calendarAddDraft.semesterId && firstActiveSemesterId) {
+      setCalendarAddDraft((current) => ({ ...current, semesterId: firstActiveSemesterId }));
     }
   }, [calendarAddDraft.semesterId, state.semesters]);
 
@@ -8551,10 +8555,6 @@ function App() {
     setCalendarMovePreview(null);
   }
 
-  function openCalendarAddDrawer() {
-    setCalendarAddOpen(true);
-  }
-
   function openTodayTodoDrawer() {
     const today = localIsoDate();
     setCalendarCursorDate(parseCalendarDate(today));
@@ -9120,6 +9120,7 @@ function App() {
       ...getOverlapSplitStyle(layout),
     } as CSSProperties;
     const isSolvedSheet = row.kind === "sheet-deadline" && row.completed;
+    const isStandaloneTodo = row.kind === "todo";
     const editable = row.kind !== "study-unit";
     const draggable = timetableEditMode && row.kind !== "study-unit";
     const isDragging = timetableDragRowId === row.id;
@@ -9128,13 +9129,13 @@ function App() {
     return (
       <div
         key={row.id}
-        className={`calendar-timeline-entry scheduled generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""}`}
+        className={`calendar-timeline-entry scheduled generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""} ${isStandaloneTodo ? "standalone-todo" : "subject-bound"}`}
         style={style}
         onMouseDown={(event) => startTimetableRowMove(event, row)}
       >
         <div className="calendar-timeline-entry-copy">
-          <strong>{row.title}</strong>
-          <span>{course?.name ?? "General"}{isSolvedSheet ? <em className="timetable-solved-badge">Solved</em> : null}</span>
+          <strong>{isStandaloneTodo ? <span className="timetable-todo-icon" aria-hidden="true">&#9679;</span> : null}{row.title}</strong>
+          <span>{isStandaloneTodo ? "To-do" : (course?.name ?? "General")}{isSolvedSheet ? <em className="timetable-solved-badge">Solved</em> : null}</span>
           <small>{row.time ?? ""}{row.endTime ? `–${row.endTime}` : ""}</small>
         </div>
         <input
@@ -9224,6 +9225,13 @@ function App() {
       setTimetableModalState({ mode: "create", prefill: { date: selectedCalendarDate!, time, semesterId: modalSemesterId } });
     }
 
+    // The day view's only creation trigger: both "+ Add task" buttons and clicking an empty
+    // timeline slot lead to this same to-do-only modal - subject-bound items can only be
+    // scheduled through the Manage Semesters portal now.
+    function openTodoCreateModal() {
+      setTimetableModalState({ mode: "create", prefill: { date: selectedCalendarDate!, time: "", semesterId: modalSemesterId } });
+    }
+
     return (
       <div className="calendar-drawer-backdrop calendar-day-view-backdrop" onMouseDown={closeCalendarDrawer}>
         <aside className="calendar-day-view" onMouseDown={(event) => event.stopPropagation()} aria-label="Calendar day view">
@@ -9231,7 +9239,7 @@ function App() {
             <div>
               <p className="eyebrow">Day view{weekNumber ? ` · Week ${weekNumber}` : ""}</p>
               <h3>{new Intl.DateTimeFormat("en", { weekday: "long", month: "long", day: "numeric", year: "numeric" }).format(selectedDate)}</h3>
-              <p className="section-note">Click + to assign planner tasks, or click a time slot to create a timetable item.</p>
+              <p className="section-note">Click + to add a to-do, or click a time slot to add one at that time. Course items are scheduled from Manage Semesters.</p>
             </div>
             <div className="calendar-day-view-actions">
               <button
@@ -9242,8 +9250,8 @@ function App() {
               >
                 {timetableEditMode ? "Done editing" : "Edit"}
               </button>
-              <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
-                + Add task
+              <button type="button" className="calendar-primary-button" onClick={openTodoCreateModal}>
+                + Add to-do
               </button>
               <button type="button" className="ghost-button small-button" onClick={closeCalendarDrawer}>
                 Done
@@ -9318,14 +9326,11 @@ function App() {
               <section className="calendar-drawer-section">
                 <div>
                   <strong>Day controls</strong>
-                  <small>Move through days or add a new calendar block.</small>
+                  <small>Move through days.</small>
                 </div>
                 <div className="calendar-day-side-actions">
                   <button type="button" className="ghost-button" onClick={openNextCalendarDay}>
                     Next day
-                  </button>
-                  <button type="button" className="calendar-primary-button" onClick={openCalendarAddDrawer}>
-                    + Add task
                   </button>
                 </div>
               </section>
@@ -12109,6 +12114,7 @@ function App() {
           setMessage={setMessage}
           target={timetableModalState}
           onClose={() => setTimetableModalState(null)}
+          onOpenManageSemesters={() => { setTimetableModalState(null); setManageSemestersOpen(true); }}
         />
       ) : null}
 
