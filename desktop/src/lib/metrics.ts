@@ -43,6 +43,11 @@ export function getTaskProgress(task: Task) {
   return Math.round((task.completedUnits / total) * 100);
 }
 
+/** Semesters that count toward workload totals: not archived. Exam-prep semesters still count as active - only archiving retires a semester's workload. */
+export function getActiveSemesterIds(state: AppState): Set<string> {
+  return new Set(state.semesters.filter((semester) => !semester.archived).map((semester) => semester.id));
+}
+
 export function getSemesterCourses(state: AppState, semesterId: string) {
   return state.courses.filter((course) => course.semesterId === semesterId);
 }

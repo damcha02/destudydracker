@@ -37,14 +37,16 @@ export interface Course {
   targetGrade: number;
   createdAt: string;
   externalUrl: string | null;
-  completedSheetCount: number;
 }
+
+export type TaskSubtype = "Lecture" | "Session" | "Sheet" | "Other";
 
 export interface Task {
   id: string;
   semesterId: string;
   courseId: string;
   title: string;
+  subtype: TaskSubtype;
   unitLabel: string;
   totalUnits: number;
   completedUnits: number;
@@ -67,18 +69,28 @@ export interface Exam {
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
-export type TimetableEventKind = "lecture" | "exercise-session" | "sheet-release" | "sheet-deadline";
+export type TimetableEventKind = "occurrence" | "sheet-release" | "sheet-deadline";
+
+export interface TimetableOccurrenceOverride {
+  skipped?: true;
+  date?: string;
+  time?: string;
+  endTime?: string | null;
+}
 
 export interface TimetableEvent {
   id: string;
   semesterId: string;
   courseId: string;
   kind: TimetableEventKind;
+  taskId: string;
   label: string;
   date: string;
   time: string;
   endTime: string | null;
   repeatWeekly: boolean;
+  recurrenceEndDate: string | null;
+  occurrenceOverrides: Record<string, TimetableOccurrenceOverride>;
   url: string | null;
   completedOccurrences: string[];
   createdAt: string;
