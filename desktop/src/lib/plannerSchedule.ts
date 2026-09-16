@@ -1,4 +1,46 @@
-import type { CalendarEntry, DailyTodo, Exam, Holiday, Semester, StudyUnit, TimetableEvent } from "../types";
+import type { CalendarEntry, DailyTodo, Exam, Holiday, Semester, StudyUnit, TimetableEvent, TimetableEventKind } from "../types";
+
+/**
+ * The single canonical constructor for a TimetableEvent. Every creation path (the main calendar's
+ * click-to-create modal, the Manage Semesters window's inline scheduler, the sheet release/due
+ * dual-scheduler) must build events through this function instead of writing object literals by
+ * hand, so the stored schema can never drift between entry points - the same repeatWeekly flag,
+ * the same empty occurrenceOverrides/completedOccurrences, the same null defaults, every time.
+ * The weekly-recurrence weekday is never stored separately - it is always implicit in `date`
+ * (`new Date(date).getDay()`), read out by expandWeekdayFrom in this same module.
+ */
+export function makeTimetableEvent(params: {
+  id: string;
+  semesterId: string;
+  courseId: string;
+  taskId: string;
+  kind: TimetableEventKind;
+  label: string;
+  date: string;
+  time: string;
+  endTime?: string | null;
+  repeatWeekly: boolean;
+  url?: string | null;
+  createdAt?: string;
+}): TimetableEvent {
+  return {
+    id: params.id,
+    semesterId: params.semesterId,
+    courseId: params.courseId,
+    taskId: params.taskId,
+    kind: params.kind,
+    label: params.label,
+    date: params.date,
+    time: params.time,
+    endTime: params.endTime ?? null,
+    repeatWeekly: params.repeatWeekly,
+    recurrenceEndDate: null,
+    occurrenceOverrides: {},
+    url: params.url ?? null,
+    completedOccurrences: [],
+    createdAt: params.createdAt ?? new Date().toISOString(),
+  };
+}
 
 export function parseIsoDate(iso: string): Date {
   const [year, month, day] = iso.split("-").map(Number);
@@ -67,23 +109,78 @@ export function expandTimetableEvents(
   rangeEndIso: string,
 ): TimetableEventOccurrence[] {
   if (!isSemesterScheduleActive(semester)) return [];
+  const effectiveEndBound = minIso(semester.endDate, rangeEndIso);
   const effectiveStart = maxIso(semester.startDate, rangeStartIso);
-  const effectiveEnd = minIso(semester.endDate, rangeEndIso);
-  if (effectiveStart > effectiveEnd) return [];
+  if (effectiveStart > effectiveEndBound) return [];
 
   const occurrences: TimetableEventOccurrence[] = [];
   for (const event of events) {
     if (event.semesterId !== semester.id) continue;
+    const seriesEnd = minIso(event.recurrenceEndDate, effectiveEndBound);
     if (event.repeatWeekly) {
-      for (const date of expandWeekdayFrom(event.date, effectiveStart, effectiveEnd)) {
-        if (isHoliday(holidays, semester.id, date)) continue;
-        occurrences.push({ event, date });
+      if (effectiveStart <= seriesEnd) {
+        for (const date of expandWeekdayFrom(event.date, effectiveStart, seriesEnd)) {
+          const override = event.occurrenceOverrides[date];
+          if (override?.skipped) continue;
+          if (override?.date && override.time) {
+            if (override.date >= effectiveStart && override.date <= effectiveEndBound && !isHoliday(holidays, semester.id, override.date)) {
+              occurrences.push({ event: { ...event, date: override.date, time: override.time, endTime: override.endTime ?? event.endTime }, date: override.date });
+            }
+            continue;
+          }
+          if (isHoliday(holidays, semester.id, date)) continue;
+          occurrences.push({ event, date });
+        }
       }
-    } else if (event.date >= effectiveStart && event.date <= effectiveEnd) {
+    } else if (event.date >= effectiveStart && event.date <= effectiveEndBound) {
       occurrences.push({ event, date: event.date });
     }
   }
   return occurrences;
+}
+
+/** Moves a single occurrence of a recurring event to a new date/time without affecting the rest of the series. */
+export function moveSingleOccurrence(event: TimetableEvent, originalDateIso: string, newDate: string, newTime: string, newEndTime: string | null): TimetableEvent {
+  return {
+    ...event,
+    occurrenceOverrides: {
+      ...event.occurrenceOverrides,
+      [originalDateIso]: { date: newDate, time: newTime, endTime: newEndTime },
+    },
+  };
+}
+
+/**
+ * Splits a recurring event at the moved occurrence: the original series is truncated to end
+ * the day before `originalDateIso`, and a new sibling event picks up the series from the moved
+ * occurrence's new date/weekday/time onward. Completion history is intentionally not carried
+ * over to the new series.
+ */
+export function splitRecurringEventAt(
+  event: TimetableEvent,
+  originalDateIso: string,
+  newDate: string,
+  newTime: string,
+  newEndTime: string | null,
+  makeId: () => string,
+): { updatedOriginal: TimetableEvent; newEvent: TimetableEvent } {
+  const dayBefore = toIsoDate(addDays(parseIsoDate(originalDateIso), -1));
+  const updatedOriginal: TimetableEvent = {
+    ...event,
+    recurrenceEndDate: minIso(event.recurrenceEndDate, dayBefore),
+  };
+  const newEvent: TimetableEvent = {
+    ...event,
+    id: makeId(),
+    date: newDate,
+    time: newTime,
+    endTime: newEndTime,
+    recurrenceEndDate: null,
+    completedOccurrences: [],
+    occurrenceOverrides: {},
+    createdAt: new Date().toISOString(),
+  };
+  return { updatedOriginal, newEvent };
 }
 
 export function shouldAutoTransitionToExamPrep(semester: Semester, todayIso: string): boolean {
@@ -96,14 +193,7 @@ export function getSemesterWeekNumber(semester: Semester, dateIso: string): numb
   return Math.floor(daysBetween(semester.startDate, dateIso) / 7) + 1;
 }
 
-export type DailyTimelineKind = "lecture" | "exercise-session" | "sheet-release" | "sheet-deadline" | "exam" | "calendar-entry" | "todo" | "study-unit";
-
-export const timetableEventKindLabels: Record<TimetableEvent["kind"], string> = {
-  lecture: "Lecture",
-  "exercise-session": "Exercise session",
-  "sheet-release": "Sheet released",
-  "sheet-deadline": "Sheet due",
-};
+export type DailyTimelineKind = "occurrence" | "sheet-release" | "sheet-deadline" | "exam" | "calendar-entry" | "todo" | "study-unit";
 
 export interface DailyTimelineRow {
   id: string;
@@ -113,6 +203,7 @@ export interface DailyTimelineRow {
   sortMinutes: number;
   title: string;
   courseId: string | null;
+  taskId?: string | null;
   url?: string | null;
   completed?: boolean;
   refId: string;
@@ -148,6 +239,7 @@ export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs)
       sortMinutes: timeToSortMinutes(event.time),
       title,
       courseId: event.courseId,
+      taskId: event.taskId,
       url: event.url,
       completed: event.completedOccurrences.includes(dateIso),
       refId: event.id,
@@ -219,4 +311,68 @@ export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs)
   }
 
   return rows.sort((a, b) => a.sortMinutes - b.sortMinutes);
+}
+
+export interface OverlapLayoutItem {
+  id: string;
+  startMinutes: number;
+  endMinutes: number;
+}
+
+export interface OverlapLayoutSlot {
+  column: number;
+  columnCount: number;
+}
+
+/**
+ * Column-splits a day's timed items so overlapping entries (startA < endB && startB < endA) sit
+ * side by side instead of stacking on top of each other. Items are grouped into connected
+ * overlap clusters (touching endpoints, e.g. one item's end === another's start, do not count as
+ * overlapping), then columns are assigned greedily within each cluster. Items with no overlap at
+ * all get columnCount 1 so callers can skip any layout override for the common case.
+ */
+export function computeOverlapLayout(items: OverlapLayoutItem[]): Map<string, OverlapLayoutSlot> {
+  const layout = new Map<string, OverlapLayoutSlot>();
+  const sorted = [...items].sort((a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes);
+
+  let cluster: OverlapLayoutItem[] = [];
+  let clusterEnd = -Infinity;
+
+  function flushCluster() {
+    if (!cluster.length) return;
+    const columnEnds: number[] = [];
+    const columnByItemId = new Map<string, number>();
+    for (const item of cluster) {
+      let placedColumn = -1;
+      for (let column = 0; column < columnEnds.length; column += 1) {
+        if (columnEnds[column] <= item.startMinutes) {
+          columnEnds[column] = item.endMinutes;
+          placedColumn = column;
+          break;
+        }
+      }
+      if (placedColumn === -1) {
+        columnEnds.push(item.endMinutes);
+        placedColumn = columnEnds.length - 1;
+      }
+      columnByItemId.set(item.id, placedColumn);
+    }
+    const columnCount = columnEnds.length;
+    for (const item of cluster) {
+      layout.set(item.id, { column: columnByItemId.get(item.id) ?? 0, columnCount });
+    }
+    cluster = [];
+  }
+
+  for (const item of sorted) {
+    if (cluster.length && item.startMinutes >= clusterEnd) {
+      flushCluster();
+      clusterEnd = -Infinity;
+    }
+    cluster.push(item);
+    clusterEnd = Math.max(clusterEnd, item.endMinutes);
+  }
+  flushCluster();
+
+  return layout;
 }

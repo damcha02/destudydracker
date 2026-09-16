@@ -24,6 +24,7 @@ import {
   daysUntil,
   formatDate,
   formatMinutes,
+  getActiveSemesterIds,
   getCourseHealthMap,
   getCourseMinutesMap,
   getCourseTasks,
@@ -55,7 +56,7 @@ import type { PersistenceBaselines, PersistSection } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
 import { pauseCountdownTimer, pauseStopwatchTimer, resumeCountdownTimer, resumeStopwatchTimer } from "./lib/timerTransitions";
-import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SemesterPhase, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TimerState } from "./types";
+import type { AppState, CalendarEntry, Course, Exam, PlayedBreak, Priority, Semester, SemesterPhase, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialFeedScope, SocialFriend, SocialLeaderboardEntry, SocialLeaderboardPeriod, SocialLeaderboardScope, SocialSquadDetails, SocialSquadRole, SocialSquadScoreEntry, SocialSquadScorePeriod, SocialState, SocialSubtab, StudySession, TabKey, Task, TaskSubtype, TimerState, TimetableEvent } from "./types";
 import type { Card, DurakGameState } from "./lib/durak";
 import { canBeat, findDailyPuzzle, executePlayerAttack, executePlayerThrow, defendOneCard, playerPassThrow, playerPickUp, processCpuTurn, executeSlide, getAttackLimitAgainstCpu, getLegalSlideCards, gameStateToPuzzle, puzzleToGameState, SUIT_SYMBOL, SUIT_COLOR } from "./lib/durak";
 import { filterFlaggleCountries, findFlaggleCountry, FLAGGLE_COUNTRY_COUNT, FLAGGLE_MAX_GUESSES, getFlaggleAnswerForDate, getFlagglePuzzleId, getFlagImageSrc, makeFlaggleSeedSalt, maskFlagByTargetColors, revealTargetFlagByGuesses } from "./lib/flaggle";
@@ -64,10 +65,9 @@ import { TRAVLE_MAP_COUNTRIES } from "./lib/travleMapData";
 import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTravleGuessStates, getTravlePuzzleForDate, getTravlePuzzleId, getTravleShortestPath, getTravleSolvedPath, isTravleRouteSolved, makeTravleSeedSalt, TRAVLE_COUNTRY_COUNT, TRAVLE_MAX_GUESSES } from "./lib/travle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 import { isTauriApp } from "./lib/obsidian";
-import { buildDailyTimeline, expandTimetableEvents, getSemesterWeekNumber, timetableEventKindLabels } from "./lib/plannerSchedule";
-import type { DailyTimelineRow } from "./lib/plannerSchedule";
-import { SemesterActionsMenu } from "./features/planner/SemesterActionsMenu";
-import { SemesterArchiveButton, SemesterSetupWizardButton } from "./features/planner/SemesterBoardControls";
+import { buildDailyTimeline, computeOverlapLayout, expandTimetableEvents, getSemesterWeekNumber, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
+import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
+import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
 import type { TimetableModalState } from "./features/planner/TimetableEventModal";
 import privacyPolicyText from "../../PRIVACY.md?raw";
@@ -2764,6 +2764,7 @@ type TaskDraft = {
   semesterId: string;
   courseId: string;
   title: string;
+  subtype: TaskSubtype;
   unitLabel: string;
   totalUnits: string;
   completedUnits: string;
@@ -2780,6 +2781,21 @@ function inferUnitLabel(title: string) {
   if (normalized.includes("chapter")) return "Chapter";
   if (normalized.includes("reading")) return "Reading";
   return "Unit";
+}
+
+/** Lecture/Session tasks are driven by scheduled calendar instances rather than a hard submission deadline, so their task form hides the due-date input. */
+function subtypeHidesDueDate(subtype: TaskSubtype) {
+  return subtype === "Lecture" || subtype === "Session";
+}
+
+/** Overrides an overlap-split timeline entry's left/width within its `.scheduled` track (left: 86px; width: calc(100% - 100px)) so it sits in its assigned column instead of covering the whole track. Entries with no overlap keep the default CSS-driven position. */
+function getOverlapSplitStyle(layout?: OverlapLayoutSlot): CSSProperties {
+  if (!layout || layout.columnCount <= 1) return {};
+  const fraction = 1 / layout.columnCount;
+  return {
+    left: `calc(86px + (100% - 100px) * ${layout.column * fraction})`,
+    width: `calc((100% - 100px) * ${fraction} - 4px)`,
+  };
 }
 
 function cleanUnitLabel(label: string, title: string) {
@@ -2819,6 +2835,7 @@ function formatSwissGrade(grade: number) {
   if (fixed.endsWith("0")) return fixed.slice(0, -1);
   return fixed;
 }
+
 
 function toggleId(list: string[], id: string) {
   return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
@@ -3750,6 +3767,7 @@ function App() {
     semesterId: "",
     courseId: "",
     title: "",
+    subtype: "Other",
     unitLabel: "Unit",
     totalUnits: "10",
     completedUnits: "0",
@@ -3785,6 +3803,7 @@ function App() {
     semesterId: "",
     courseId: "",
     title: "",
+    subtype: "Other",
     unitLabel: "Unit",
     totalUnits: "10",
     completedUnits: "0",
@@ -3809,6 +3828,8 @@ function App() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [timetableModalState, setTimetableModalState] = useState<TimetableModalState>(null);
   const [timetableEditMode, setTimetableEditMode] = useState(false);
+  const [manageSemestersOpen, setManageSemestersOpen] = useState(false);
+  const [manageSemestersInitialCourseId, setManageSemestersInitialCourseId] = useState<string | null>(null);
   const [calendarAddOpen, setCalendarAddOpen] = useState(false);
   const [calendarAddDraft, setCalendarAddDraft] = useState<CalendarAddDraft>({
     semesterId: "",
@@ -3829,6 +3850,12 @@ function App() {
   const calendarTimelineRef = useRef<HTMLDivElement | null>(null);
   const calendarMoveDragRef = useRef<CalendarMoveDragState | null>(null);
   const calendarResizeRef = useRef<CalendarResizeState | null>(null);
+  const [timetableDragRowId, setTimetableDragRowId] = useState<string | null>(null);
+  const [timetableDragPreview, setTimetableDragPreview] = useState<{ x: number; y: number; time: string; top: number } | null>(null);
+  const [timetableResizeRowId, setTimetableResizeRowId] = useState<string | null>(null);
+  const timetableMoveDragRef = useRef<{ row: DailyTimelineRow; event: TimetableEvent; durationMinutes: number | null; startX: number; startY: number; moved: boolean } | null>(null);
+  const timetableResizeRef = useRef<{ row: DailyTimelineRow; event: TimetableEvent; startY: number; startMinutes: number; endMinutes: number } | null>(null);
+  const [timetableRecurrenceConfirm, setTimetableRecurrenceConfirm] = useState<{ eventId: string; originalDate: string; newDate: string; newTime: string; newEndTime: string | null } | null>(null);
   const [calendarToday, setCalendarToday] = useState(localIsoDate);
   const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
   const [personalDailyGoalHoursDraft, setPersonalDailyGoalHoursDraft] = useState(() => String((state.settings.dailyGoalMinutes ?? 120) / 60));
@@ -3973,6 +4000,29 @@ function App() {
       saveStateTimeoutRef.current = null;
     }, 700);
   }, [state]);
+
+  // Lecture-subtype tasks don't take a manual totalUnits/completedUnits input (see the task
+  // form) - their progress is derived entirely from how many Lecture timetable events exist for
+  // them and how many of those have at least one checked-off occurrence. Recompute and write
+  // those two fields through whenever the schedule or task list changes, so every existing
+  // consumer (workload calc, task cards, dashboard) keeps reading plain numbers. This never
+  // touches the recurrence engine itself (plannerSchedule's expandTimetableEvents), which stays
+  // fully independent of subtype - it only ever reads date/time/repeatWeekly/overrides/holidays.
+  useEffect(() => {
+    setState((current) => {
+      let changed = false;
+      const tasks = current.tasks.map((task) => {
+        if (task.subtype !== "Lecture") return task;
+        const events = current.timetableEvents.filter((event) => event.taskId === task.id);
+        const totalUnits = events.length;
+        const completedUnits = events.filter((event) => event.completedOccurrences.length > 0).length;
+        if (task.totalUnits === totalUnits && task.completedUnits === completedUnits) return task;
+        changed = true;
+        return { ...task, totalUnits, completedUnits };
+      });
+      return changed ? { ...current, tasks } : current;
+    });
+  }, [state.timetableEvents, state.tasks]);
 
   useEffect(() => {
     if (!state.timer.running) return undefined;
@@ -4452,15 +4502,68 @@ function App() {
       setCalendarResizeEntryId(null);
     }
 
+    function handleTimetableMoveDrag(event: globalThis.MouseEvent) {
+      const drag = timetableMoveDragRef.current;
+      const timeline = calendarTimelineRef.current;
+      if (!drag || !timeline) return;
+
+      const movedEnough = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) > 4;
+      if (!movedEnough && !drag.moved) return;
+      drag.moved = true;
+
+      const target = getTimelineTimeFromClientY(timeline, event.clientY);
+      setTimetableDragPreview({ x: event.clientX, y: event.clientY, top: target.top, time: target.time });
+    }
+
+    function handleTimetableMoveEnd(event: globalThis.MouseEvent) {
+      const drag = timetableMoveDragRef.current;
+      const timeline = calendarTimelineRef.current;
+      timetableMoveDragRef.current = null;
+      setTimetableDragRowId(null);
+      setTimetableDragPreview(null);
+      if (!drag || !timeline || !drag.moved) return;
+
+      const target = getTimelineTimeFromClientY(timeline, event.clientY);
+      const newEndTime = drag.durationMinutes !== null ? addMinutesToTime(target.time, drag.durationMinutes) : null;
+      commitTimetableOccurrenceChange(drag.event, drag.row.occurrenceDate, target.time, newEndTime);
+    }
+
+    function handleTimetableResizeMove(event: globalThis.MouseEvent) {
+      const resize = timetableResizeRef.current;
+      if (!resize) return;
+      const minuteDelta = snapCalendarMinutes(((event.clientY - resize.startY) / calendarTimelineHourHeight) * 60);
+      const endMinutes = clamp(resize.endMinutes + minuteDelta, resize.startMinutes + calendarTimeStepMinutes, 23 * 60 + 59);
+      setTimetableDragPreview({ x: event.clientX, y: event.clientY, top: 0, time: minutesToTime(endMinutes) });
+    }
+
+    function handleTimetableResizeEnd(event: globalThis.MouseEvent) {
+      const resize = timetableResizeRef.current;
+      timetableResizeRef.current = null;
+      setTimetableResizeRowId(null);
+      setTimetableDragPreview(null);
+      if (!resize) return;
+      const minuteDelta = snapCalendarMinutes(((event.clientY - resize.startY) / calendarTimelineHourHeight) * 60);
+      const endMinutes = clamp(resize.endMinutes + minuteDelta, resize.startMinutes + calendarTimeStepMinutes, 23 * 60 + 59);
+      commitTimetableOccurrenceChange(resize.event, resize.row.occurrenceDate, resize.row.time ?? minutesToTime(resize.startMinutes), minutesToTime(endMinutes));
+    }
+
     window.addEventListener("mousemove", handleResizeMove);
     window.addEventListener("mouseup", handleResizeEnd);
     window.addEventListener("mousemove", handleMoveDrag);
     window.addEventListener("mouseup", handleMoveEnd);
+    window.addEventListener("mousemove", handleTimetableMoveDrag);
+    window.addEventListener("mouseup", handleTimetableMoveEnd);
+    window.addEventListener("mousemove", handleTimetableResizeMove);
+    window.addEventListener("mouseup", handleTimetableResizeEnd);
     return () => {
       window.removeEventListener("mousemove", handleResizeMove);
       window.removeEventListener("mouseup", handleResizeEnd);
       window.removeEventListener("mousemove", handleMoveDrag);
       window.removeEventListener("mouseup", handleMoveEnd);
+      window.removeEventListener("mousemove", handleTimetableMoveDrag);
+      window.removeEventListener("mouseup", handleTimetableMoveEnd);
+      window.removeEventListener("mousemove", handleTimetableResizeMove);
+      window.removeEventListener("mouseup", handleTimetableResizeEnd);
     };
   }, []);
 
@@ -4519,6 +4622,13 @@ function App() {
     [state.semesters],
   );
   const activeSemesters = useMemo(() => state.semesters.filter((semester) => !semester.archived), [state.semesters]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getActiveSemesterIds only reads state.semesters
+  const activeSemesterIds = useMemo(() => getActiveSemesterIds(state), [state.semesters]);
+  // Archived semesters' courses/tasks/exams are excluded from workload totals, health scores,
+  // and workload selectors - only currently-running semesters count toward "total workload".
+  const activeCourses = useMemo(() => state.courses.filter((course) => activeSemesterIds.has(course.semesterId)), [state.courses, activeSemesterIds]);
+  const activeTasks = useMemo(() => state.tasks.filter((task) => activeSemesterIds.has(task.semesterId)), [state.tasks, activeSemesterIds]);
+  const activeExams = useMemo(() => state.exams.filter((exam) => activeSemesterIds.has(exam.semesterId)), [state.exams, activeSemesterIds]);
   const courseLookup = useMemo(
     () => new Map(state.courses.map((course) => [course.id, course])),
     [state.courses],
@@ -4564,14 +4674,14 @@ function App() {
     [selectedTaskId, state.tasks],
   );
   const totalWorkload = useMemo(() => {
-    return calculateAggregateWorkload(state.tasks);
-  }, [state.tasks]);
+    return calculateAggregateWorkload(activeTasks);
+  }, [activeTasks]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
   const fieldPlannerWorkload = useMemo(() => {
     if (fieldPlannerWorkloadId === TOTAL_WORKLOAD_ID) return { ...totalWorkload, label: "Total workload" };
 
-    const course = state.courses.find((item) => item.id === fieldPlannerWorkloadId) ?? null;
-    const courseTasks = course ? state.tasks.filter((task) => task.courseId === course.id) : [];
+    const course = activeCourses.find((item) => item.id === fieldPlannerWorkloadId) ?? null;
+    const courseTasks = course ? activeTasks.filter((task) => task.courseId === course.id) : [];
     if (!course) {
       return {
         ...calculateAggregateWorkload([]),
@@ -4581,11 +4691,11 @@ function App() {
     }
 
     return { ...calculateAggregateWorkload(courseTasks), label: course.name };
-  }, [fieldPlannerWorkloadId, state.courses, state.tasks, totalWorkload]);
+  }, [fieldPlannerWorkloadId, activeCourses, activeTasks, totalWorkload]);
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions, new Date(`${calendarToday}T00:00:00`)), [state.sessions, calendarToday]);
   const upcomingExams = useMemo(() => getUpcomingExams({ exams: state.exams } as AppState), [state.exams]);
-  const overallHealth = useMemo(() => getOverallHealth({ tasks: state.tasks, exams: state.exams } as AppState), [state.exams, state.tasks]);
+  const overallHealth = useMemo(() => getOverallHealth({ tasks: activeTasks, exams: activeExams } as AppState), [activeExams, activeTasks]);
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
@@ -5281,7 +5391,7 @@ function App() {
         : [{ id: TUTORIAL_SEMESTER_ID, name: TUTORIAL_SEMESTER_NAME, createdAt, startDate: null, endDate: null, phase: "semester" as SemesterPhase, archived: false, archivedAt: null }, ...current.semesters];
       const courses = hasCourse
         ? current.courses
-        : [{ id: TUTORIAL_COURSE_ID, semesterId: TUTORIAL_SEMESTER_ID, name: TUTORIAL_COURSE_NAME, targetGrade: 5, color: "#8fb4ff", createdAt, externalUrl: null, completedSheetCount: 0 }, ...current.courses];
+        : [{ id: TUTORIAL_COURSE_ID, semesterId: TUTORIAL_SEMESTER_ID, name: TUTORIAL_COURSE_NAME, targetGrade: 5, color: "#8fb4ff", createdAt, externalUrl: null }, ...current.courses];
       const tasks = hasTask
         ? current.tasks
         : [{
@@ -5289,6 +5399,7 @@ function App() {
             semesterId: TUTORIAL_SEMESTER_ID,
             courseId: TUTORIAL_COURSE_ID,
             title: TUTORIAL_TASK_TITLE,
+            subtype: "Other" as const,
             unitLabel: "Lecture",
             totalUnits: 10,
             completedUnits: 3,
@@ -7269,7 +7380,7 @@ function App() {
     setSelectedTaskId(TOTAL_WORKLOAD_ID);
     setSemesterName("");
     setCourseDraft({ semesterId: "", name: "", targetGrade: "4.0", color: "#8fb4ff" });
-    setTaskDraft({ semesterId: "", courseId: "", title: "", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" });
+    setTaskDraft({ semesterId: "", courseId: "", title: "", subtype: "Other", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" });
     setExamDraft({ semesterId: "", courseId: "", title: "", examDate: "", weight: "40", preparedness: "35" });
     setShowSemesterForm(false);
     setExpandedSemesterIds([]);
@@ -7336,7 +7447,6 @@ function App() {
       targetGrade: Number(courseDraft.targetGrade) || 4,
       createdAt: new Date().toISOString(),
       externalUrl: null,
-      completedSheetCount: 0,
     };
 
     setState((current) => ({ ...current, courses: [...current.courses, course] }));
@@ -7379,15 +7489,17 @@ function App() {
       return;
     }
 
+    const isLecture = taskDraft.subtype === "Lecture";
     const task: Task = {
       id: makeId(),
       semesterId: taskDraft.semesterId,
       courseId: taskDraft.courseId,
       title: taskDraft.title.trim(),
+      subtype: taskDraft.subtype,
       unitLabel: cleanUnitLabel(taskDraft.unitLabel, taskDraft.title),
-      totalUnits: Math.max(1, Number(taskDraft.totalUnits) || 1),
-      completedUnits: clamp(Number(taskDraft.completedUnits) || 0, 0, Number(taskDraft.totalUnits) || 1),
-      dueDate: taskDraft.dueDate || null,
+      totalUnits: isLecture ? 0 : Math.max(1, Number(taskDraft.totalUnits) || 1),
+      completedUnits: isLecture ? 0 : clamp(Number(taskDraft.completedUnits) || 0, 0, Number(taskDraft.totalUnits) || 1),
+      dueDate: subtypeHidesDueDate(taskDraft.subtype) ? null : (taskDraft.dueDate || null),
       priority: taskDraft.priority,
       notes: taskDraft.notes.trim(),
       createdAt: new Date().toISOString(),
@@ -7397,6 +7509,7 @@ function App() {
     setTaskDraft((current) => ({
       ...current,
       title: "",
+      subtype: "Other",
       unitLabel: "Unit",
       totalUnits: "10",
       completedUnits: "0",
@@ -7454,6 +7567,7 @@ function App() {
       semesterId: task.semesterId,
       courseId: task.courseId,
       title: task.title,
+      subtype: task.subtype,
       unitLabel: task.unitLabel || inferUnitLabel(task.title),
       totalUnits: task.totalUnits.toString(),
       completedUnits: task.completedUnits.toString(),
@@ -7465,6 +7579,19 @@ function App() {
     setAddingTaskCourseId(null);
   }
 
+  /** Opens the same task-create modal the field-notebook sidebar's "+ add task" uses, so "Add Unit"/"Add Course Task" everywhere shares one entity and one UI. */
+  function openAddTaskModalFor(semesterId: string, courseId: string) {
+    setTaskDraft((current) => ({ ...current, semesterId, courseId, title: "", subtype: "Other", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" }));
+    setFieldPlannerTaskId(null);
+    setFieldPlannerTaskMode("create");
+  }
+
+  function openTaskEditor(task: Task) {
+    startEditingTask(task);
+    setFieldPlannerTaskId(task.id);
+    setFieldPlannerTaskMode("edit");
+  }
+
   function updateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editingTaskId || !taskEditDraft.semesterId || !taskEditDraft.courseId || !taskEditDraft.title.trim()) {
@@ -7474,8 +7601,9 @@ function App() {
 
     const title = taskEditDraft.title.trim();
     const unitLabel = cleanUnitLabel(taskEditDraft.unitLabel, title);
-    const totalUnits = Math.max(1, Number(taskEditDraft.totalUnits) || 1);
-    const completedUnits = clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
+    const isLecture = taskEditDraft.subtype === "Lecture";
+    const totalUnits = isLecture ? 0 : Math.max(1, Number(taskEditDraft.totalUnits) || 1);
+    const completedUnits = isLecture ? 0 : clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
     setState((current) => ({
       ...current,
       tasks: current.tasks.map((task) =>
@@ -7483,10 +7611,11 @@ function App() {
           ? {
               ...task,
               title,
+              subtype: taskEditDraft.subtype,
               unitLabel,
               totalUnits,
               completedUnits,
-              dueDate: taskEditDraft.dueDate || null,
+              dueDate: subtypeHidesDueDate(taskEditDraft.subtype) ? null : (taskEditDraft.dueDate || null),
               priority: taskEditDraft.priority,
               notes: taskEditDraft.notes.trim(),
             }
@@ -7542,6 +7671,7 @@ function App() {
       ...current,
       tasks: current.tasks.filter((task) => task.id !== taskId),
       calendarEntries: current.calendarEntries.filter((entry) => entry.taskId !== taskId),
+      timetableEvents: current.timetableEvents.filter((event) => event.taskId !== taskId),
       timer: current.timer.taskId === taskId ? { ...current.timer, taskId: null } : current.timer,
     }));
     setEditingTaskId((current) => (current === taskId ? null : current));
@@ -8335,6 +8465,55 @@ function App() {
     setCalendarResizeEntryId(entry.id);
   }
 
+  function startTimetableRowMove(event: MouseEvent<HTMLDivElement>, row: DailyTimelineRow) {
+    if (!timetableEditMode || row.kind === "study-unit") return;
+    const target = event.target as HTMLElement;
+    if (target.closest("button,input,.calendar-resize-handle")) return;
+    const timetableEvent = state.timetableEvents.find((item) => item.id === row.refId);
+    if (!timetableEvent) return;
+    event.preventDefault();
+    const durationMinutes = row.time && row.endTime ? timeToMinutes(row.endTime) - timeToMinutes(row.time) : null;
+    timetableMoveDragRef.current = { row, event: timetableEvent, durationMinutes, startX: event.clientX, startY: event.clientY, moved: false };
+    setTimetableDragRowId(row.id);
+  }
+
+  function startTimetableRowResize(event: MouseEvent<HTMLDivElement>, row: DailyTimelineRow) {
+    if (!timetableEditMode || !row.time || !row.endTime) return;
+    const timetableEvent = state.timetableEvents.find((item) => item.id === row.refId);
+    if (!timetableEvent) return;
+    event.preventDefault();
+    event.stopPropagation();
+    timetableResizeRef.current = { row, event: timetableEvent, startY: event.clientY, startMinutes: timeToMinutes(row.time), endMinutes: timeToMinutes(row.endTime) };
+    setTimetableResizeRowId(row.id);
+  }
+
+  function commitTimetableOccurrenceChange(eventSnapshot: TimetableEvent, originalDate: string, newTime: string, newEndTime: string | null) {
+    if (!eventSnapshot.repeatWeekly) {
+      setState((current) => ({
+        ...current,
+        timetableEvents: current.timetableEvents.map((item) => (item.id === eventSnapshot.id ? { ...item, time: newTime, endTime: newEndTime } : item)),
+      }));
+      return;
+    }
+    setTimetableRecurrenceConfirm({ eventId: eventSnapshot.id, originalDate, newDate: originalDate, newTime, newEndTime });
+  }
+
+  function resolveTimetableRecurrenceConfirm(scope: "occurrence" | "future") {
+    const pending = timetableRecurrenceConfirm;
+    if (!pending) return;
+    setState((current) => {
+      const event = current.timetableEvents.find((item) => item.id === pending.eventId);
+      if (!event) return current;
+      if (scope === "occurrence") {
+        const updated = moveSingleOccurrence(event, pending.originalDate, pending.newDate, pending.newTime, pending.newEndTime);
+        return { ...current, timetableEvents: current.timetableEvents.map((item) => (item.id === event.id ? updated : item)) };
+      }
+      const { updatedOriginal, newEvent } = splitRecurringEventAt(event, pending.originalDate, pending.newDate, pending.newTime, pending.newEndTime, makeId);
+      return { ...current, timetableEvents: [...current.timetableEvents.map((item) => (item.id === event.id ? updatedOriginal : item)), newEvent] };
+    });
+    setTimetableRecurrenceConfirm(null);
+  }
+
   function shiftCalendar(direction: -1 | 1) {
     setCalendarCursorDate((current) => {
       if (calendarView === "month") {
@@ -8714,7 +8893,7 @@ function App() {
     return task ? semesterLookup.get(task.semesterId) ?? null : entry.adHocSemesterId ? semesterLookup.get(entry.adHocSemesterId) ?? null : null;
   };
 
-  function renderCalendarTimelineEntry(entry: CalendarEntry) {
+  function renderCalendarTimelineEntry(entry: CalendarEntry, layout?: OverlapLayoutSlot) {
     const task = getCalendarEntryTask(entry);
     const course = getCalendarEntryCourse(entry);
     const semester = getCalendarEntrySemester(entry);
@@ -8725,14 +8904,16 @@ function App() {
     const entryEndMinutes = entry.endTime ? timeToMinutes(entry.endTime) : entryStartMinutes + 60;
     const entryTop = ((entryStartMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
     const entryHeight = Math.max(58, ((entryEndMinutes - entryStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+    const isSplit = Boolean(layout && layout.columnCount > 1);
     const entryStyle = {
       "--entry-color": course?.color ?? "var(--accent)",
       ...(entry.startTime ? { top: `${Math.max(4, entryTop + 4)}px`, height: `${entryHeight}px` } : {}),
+      ...(entry.startTime ? getOverlapSplitStyle(layout) : {}),
     } as CSSProperties;
     return (
       <div
         key={entry.id}
-        className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""}`}
+        className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""}`}
         onMouseDown={(event) => !isEditing && startCalendarEntryMove(event, entry)}
         style={entryStyle}
       >
@@ -8842,15 +9023,21 @@ function App() {
             }
           : item,
       );
-      // Checking a Sheet Release marks that unit worked on for the course; unchecking backs it out.
-      if (event.kind !== "sheet-release") return { ...current, timetableEvents };
+      // A Sheet Release is an informational notification/link, not a completed academic unit -
+      // its checkbox still tracks per-occurrence "seen" state above, but must never move the
+      // subject's completed-unit count. Only a Sheet Due (or a non-sheet occurrence) does that.
+      if (event.kind === "sheet-release") {
+        return { ...current, timetableEvents };
+      }
+
+      // Checking off any other occurrence updates its course task's completed-units count; unchecking backs it out.
       return {
         ...current,
         timetableEvents,
-        courses: current.courses.map((course) =>
-          course.id === event.courseId
-            ? { ...course, completedSheetCount: Math.max(0, course.completedSheetCount + (wasCompleted ? -1 : 1)) }
-            : course,
+        tasks: current.tasks.map((task) =>
+          task.id === event.taskId
+            ? { ...task, completedUnits: clamp(task.completedUnits + (wasCompleted ? -1 : 1), 0, task.totalUnits) }
+            : task,
         ),
       };
     });
@@ -8867,18 +9054,44 @@ function App() {
     }
     setState((current) => {
       const event = current.timetableEvents.find((item) => item.id === row.refId);
+      if (!event) return current;
+
+      // A repeating event's single day-of occurrence shares its id with every other projected
+      // occurrence - removing it must skip just that date via an override, not delete the whole
+      // series (which would silently wipe every other week too).
+      if (event.repeatWeekly) {
+        const wasCompleted = event.completedOccurrences.includes(row.occurrenceDate);
+        const timetableEvents = current.timetableEvents.map((item) =>
+          item.id === row.refId
+            ? {
+                ...item,
+                occurrenceOverrides: { ...item.occurrenceOverrides, [row.occurrenceDate]: { skipped: true as const } },
+                completedOccurrences: wasCompleted
+                  ? item.completedOccurrences.filter((date) => date !== row.occurrenceDate)
+                  : item.completedOccurrences,
+              }
+            : item,
+        );
+        if (!wasCompleted || event.kind === "sheet-release") return { ...current, timetableEvents };
+        return {
+          ...current,
+          timetableEvents,
+          tasks: current.tasks.map((task) =>
+            task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - 1, 0, task.totalUnits) } : task,
+          ),
+        };
+      }
+
       const timetableEvents = current.timetableEvents.filter((item) => item.id !== row.refId);
-      if (!event || event.kind !== "sheet-release" || !event.completedOccurrences.length) {
+      if (!event.completedOccurrences.length || event.kind === "sheet-release") {
         return { ...current, timetableEvents };
       }
       const completedCount = event.completedOccurrences.length;
       return {
         ...current,
         timetableEvents,
-        courses: current.courses.map((course) =>
-          course.id === event.courseId
-            ? { ...course, completedSheetCount: Math.max(0, course.completedSheetCount - completedCount) }
-            : course,
+        tasks: current.tasks.map((task) =>
+          task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - completedCount, 0, task.totalUnits) } : task,
         ),
       };
     });
@@ -8894,7 +9107,7 @@ function App() {
     if (event) setTimetableModalState({ mode: "edit", entityKind: "event", event });
   }
 
-  function renderTimetableTimelineEntry(row: DailyTimelineRow) {
+  function renderTimetableTimelineEntry(row: DailyTimelineRow, layout?: OverlapLayoutSlot) {
     const course = row.courseId ? courseLookup.get(row.courseId) : null;
     const startMinutes = row.time ? timeToMinutes(row.time) : calendarTimelineStartMinutes;
     const endMinutes = row.endTime ? timeToMinutes(row.endTime) : startMinutes + 60;
@@ -8904,11 +9117,21 @@ function App() {
       "--entry-color": course?.color ?? "var(--accent)",
       top: `${Math.max(4, top + 4)}px`,
       height: `${height}px`,
+      ...getOverlapSplitStyle(layout),
     } as CSSProperties;
     const isSolvedSheet = row.kind === "sheet-deadline" && row.completed;
     const editable = row.kind !== "study-unit";
+    const draggable = timetableEditMode && row.kind !== "study-unit";
+    const isDragging = timetableDragRowId === row.id;
+    const isResizing = timetableResizeRowId === row.id;
+    const isSplit = Boolean(layout && layout.columnCount > 1);
     return (
-      <div key={row.id} className={`calendar-timeline-entry scheduled generated ${row.completed ? "done" : ""}`} style={style}>
+      <div
+        key={row.id}
+        className={`calendar-timeline-entry scheduled generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""}`}
+        style={style}
+        onMouseDown={(event) => startTimetableRowMove(event, row)}
+      >
         <div className="calendar-timeline-entry-copy">
           <strong>{row.title}</strong>
           <span>{course?.name ?? "General"}{isSolvedSheet ? <em className="timetable-solved-badge">Solved</em> : null}</span>
@@ -8940,6 +9163,9 @@ function App() {
             ) : null}
           </div>
         ) : null}
+        {timetableEditMode && row.time && row.endTime ? (
+          <div className="calendar-resize-handle" onMouseDown={(event) => startTimetableRowResize(event, row)} title="Drag to change duration" />
+        ) : null}
       </div>
     );
   }
@@ -8969,6 +9195,21 @@ function App() {
       dailyTodos: state.dailyTodos,
       studyUnits: state.studyUnits,
     });
+    // Both entry kinds share the same absolute-positioned timeline canvas, so overlap columns
+    // must be computed across both together - a CalendarEntry and a generated timetable row at
+    // the same time need to split columns with each other, not just within their own kind.
+    const timelineOverlapLayout = computeOverlapLayout([
+      ...timedEntries.map((entry) => ({
+        id: `entry:${entry.id}`,
+        startMinutes: timeToMinutes(entry.startTime!),
+        endMinutes: entry.endTime ? timeToMinutes(entry.endTime) : timeToMinutes(entry.startTime!) + 60,
+      })),
+      ...generatedRows.filter((row) => row.time).map((row) => ({
+        id: `row:${row.id}`,
+        startMinutes: timeToMinutes(row.time!),
+        endMinutes: row.endTime ? timeToMinutes(row.endTime) : timeToMinutes(row.time!) + 60,
+      })),
+    ]);
     const dateRangeSemester = activeSemesters.find(
       (semester) => semester.startDate && semester.endDate && selectedCalendarDate >= semester.startDate && selectedCalendarDate <= semester.endDate,
     ) ?? null;
@@ -9033,8 +9274,8 @@ function App() {
                     <span>{calendarMovePreview.time}</span>
                   </div>
                 ) : null}
-                {timedEntries.map(renderCalendarTimelineEntry)}
-                {generatedRows.map(renderTimetableTimelineEntry)}
+                {timedEntries.map((entry) => renderCalendarTimelineEntry(entry, timelineOverlapLayout.get(`entry:${entry.id}`)))}
+                {generatedRows.map((row) => renderTimetableTimelineEntry(row, timelineOverlapLayout.get(`row:${row.id}`)))}
               </div>
             </div>
 
@@ -9045,7 +9286,7 @@ function App() {
                   <small>Entries without a time stay here.</small>
                 </div>
                 <div className="calendar-expanded-list drawer-list">
-                  {unscheduledEntries.length ? unscheduledEntries.map(renderCalendarTimelineEntry) : (
+                  {unscheduledEntries.length ? unscheduledEntries.map((entry) => renderCalendarTimelineEntry(entry)) : (
                     <p className="empty-copy compact-empty">No unscheduled calendar tasks.</p>
                   )}
                 </div>
@@ -9244,6 +9485,21 @@ function App() {
                 </div>
               );
             })() : null}
+            {timetableDragPreview ? (
+              <div className="calendar-drag-preview" style={{ left: timetableDragPreview.x + 14, top: timetableDragPreview.y + 14 }}>
+                <span>{timetableDragPreview.time}</span>
+              </div>
+            ) : null}
+            {timetableRecurrenceConfirm ? (
+              <div className="calendar-drag-preview timetable-recurrence-confirm">
+                <span>This item repeats weekly. Move:</span>
+                <div className="timetable-recurrence-confirm-actions">
+                  <button type="button" className="ghost-button small-button" onClick={() => resolveTimetableRecurrenceConfirm("occurrence")}>This occurrence only</button>
+                  <button type="button" className="ghost-button small-button" onClick={() => resolveTimetableRecurrenceConfirm("future")}>All future occurrences</button>
+                  <button type="button" className="ghost-button small-button" onClick={() => setTimetableRecurrenceConfirm(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </aside>
       </div>
@@ -9370,13 +9626,14 @@ function App() {
                   })}
                   {timetableOccurrences.slice(0, visibleTimetableLimit).map((occurrence) => {
                     const course = courseLookup.get(occurrence.event.courseId);
+                    const unitLabel = taskLookup.get(occurrence.event.taskId)?.title ?? "Item";
                     return (
                       <div
                         key={`${occurrence.event.id}:${occurrence.date}`}
                         className={`calendar-pill timetable-pill timetable-pill--${occurrence.event.kind}`}
                         style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}
                       >
-                        <span>{timetableEventKindLabels[occurrence.event.kind]}: {occurrence.event.label}</span>
+                        <span>{unitLabel}: {occurrence.event.label}</span>
                       </div>
                     );
                   })}
@@ -11133,6 +11390,8 @@ function App() {
     const renderTaskForm = () => {
       const draft = creating ? taskDraft : taskEditDraft;
       const setDraft = creating ? setTaskDraft : setTaskEditDraft;
+      const isLecture = draft.subtype === "Lecture";
+      const hideDueDate = subtypeHidesDueDate(draft.subtype);
       const submit = (event: FormEvent<HTMLFormElement>) => {
         if (creating) {
           addTask(event);
@@ -11156,17 +11415,32 @@ function App() {
               }} placeholder="Lecture, exercise sheet, reading..." autoFocus />
             </label>
             <label className="field">
+              <span>Subtype</span>
+              <select value={draft.subtype} onChange={(event) => setDraft((current) => ({ ...current, subtype: event.target.value as TaskSubtype }))}>
+                <option value="Lecture">Lecture</option>
+                <option value="Session">Session</option>
+                <option value="Sheet">Sheet</option>
+                <option value="Other">Other</option>
+              </select>
+            </label>
+            <label className="field">
               <span>Unit label</span>
               <input value={draft.unitLabel} onChange={(event) => setDraft((current) => ({ ...current, unitLabel: event.target.value }))} />
             </label>
-            <label className="field">
-              <span>Total units</span>
-              <input type="number" min="1" value={draft.totalUnits} onChange={(event) => setDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
-            </label>
-            <label className="field">
-              <span>Done</span>
-              <input type="number" min="0" value={draft.completedUnits} onChange={(event) => setDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
-            </label>
+            {isLecture ? (
+              <p className="section-note fn-task-form-notice">Total/done units are tracked automatically from the Lecture items scheduled on the calendar.</p>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Total units</span>
+                  <input type="number" min="1" value={draft.totalUnits} onChange={(event) => setDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
+                </label>
+                <label className="field">
+                  <span>Done</span>
+                  <input type="number" min="0" value={draft.completedUnits} onChange={(event) => setDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
+                </label>
+              </>
+            )}
             <label className="field">
               <span>Priority</span>
               <select value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
@@ -11175,10 +11449,12 @@ function App() {
                 <option value="low">Low</option>
               </select>
             </label>
-            <label className="field">
-              <span>Due date</span>
-              <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} onKeyDown={confirmTaskDueDate} />
-            </label>
+            {hideDueDate ? null : (
+              <label className="field">
+                <span>Due date (optional)</span>
+                <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} onKeyDown={confirmTaskDueDate} />
+              </label>
+            )}
             <label className="field fn-task-form-notes">
               <span>Notes</span>
               <textarea value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
@@ -11187,13 +11463,13 @@ function App() {
           <footer className="fn-task-modal-footer">
             <button type="submit">{creating ? "Create task" : "Save task"}</button>
             <button type="button" className="ghost-button" onClick={creating ? closeModal : () => setFieldPlannerTaskMode("view")}>Cancel</button>
-            {draft.dueDate ? <button type="button" className="ghost-button" onClick={() => setDraft((current) => ({ ...current, dueDate: "" }))}>Clear due date</button> : null}
+            {!hideDueDate && draft.dueDate ? <button type="button" className="ghost-button" onClick={() => setDraft((current) => ({ ...current, dueDate: "" }))}>Clear due date</button> : null}
           </footer>
         </form>
       );
     };
 
-    return (
+    return createPortal(
       <div className="fn-task-modal-backdrop" onMouseDown={closeModal}>
         <section className="fn-task-modal" role="dialog" aria-modal="true" aria-labelledby="fn-task-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <header className="fn-task-modal-head">
@@ -11223,7 +11499,8 @@ function App() {
             </>
           ) : null}
         </section>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
@@ -11835,6 +12112,21 @@ function App() {
         />
       ) : null}
 
+      {manageSemestersOpen ? (
+        <ManageSemestersModal
+          state={state}
+          setState={setState}
+          setMessage={setMessage}
+          onClose={() => { setManageSemestersOpen(false); setManageSemestersInitialCourseId(null); }}
+          onRemoveSemester={removeSemester}
+          onRemoveCourse={removeCourse}
+          onRemoveTask={removeTask}
+          onAddTask={openAddTaskModalFor}
+          onEditTask={openTaskEditor}
+          initialCourseId={manageSemestersInitialCourseId}
+        />
+      ) : null}
+
       {openHelp ? (
         <div className="help-modal-backdrop" onMouseDown={() => setHelpTab(null)}>
           <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${openHelp.title} help`}>
@@ -12191,6 +12483,7 @@ function App() {
           {appStyle === "field-notebook" ? (
             <aside className="fn-planner-rail" aria-label="Planner folders">
               <div className="fn-rail-section">
+                <button type="button" className="ghost-button fn-manage-semesters-button" onClick={() => setManageSemestersOpen(true)}>Manage Semesters</button>
                 <div className="fn-rail-label">Semesters</div>
                 {activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
@@ -12214,125 +12507,50 @@ function App() {
                           <strong>{semester.name}</strong>
                           <span>{courses.length} courses · {tasks.length} tasks</span>
                         </div>
-                        <SemesterActionsMenu
-                          state={state}
-                          setState={setState}
-                          semester={semester}
-                          setMessage={setMessage}
-                          extraActions={{
-                            onAddCourse: () => {
-                              if (!active) toggleSemester(semester.id);
-                              setCourseDraft((current) => ({ ...current, semesterId: semester.id }));
-                              setAddingCourseSemesterId(semester.id);
-                            },
-                            onEditSemester: () => {
-                              if (!active) toggleSemester(semester.id);
-                              startEditingSemester(semester);
-                            },
-                            onNewSemester: () => setShowSemesterForm((current) => !current),
-                            onRemoveSemester: () => setFieldPlannerDeleteTarget({ type: "semester", id: semester.id, name: semester.name }),
-                          }}
-                        />
                       </div>
                       {active ? (
                         <div className="fn-course-tree">
                           {courses.map((course) => {
                             const courseTasks = getCourseTasks(state, course.id);
-                            const courseActive = expandedCourseIds.includes(course.id);
                             return (
                               <div key={course.id} className="fn-course-tree-item">
-                                <button type="button" className={`fn-course-folder ${courseActive ? "active" : ""}`} style={{ "--fn-course": course.color } as CSSProperties} onClick={() => toggleCourse(course.id)}>
+                                <button
+                                  type="button"
+                                  className="fn-course-folder"
+                                  style={{ "--fn-course": course.color } as CSSProperties}
+                                  onClick={() => { setManageSemestersInitialCourseId(course.id); setManageSemestersOpen(true); }}
+                                  title="Edit this subject"
+                                >
                                   <strong>{course.name}</strong>
-                                  <span>{courseTasks.length}{course.completedSheetCount ? ` · ${course.completedSheetCount} sheets` : ""}</span>
+                                  <span>{courseTasks.length} tasks</span>
                                 </button>
-                                {courseActive ? (
-                                  <div className="fn-task-tree">
-                                    {courseTasks.length ? courseTasks.map((task) => (
-                                      <button key={task.id} type="button" className={`fn-sidebar-task ${fieldPlannerTaskId === task.id ? "active" : ""}`} onClick={() => {
-                                        setSelectedTaskId(task.id);
-                                        setFieldPlannerTaskId(task.id);
-                                        setFieldPlannerTaskMode("view");
-                                      }}>
-                                        <span>{task.title}</span>
-                                        <em>{task.completedUnits}/{task.totalUnits}</em>
-                                      </button>
-                                    )) : <p className="fn-sidebar-empty">No tasks yet.</p>}
-                                    <button type="button" className="fn-rail-link fn-sidebar-add-task" onClick={() => {
-                                      setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, title: "", unitLabel: "Unit", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "" }));
-                                      setFieldPlannerTaskId(null);
-                                      setFieldPlannerTaskMode("create");
-                                    }}>+ add task</button>
-                                    <div className="fn-sidebar-actions">
-                                      <button type="button" onClick={() => startEditingCourse(course)}>edit course</button>
-                                      <button type="button" className="danger" onClick={() => setFieldPlannerDeleteTarget({ type: "course", id: course.id, name: course.name })}>remove course</button>
-                                    </div>
-                                    {editingCourseId === course.id ? (
-                                      <form className="fn-sidebar-form" onSubmit={updateCourse}>
-                                        <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Course name" />
-                                        <div className="fn-sidebar-form-grid">
-                                          <select value={courseEditDraft.targetGrade} onChange={(event) => setCourseEditDraft((current) => ({ ...current, targetGrade: event.target.value }))}>
-                                            {swissGrades.map((grade) => <option key={grade} value={grade.toString()}>{formatSwissGrade(grade)}</option>)}
-                                          </select>
-                                          <input aria-label="Course color" type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
-                                        </div>
-                                        <div className="fn-sidebar-form-actions">
-                                          <button type="submit">Save</button>
-                                          <button type="button" onClick={() => setEditingCourseId(null)}>Cancel</button>
-                                        </div>
-                                      </form>
-                                    ) : null}
-                                  </div>
-                                ) : null}
+                                <div className="fn-task-tree">
+                                  {courseTasks.length ? courseTasks.map((task) => (
+                                    <button key={task.id} type="button" className={`fn-sidebar-task ${fieldPlannerTaskId === task.id ? "active" : ""}`} onClick={() => {
+                                      setSelectedTaskId(task.id);
+                                      setFieldPlannerTaskId(task.id);
+                                      setFieldPlannerTaskMode("view");
+                                    }}>
+                                      <span>{task.title}</span>
+                                      <em>{task.completedUnits}/{task.totalUnits}</em>
+                                    </button>
+                                  )) : <p className="fn-sidebar-empty">No tasks yet.</p>}
+                                </div>
                               </div>
                             );
                           })}
-                          {addingCourseSemesterId === semester.id ? (
-                            <form className="fn-sidebar-form" onSubmit={addCourse}>
-                              <input value={courseDraft.name} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, name: event.target.value }))} placeholder="Course name" />
-                              <div className="fn-sidebar-form-grid">
-                                <select value={courseDraft.targetGrade} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, targetGrade: event.target.value }))}>
-                                  {swissGrades.map((grade) => <option key={grade} value={grade.toString()}>{formatSwissGrade(grade)}</option>)}
-                                </select>
-                                <input aria-label="Course color" type="color" value={courseDraft.color} onChange={(event) => setCourseDraft((current) => ({ ...current, semesterId: semester.id, color: event.target.value }))} />
-                              </div>
-                              <div className="fn-sidebar-form-actions">
-                                <button type="submit">Add</button>
-                                <button type="button" onClick={() => setAddingCourseSemesterId(null)}>Cancel</button>
-                              </div>
-                            </form>
-                          ) : null}
-                          {editingSemesterId === semester.id ? (
-                            <form className="fn-sidebar-form" onSubmit={updateSemester}>
-                              <input value={semesterEditName} onChange={(event) => setSemesterEditName(event.target.value)} placeholder="Semester name" />
-                              <div className="fn-sidebar-form-actions">
-                                <button type="submit">Save</button>
-                                <button type="button" onClick={() => setEditingSemesterId(null)}>Cancel</button>
-                              </div>
-                            </form>
-                          ) : null}
                         </div>
                       ) : null}
                     </div>
                   );
                 })}
-                {showSemesterForm ? (
-                  <form className="fn-sidebar-form" onSubmit={addSemester}>
-                    <input value={semesterName} onChange={(event) => setSemesterName(event.target.value)} placeholder="Semester name" />
-                    <div className="fn-sidebar-form-actions">
-                      <button type="submit">Add</button>
-                      <button type="button" onClick={() => setShowSemesterForm(false)}>Cancel</button>
-                    </div>
-                  </form>
-                ) : !activeSemesters.length ? (
-                  <button type="button" className="fn-rail-link" onClick={() => setShowSemesterForm(true)}>+ new semester</button>
-                ) : null}
                 <section className="fn-sidebar-workload" aria-label="Workload calculator">
                   <div className="fn-rail-label">Workload</div>
                   <label>
                     <span>Selection</span>
                     <select value={fieldPlannerWorkloadId} onChange={(event) => setFieldPlannerWorkloadId(event.target.value)}>
                       <option value={TOTAL_WORKLOAD_ID}>Total workload</option>
-                      {state.courses.map((course) => (
+                      {activeCourses.map((course) => (
                         <option key={course.id} value={course.id}>{course.name}</option>
                       ))}
                     </select>
@@ -12355,7 +12573,6 @@ function App() {
               </div>
             </aside>
           ) : null}
-          {appStyle === "wabi-sabi" ? renderPlannerCalendar() : null}
           <article className="panel-card planner-board-panel" data-tour="planner-semesters">
             <div className="section-head planner-header">
               <div>
@@ -12364,8 +12581,7 @@ function App() {
                 <p className="section-note">{appStyle === "wabi-sabi" ? "Open a semester to manage its courses. Select a course to edit it." : "Click a semester or course to expand it. Click it again to collapse."}</p>
               </div>
               <div className="page-head-actions">
-                <SemesterSetupWizardButton state={state} setState={setState} setMessage={setMessage} />
-                <SemesterArchiveButton state={state} setState={setState} setMessage={setMessage} />
+                <button type="button" className="ghost-button" onClick={() => setManageSemestersOpen(true)}>Manage Semesters</button>
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
                   {showSemesterForm ? "Close" : "+ Add semester"}
                 </button>
@@ -12408,7 +12624,6 @@ function App() {
                         </button>
 
                         <div className="accordion-actions">
-                          <SemesterActionsMenu state={state} setState={setState} semester={semester} setMessage={setMessage} />
                           <div className="mini-health" data-tour={semester.id === TUTORIAL_SEMESTER_ID ? "planner-tutorial-semester-health" : undefined}>
                             <strong>{semesterHealth.score}</strong>
                             <span>{semesterHealth.label}</span>
@@ -12510,8 +12725,8 @@ function App() {
                                              <strong>{course.name}</strong>
                                              <small>
                                               {appStyle === "wabi-sabi"
-                                                ? `${completedCourseTasks} of ${courseTasks.length} done${course.completedSheetCount ? ` • ${course.completedSheetCount} sheets` : ""}`
-                                                : `Target ${formatSwissGrade(course.targetGrade)} • ${courseTasks.length} tasks • ${health.label}${course.completedSheetCount ? ` • ${course.completedSheetCount} sheets` : ""}`}
+                                                ? `${completedCourseTasks} of ${courseTasks.length} done`
+                                                : `Target ${formatSwissGrade(course.targetGrade)} • ${courseTasks.length} tasks • ${health.label}`}
                                              </small>
                                            </span>
                                            {appStyle === "wabi-sabi" ? <span className="wabi-course-progress" aria-label={`${courseProgress}% complete`}><i style={{ width: `${courseProgress}%`, background: course.color }} /></span> : null}
@@ -12607,17 +12822,32 @@ function App() {
                                                 />
                                               </label>
                                               <label className="field">
+                                                <span>Subtype</span>
+                                                <select data-tour="planner-task-subtype" value={taskDraft.subtype} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, subtype: event.target.value as TaskSubtype }))}>
+                                                  <option value="Lecture">Lecture</option>
+                                                  <option value="Session">Session</option>
+                                                  <option value="Sheet">Sheet</option>
+                                                  <option value="Other">Other</option>
+                                                </select>
+                                              </label>
+                                              <label className="field">
                                                 <span>Unit label</span>
                                                 <input data-tour="planner-task-unit-label" value={taskDraft.unitLabel} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
                                               </label>
-                                              <label className="field">
-                                                <span>Total units</span>
-                                                <input data-tour="planner-task-total" type="number" min="1" value={taskDraft.totalUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, totalUnits: event.target.value }))} />
-                                              </label>
-                                              <label className="field">
-                                                <span>Done</span>
-                                                <input data-tour="planner-task-done" type="number" min="0" value={taskDraft.completedUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, completedUnits: event.target.value }))} />
-                                              </label>
+                                              {taskDraft.subtype === "Lecture" ? (
+                                                <p className="section-note task-notes-field">Total/done units are tracked automatically from the Lecture items scheduled on the calendar.</p>
+                                              ) : (
+                                                <>
+                                                  <label className="field">
+                                                    <span>Total units</span>
+                                                    <input data-tour="planner-task-total" type="number" min="1" value={taskDraft.totalUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, totalUnits: event.target.value }))} />
+                                                  </label>
+                                                  <label className="field">
+                                                    <span>Done</span>
+                                                    <input data-tour="planner-task-done" type="number" min="0" value={taskDraft.completedUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, completedUnits: event.target.value }))} />
+                                                  </label>
+                                                </>
+                                              )}
                                               <label className="field">
                                                 <span>Priority</span>
                                                 <select data-tour="planner-task-priority" value={taskDraft.priority} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, priority: event.target.value as Priority }))}>
@@ -12626,16 +12856,18 @@ function App() {
                                                   <option value="low">Low</option>
                                                 </select>
                                               </label>
-                                              <label className="field">
-                                                <span>Due date (optional)</span>
-                                                <input
-                                                  type="date"
-                                                  data-tour="planner-task-due"
-                                                  value={taskDraft.dueDate}
-                                                  onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, dueDate: event.target.value }))}
-                                                  onKeyDown={confirmTaskDueDate}
-                                                />
-                                              </label>
+                                              {subtypeHidesDueDate(taskDraft.subtype) ? null : (
+                                                <label className="field">
+                                                  <span>Due date (optional)</span>
+                                                  <input
+                                                    type="date"
+                                                    data-tour="planner-task-due"
+                                                    value={taskDraft.dueDate}
+                                                    onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, dueDate: event.target.value }))}
+                                                    onKeyDown={confirmTaskDueDate}
+                                                  />
+                                                </label>
+                                              )}
                                               <label className="field task-notes-field">
                                                 <span>Notes</span>
                                                 <textarea data-tour="planner-task-notes" value={taskDraft.notes} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
@@ -12647,7 +12879,7 @@ function App() {
                                               <button type="button" className="ghost-button" onClick={() => setAddingTaskCourseId(null)}>
                                                 Cancel
                                               </button>
-                                              {taskDraft.dueDate ? (
+                                              {!subtypeHidesDueDate(taskDraft.subtype) && taskDraft.dueDate ? (
                                                 <button type="button" className="ghost-button" onClick={() => setTaskDraft((current) => ({ ...current, dueDate: "" }))}>
                                                   Clear due date
                                                 </button>
@@ -12758,17 +12990,32 @@ function App() {
                                                           })} />
                                                         </label>
                                                         <label className="field">
+                                                          <span>Subtype</span>
+                                                          <select value={taskEditDraft.subtype} onChange={(event) => setTaskEditDraft((current) => ({ ...current, subtype: event.target.value as TaskSubtype }))}>
+                                                            <option value="Lecture">Lecture</option>
+                                                            <option value="Session">Session</option>
+                                                            <option value="Sheet">Sheet</option>
+                                                            <option value="Other">Other</option>
+                                                          </select>
+                                                        </label>
+                                                        <label className="field">
                                                           <span>Unit label</span>
                                                           <input value={taskEditDraft.unitLabel} onChange={(event) => setTaskEditDraft((current) => ({ ...current, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
                                                         </label>
-                                                        <label className="field">
-                                                          <span>Total units</span>
-                                                          <input type="number" min="1" value={taskEditDraft.totalUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
-                                                        </label>
-                                                        <label className="field">
-                                                          <span>Done</span>
-                                                          <input type="number" min="0" value={taskEditDraft.completedUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
-                                                        </label>
+                                                        {taskEditDraft.subtype === "Lecture" ? (
+                                                          <p className="section-note task-notes-field">Total/done units are tracked automatically from the Lecture items scheduled on the calendar.</p>
+                                                        ) : (
+                                                          <>
+                                                            <label className="field">
+                                                              <span>Total units</span>
+                                                              <input type="number" min="1" value={taskEditDraft.totalUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
+                                                            </label>
+                                                            <label className="field">
+                                                              <span>Done</span>
+                                                              <input type="number" min="0" value={taskEditDraft.completedUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
+                                                            </label>
+                                                          </>
+                                                        )}
                                                         <label className="field">
                                                           <span>Priority</span>
                                                           <select value={taskEditDraft.priority} onChange={(event) => setTaskEditDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
@@ -12777,27 +13024,31 @@ function App() {
                                                             <option value="low">Low</option>
                                                           </select>
                                                         </label>
-                                                        <label className="field">
-                                                          <span>Due date (optional)</span>
-                                                          <input
-                                                            type="date"
-                                                            value={taskEditDraft.dueDate}
-                                                            onChange={(event) => setTaskEditDraft((current) => ({ ...current, dueDate: event.target.value }))}
-                                                            onKeyDown={confirmTaskDueDate}
-                                                          />
-                                                        </label>
+                                                        {subtypeHidesDueDate(taskEditDraft.subtype) ? null : (
+                                                          <label className="field">
+                                                            <span>Due date (optional)</span>
+                                                            <input
+                                                              type="date"
+                                                              value={taskEditDraft.dueDate}
+                                                              onChange={(event) => setTaskEditDraft((current) => ({ ...current, dueDate: event.target.value }))}
+                                                              onKeyDown={confirmTaskDueDate}
+                                                            />
+                                                          </label>
+                                                        )}
                                                         <label className="field task-notes-field">
                                                           <span>Notes</span>
                                                           <textarea value={taskEditDraft.notes} onChange={(event) => setTaskEditDraft((current) => ({ ...current, notes: event.target.value }))} />
                                                         </label>
                                                       </div>
-                                                      <p className="unit-label-hint">This controls labels like {cleanUnitLabel(taskEditDraft.unitLabel, taskEditDraft.title)} {Math.min(Math.max(1, Number(taskEditDraft.completedUnits) + 1 || 1), Math.max(1, Number(taskEditDraft.totalUnits) || 1))} of {Math.max(1, Number(taskEditDraft.totalUnits) || 1)}.</p>
+                                                      {taskEditDraft.subtype === "Lecture" ? null : (
+                                                        <p className="unit-label-hint">This controls labels like {cleanUnitLabel(taskEditDraft.unitLabel, taskEditDraft.title)} {Math.min(Math.max(1, Number(taskEditDraft.completedUnits) + 1 || 1), Math.max(1, Number(taskEditDraft.totalUnits) || 1))} of {Math.max(1, Number(taskEditDraft.totalUnits) || 1)}.</p>
+                                                      )}
                                                       <div className="inline-form-actions">
                                                         <button type="submit">Save task</button>
                                                         <button type="button" className="ghost-button" onClick={() => setEditingTaskId(null)}>
                                                           Cancel
                                                         </button>
-                                                        {taskEditDraft.dueDate ? (
+                                                        {!subtypeHidesDueDate(taskEditDraft.subtype) && taskEditDraft.dueDate ? (
                                                           <button type="button" className="ghost-button" onClick={() => setTaskEditDraft((current) => ({ ...current, dueDate: "" }))}>
                                                             Clear due date
                                                           </button>
@@ -12878,7 +13129,7 @@ function App() {
             </div>
           </article>
 
-          {appStyle !== "wabi-sabi" ? renderPlannerCalendar() : null}
+          {renderPlannerCalendar()}
 
           <div className="planner-support-grid">
             <article className="panel-card calculator-card">
@@ -12896,7 +13147,7 @@ function App() {
                     <select value={selectedTaskId ?? ""} onChange={(event) => setSelectedTaskId(event.target.value)}>
                       <option value="">Select task</option>
                       <option value={TOTAL_WORKLOAD_ID}>Total workload</option>
-                      {state.tasks.map((task) => (
+                      {activeTasks.map((task) => (
                         <option key={task.id} value={task.id}>
                           {task.title}
                         </option>
@@ -13037,7 +13288,7 @@ function App() {
               )}
             </div>
           </article>
-          {appStyle === "field-notebook" ? renderFieldPlannerTaskModal() : null}
+          {renderFieldPlannerTaskModal()}
           {appStyle === "field-notebook" ? renderFieldPlannerDeleteDialog() : null}
         </section>
       ) : null}

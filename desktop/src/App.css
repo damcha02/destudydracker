@@ -8839,6 +8839,21 @@ input[type="color"] {
   opacity: 0.62;
 }
 
+/* Overlap-split entries (see computeOverlapLayout) sit side by side in narrower columns; on
+   hover, lift the hovered one above its neighbors and boost its background so it stays fully
+   readable even when several entries are squeezed into the same time slot. */
+.calendar-timeline-entry.overlap-split {
+  z-index: 1;
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent);
+}
+
+.calendar-timeline-entry.overlap-split:hover,
+.calendar-timeline-entry.overlap-split:focus-within {
+  z-index: 10;
+  background: color-mix(in oklch, var(--entry-color, var(--accent)) 14%, var(--surface-raised));
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--entry-color, var(--accent)) 55%, transparent), var(--shadow-lg);
+}
+
 .calendar-timeline-entry.done strong {
   text-decoration: line-through;
 }
@@ -15502,15 +15517,6 @@ input[type="color"] {
   cursor: pointer;
 }
 
-.fn-semester-folder .semester-menu-wrap {
-  flex-shrink: 0;
-}
-
-.fn-semester-folder:hover .semester-menu-trigger,
-.fn-semester-folder .semester-menu-trigger[aria-expanded="true"] {
-  opacity: 1;
-}
-
 .fn-rail-row strong,
 .fn-course-folder strong {
   color: inherit;
@@ -15920,7 +15926,8 @@ input[type="color"] {
 .fn-task-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 5000;
+  /* Higher than .timetable-modal-backdrop (5000) so the task editor always layers above an open Manage Semesters modal. */
+  z-index: 5100;
   display: grid;
   place-items: start center;
   background: rgb(0 0 0 / 0.62);
@@ -21633,6 +21640,14 @@ input[type="color"] {
   cursor: default;
 }
 
+.calendar-timeline-entry.generated.editable-draggable {
+  cursor: grab;
+}
+
+.calendar-timeline-entry.generated.editable-draggable:active {
+  cursor: grabbing;
+}
+
 .exam-row-edit {
   display: flex;
   flex-wrap: wrap;
@@ -21645,89 +21660,7 @@ input[type="color"] {
   min-width: 0;
 }
 
-/* Per-semester "Manage Semester" 3-dot menu, revealed on hover of the semester row. */
-
-.semester-menu-wrap {
-  position: relative;
-  display: inline-flex;
-}
-
-.semester-menu-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, background 0.12s, color 0.12s;
-}
-
-.semester-card:hover .semester-menu-trigger,
-.semester-menu-trigger:focus-visible,
-.semester-menu-trigger[aria-expanded="true"] {
-  opacity: 1;
-}
-
-.semester-menu-trigger:hover {
-  background: color-mix(in oklch, var(--accent) 14%, transparent);
-  color: var(--text);
-  border-color: var(--border);
-}
-
-.semester-menu-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 5009;
-}
-
-.semester-menu-dropdown {
-  position: fixed;
-  z-index: 5010;
-  display: grid;
-  gap: 2px;
-  min-width: 230px;
-  padding: 8px;
-  border-radius: var(--r-md);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow);
-}
-
-.semester-menu-title {
-  padding: 6px 10px 8px;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 2px;
-}
-
-.semester-menu-dropdown button {
-  text-align: left;
-  padding: 9px 10px;
-  border-radius: var(--r-sm);
-  border: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 0.88rem;
-  cursor: pointer;
-}
-
-.semester-menu-dropdown button:hover {
-  background: color-mix(in oklch, var(--accent) 12%, transparent);
-}
-
-.semester-menu-dropdown button.danger {
-  color: var(--danger);
-}
+/* Inline confirm affordance reused by the Manage Semesters modal (remove semester/course). */
 
 .semester-menu-confirm {
   display: grid;
@@ -21759,4 +21692,211 @@ input[type="color"] {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+}
+
+/* Timetable drag/resize preview + recurrence-scope confirm popover (repeat-weekly move/resize). */
+
+.timetable-recurrence-confirm {
+  display: grid;
+  gap: 8px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 14px;
+  min-width: 260px;
+  max-width: 320px;
+  pointer-events: auto;
+  z-index: 220;
+}
+
+.timetable-recurrence-confirm span:first-child {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.timetable-recurrence-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Manage Semesters modal: semester picker/summary, holidays, and per-subject unit-type editor. */
+
+.manage-semesters-modal {
+  width: min(720px, 100%);
+}
+
+.manage-semesters-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.manage-semesters-toolbar .field {
+  flex: 1;
+  min-width: 180px;
+}
+
+.manage-semesters-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.semester-phase-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.manage-semesters-summary .danger {
+  color: var(--danger);
+}
+
+.manage-semesters-holidays {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+
+.manage-semesters-holidays summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.manage-semesters-holidays .timetable-modal-dates {
+  margin-top: 10px;
+}
+
+.manage-semesters-subjects-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.manage-semesters-subject-row {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.manage-semesters-subject-row:last-child {
+  border-bottom: none;
+}
+
+.manage-semesters-subject-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.manage-semesters-units {
+  display: grid;
+  gap: 6px;
+  padding-left: 16px;
+}
+
+.manage-semesters-unit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.manage-semesters-unit-label {
+  flex: 1 1 160px;
+  min-width: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 4px 6px;
+  color: var(--text);
+  font-size: 0.88rem;
+}
+
+.manage-semesters-unit-label:hover,
+.manage-semesters-unit-label:focus {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.fn-manage-semesters-button {
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.manage-semesters-schedule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  margin-top: 4px;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+  border: 1px solid var(--border);
+}
+
+.manage-semesters-schedule-row input,
+.manage-semesters-schedule-row select {
+  min-width: 0;
+}
+
+.manage-semesters-sheet-schedule {
+  align-items: stretch;
+  gap: 12px;
+}
+
+.manage-semesters-sheet-schedule-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.manage-semesters-sheet-schedule-section > .section-note {
+  flex: 0 0 100%;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 0.7rem;
+}
+
+.manage-semesters-sheet-schedule > input {
+  flex: 1 1 100%;
+}
+
+.semester-menu-confirm.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+}
+
+.timetable-modal-toggle.compact {
+  padding: 0;
+  gap: 6px;
+  font-size: 0.82rem;
 }

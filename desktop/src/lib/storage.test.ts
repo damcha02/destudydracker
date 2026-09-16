@@ -154,7 +154,7 @@ describe("saveAppState - section-aware writes", () => {
     let baselines = createInitialPersistenceBaselines(state);
     baselines = applyPersistedSections(baselines, state, saveAppState(state, baselines));
 
-    const afterEdit: AppState = { ...state, tasks: [{ id: "t1", semesterId: "s", courseId: "c", title: "Read", unitLabel: "Unit", totalUnits: 1, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-08-01T00:00:00.000Z" }] };
+    const afterEdit: AppState = { ...state, tasks: [{ id: "t1", semesterId: "s", courseId: "c", title: "Read", subtype: "Other", unitLabel: "Unit", totalUnits: 1, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-08-01T00:00:00.000Z" }] };
     const succeeded = saveAppState(afterEdit, baselines);
 
     expect(succeeded).toEqual(new Set(["core"]));
@@ -375,9 +375,13 @@ describe("loadAppState - migration and corruption", () => {
   it("round-trips populated timetable events, holidays, todos, and study units", () => {
     const state: AppState = {
       ...defaultState,
+      tasks: [{
+        id: "task1", semesterId: "sem1", courseId: "course1", title: "Lectures", subtype: "Lecture", unitLabel: "unit",
+        totalUnits: 14, completedUnits: 3, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z",
+      }],
       timetableEvents: [{
-        id: "ev1", semesterId: "sem1", courseId: "course1", kind: "lecture", label: "Lecture",
-        date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null,
+        id: "ev1", semesterId: "sem1", courseId: "course1", kind: "occurrence", taskId: "task1", label: "Lecture",
+        date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, recurrenceEndDate: null, occurrenceOverrides: {}, url: null,
         completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z",
       }],
       holidays: [{ id: "holiday1", semesterId: "sem1", startDate: "2026-12-20", endDate: "2027-01-05", label: "Winter break", createdAt: "2026-01-01T00:00:00.000Z" }],
@@ -392,7 +396,7 @@ describe("loadAppState - migration and corruption", () => {
     expect(loaded.studyUnits).toEqual(state.studyUnits);
   });
 
-  it("migrates a legacy recurring-class-event and exercise-sheet-series blob into unified timetable events", () => {
+  it("migrates a legacy recurring-class-event and exercise-sheet-series blob into unified timetable events, creating fallback tasks for them", () => {
     storage.setItem(CORE_KEY, JSON.stringify({
       semesters: [{ id: "sem1", name: "WS", createdAt: "2026-01-01T00:00:00.000Z", startDate: "2026-09-07", endDate: "2026-12-31", phase: "semester", archived: false, archivedAt: null }],
       recurringClassEvents: [{ id: "ev1", semesterId: "sem1", courseId: "course1", label: "Lecture", weekday: 1, startTime: "10:00", endTime: "12:00", createdAt: "2026-01-01T00:00:00.000Z" }],
@@ -400,9 +404,70 @@ describe("loadAppState - migration and corruption", () => {
     }));
     const result = loadAppState();
     expect(result.timetableEvents).toEqual([
-      { id: "ev1", semesterId: "sem1", courseId: "course1", kind: "lecture", label: "Lecture", date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
-      { id: "series1-release", semesterId: "sem1", courseId: "course1", kind: "sheet-release", label: "Sheet", date: "2026-09-07", time: "20:00", endTime: null, repeatWeekly: true, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
-      { id: "series1-deadline", semesterId: "sem1", courseId: "course1", kind: "sheet-deadline", label: "Sheet", date: "2026-09-13", time: "23:59", endTime: null, repeatWeekly: true, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "ev1", semesterId: "sem1", courseId: "course1", kind: "occurrence", taskId: "course1:legacy-lecture-task", label: "Lecture", date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, recurrenceEndDate: null, occurrenceOverrides: {}, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "series1-release", semesterId: "sem1", courseId: "course1", kind: "sheet-release", taskId: "course1:legacy-sheet-task", label: "Sheet", date: "2026-09-07", time: "20:00", endTime: null, repeatWeekly: true, recurrenceEndDate: null, occurrenceOverrides: {}, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "series1-deadline", semesterId: "sem1", courseId: "course1", kind: "sheet-deadline", taskId: "course1:legacy-sheet-task", label: "Sheet", date: "2026-09-13", time: "23:59", endTime: null, repeatWeekly: true, recurrenceEndDate: null, occurrenceOverrides: {}, url: "https://example.com", completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
     ]);
+    expect(result.tasks.map((task) => task.id)).toEqual(expect.arrayContaining(["course1:legacy-lecture-task", "course1:legacy-sheet-task"]));
+  });
+
+  it("migrates old kind='class'/'lecture'/'exercise-session' timetable events (with no taskId or unitTypeId at all) onto a fallback task", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      courses: [{ id: "course1", semesterId: "sem1", name: "Old Course", color: "#fff", targetGrade: 5, createdAt: "2026-01-01T00:00:00.000Z" }],
+      timetableEvents: [
+        { id: "ev1", semesterId: "sem1", courseId: "course1", kind: "class", label: "Lecture", date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "ev2", semesterId: "sem1", courseId: "course1", kind: "exercise-session", label: "Exercise", date: "2026-09-08", time: "14:00", endTime: "16:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    }));
+    const result = loadAppState();
+    expect(result.timetableEvents[0]).toMatchObject({ kind: "occurrence", taskId: "course1:legacy-lecture-task" });
+    expect(result.timetableEvents[1]).toMatchObject({ kind: "occurrence", taskId: "course1:legacy-lecture-task" });
+    expect(result.tasks.some((task) => task.id === "course1:legacy-lecture-task")).toBe(true);
+  });
+
+  it("converts a pre-unification course.unitTypes entry into a Task, reusing the unit type's id, and drops a timetable event whose taskId no longer resolves to any task", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      courses: [{
+        id: "course1", semesterId: "sem1", name: "Old Course", color: "#fff", targetGrade: 5, createdAt: "2026-01-01T00:00:00.000Z",
+        unitTypes: [{ id: "unit1", label: "Lectures", behavior: "single", repeatWeeklyDefault: true, completedCount: 4, createdAt: "2026-01-01T00:00:00.000Z" }],
+      }],
+      timetableEvents: [
+        { id: "ev1", semesterId: "sem1", courseId: "course1", kind: "occurrence", unitTypeId: "unit1", label: "Lecture", date: "2026-09-07", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "ev2", semesterId: "sem1", courseId: "course1", kind: "occurrence", unitTypeId: "no-such-unit", label: "Orphaned", date: "2026-09-08", time: "10:00", endTime: "12:00", repeatWeekly: true, url: null, completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    }));
+    const result = loadAppState();
+    const migratedTask = result.tasks.find((task) => task.id === "unit1");
+    expect(migratedTask).toMatchObject({ courseId: "course1", title: "Lectures", subtype: "Lecture", completedUnits: 4, totalUnits: 4 });
+    expect(result.timetableEvents.map((event) => event.id)).toEqual(["ev1"]);
+    expect(result.timetableEvents[0].taskId).toBe("unit1");
+  });
+
+  it("defaults a task's subtype to 'Other' when missing or invalid, and preserves a valid explicit subtype", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      tasks: [
+        { id: "t1", semesterId: "sem1", courseId: "course1", title: "Old task", unitLabel: "Unit", totalUnits: 5, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "t2", semesterId: "sem1", courseId: "course1", title: "Bogus subtype", subtype: "Homework", unitLabel: "Unit", totalUnits: 5, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "t3", semesterId: "sem1", courseId: "course1", title: "Weekly lecture", subtype: "Lecture", unitLabel: "unit", totalUnits: 0, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    }));
+    const result = loadAppState();
+    expect(result.tasks.find((task) => task.id === "t1")?.subtype).toBe("Other");
+    expect(result.tasks.find((task) => task.id === "t2")?.subtype).toBe("Other");
+    expect(result.tasks.find((task) => task.id === "t3")?.subtype).toBe("Lecture");
+  });
+
+  it("infers a subtype from the title for a task that predates the subtype field entirely, matching 'Sheet' over 'Session' for a title that contains both 'exercise' and 'sheet'", () => {
+    storage.setItem(CORE_KEY, JSON.stringify({
+      tasks: [
+        { id: "t1", semesterId: "sem1", courseId: "course1", title: "Exercise Sheets", unitLabel: "unit", totalUnits: 1, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "t2", semesterId: "sem1", courseId: "course1", title: "Lectures", unitLabel: "unit", totalUnits: 1, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "t3", semesterId: "sem1", courseId: "course1", title: "Exercise Sessions", unitLabel: "unit", totalUnits: 1, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: "2026-01-01T00:00:00.000Z" },
+      ],
+    }));
+    const result = loadAppState();
+    expect(result.tasks.find((task) => task.id === "t1")?.subtype).toBe("Sheet");
+    expect(result.tasks.find((task) => task.id === "t2")?.subtype).toBe("Lecture");
+    expect(result.tasks.find((task) => task.id === "t3")?.subtype).toBe("Session");
   });
 });
