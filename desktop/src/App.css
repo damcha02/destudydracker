@@ -22302,3 +22302,22 @@ input[type="color"] {
   background: color-mix(in oklch, var(--warn, var(--accent)) 10%, var(--surface-raised));
   font-size: 0.85rem;
 }
+
+.manage-semesters-timespan {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.manage-semesters-timespan-field {
+  display: grid;
+  gap: 2px;
+  font-size: 0.72rem;
+  color: var(--ink-4);
+}
+
+.manage-semesters-timespan-end {
+  align-self: center;
+  white-space: nowrap;
+}

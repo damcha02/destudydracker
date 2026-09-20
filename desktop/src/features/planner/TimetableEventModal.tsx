@@ -136,7 +136,7 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
         setMessage("Pick a course and a course task first.");
         return;
       }
-      const nextEndTime = occurrenceKind === "occurrence" ? endTime : "";
+      const nextEndTime = endTime;
       if (!validateTimes(time, nextEndTime, true)) return;
       setState((current) => {
         const previous = current.timetableEvents.find((event) => event.id === editingEvent.id);
@@ -292,12 +292,10 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
                 <span>Time</span>
                 <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
               </label>
-              {occurrenceKind === "occurrence" ? (
-                <label className="field compact-field">
-                  <span>End time</span>
-                  <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
-                </label>
-              ) : null}
+              <label className="field compact-field">
+                <span>End time</span>
+                <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+              </label>
             </div>
           ) : (
             <>

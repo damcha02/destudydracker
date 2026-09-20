@@ -3,7 +3,7 @@ import {
   buildDailyTimeline,
   computeOverlapLayout,
   countEventOccurrenceDates,
-  expandDailyTodoDates,
+  endTimeFor, durationBetween, expandDailyTodoDates,
   expandTimetableEvents,
   getSemesterWeekNumber,
   isHoliday,
@@ -198,6 +198,21 @@ describe("countEventOccurrenceDates", () => {
     const outOfRange = timetableEvent({ repeatWeekly: false, date: "2026-10-10" });
     expect(countEventOccurrenceDates(inRange, [], "semester", "2026-09-07", "2026-09-28")).toEqual(["2026-09-10"]);
     expect(countEventOccurrenceDates(outOfRange, [], "semester", "2026-09-07", "2026-09-28")).toEqual([]);
+  });
+});
+
+describe("endTimeFor / durationBetween", () => {
+  it("adds a duration to a start time and refuses to cross midnight", () => {
+    expect(endTimeFor("10:00", 120)).toBe("12:00");
+    expect(endTimeFor("09:15", 90)).toBe("10:45");
+    expect(endTimeFor("23:30", 60)).toBeNull();
+    expect(endTimeFor("", 60)).toBeNull();
+  });
+
+  it("measures a span, falling back when the end is missing or invalid", () => {
+    expect(durationBetween("10:00", "12:00", 60)).toBe(120);
+    expect(durationBetween("10:00", null, 60)).toBe(60);
+    expect(durationBetween("10:00", "09:00", 30)).toBe(30);
   });
 });
 

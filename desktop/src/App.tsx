@@ -67,7 +67,8 @@ import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardSt
 import { isTauriApp } from "./lib/obsidian";
 import { applyUndoPatch, countCompletedUnitOccurrences, diffForUndo, isEmptyUndoPatch, getOverdueTodos, setTodoOccurrenceTime, splitRecurringTodoAt, unitDecrementFor } from "./lib/plannerActions";
 import type { UndoPatch } from "./lib/plannerActions";
-import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
+import { TimeSpanFields } from "./features/planner/TimeSpanFields";
+import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
@@ -2767,8 +2768,6 @@ type TaskDraft = {
   title: string;
   subtype: TaskSubtype;
   unitLabel: string;
-  totalUnits: string;
-  completedUnits: string;
   dueDate: string;
   priority: Priority;
   notes: string;
@@ -2777,22 +2776,24 @@ type TaskDraft = {
   // separately finding it again in Manage Semesters to schedule it.
   scheduleDate: string;
   scheduleTime: string;
-  scheduleEndTime: string;
+  scheduleDuration: number;
   scheduleRepeatWeekly: boolean;
   scheduleReleaseDate: string;
   scheduleReleaseTime: string;
+  scheduleReleaseDuration: number;
   scheduleReleaseWeekly: boolean;
   scheduleDueDate: string;
   scheduleDueTime: string;
+  scheduleDueDuration: number;
   scheduleDueWeekly: boolean;
   scheduleUrl: string;
 };
 
 function emptyScheduleDraftFields() {
   return {
-    scheduleDate: "", scheduleTime: "", scheduleEndTime: "", scheduleRepeatWeekly: true,
-    scheduleReleaseDate: "", scheduleReleaseTime: "", scheduleReleaseWeekly: true,
-    scheduleDueDate: "", scheduleDueTime: "", scheduleDueWeekly: true,
+    scheduleDate: "", scheduleTime: "", scheduleDuration: 90, scheduleRepeatWeekly: true,
+    scheduleReleaseDate: "", scheduleReleaseTime: "", scheduleReleaseDuration: 30, scheduleReleaseWeekly: true,
+    scheduleDueDate: "", scheduleDueTime: "", scheduleDueDuration: 30, scheduleDueWeekly: true,
     scheduleUrl: "",
   };
 }
@@ -3811,8 +3812,6 @@ function App() {
     title: "",
     subtype: "Other",
     unitLabel: "Task",
-    totalUnits: "10",
-    completedUnits: "0",
     dueDate: "",
     priority: "medium",
     notes: "",
@@ -3848,8 +3847,6 @@ function App() {
     title: "",
     subtype: "Other",
     unitLabel: "Task",
-    totalUnits: "10",
-    completedUnits: "0",
     dueDate: "",
     priority: "medium",
     notes: "",
@@ -4037,8 +4034,8 @@ function App() {
     }, 700);
   }, [state]);
 
-  // Lecture-subtype tasks don't take a manual totalUnits/completedUnits input (see the task
-  // form) - their progress is derived entirely from how many Lecture occurrences are projected
+  // No task takes a manual totalUnits/completedUnits input (see the task form) - a task's
+  // progress is derived entirely from how many of its occurrences are projected
   // across the semester's date range (weekly recurrence expanded, holidays excluded) and how many
   // of those specific dates are checked off. Recompute and write those two fields through
   // whenever the schedule or task list changes, so every existing consumer (workload calc, task
@@ -4049,8 +4046,9 @@ function App() {
     setState((current) => {
       let changed = false;
       const tasks = current.tasks.map((task) => {
-        if (task.subtype !== "Lecture") return task;
-        const events = current.timetableEvents.filter((event) => event.taskId === task.id);
+        // Sheet releases are notifications, not units - only deadlines/occurrences are counted.
+        const events = current.timetableEvents.filter((event) => event.taskId === task.id && event.kind !== "sheet-release");
+        if (!events.length) return task;
         const semester = current.semesters.find((item) => item.id === task.semesterId);
         let totalUnits: number;
         let completedUnits: number;
@@ -7441,7 +7439,7 @@ function App() {
     setSelectedTaskId(TOTAL_WORKLOAD_ID);
     setSemesterName("");
     setCourseDraft({ semesterId: "", name: "", targetGrade: "4.0", color: "#8fb4ff" });
-    setTaskDraft({ semesterId: "", courseId: "", title: "", subtype: "Other", unitLabel: "Task", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "", ...emptyScheduleDraftFields() });
+    setTaskDraft({ semesterId: "", courseId: "", title: "", subtype: "Other", unitLabel: "Task", dueDate: "", priority: "medium", notes: "", ...emptyScheduleDraftFields() });
     setExamDraft({ semesterId: "", courseId: "", title: "", examDate: "", weight: "40", preparedness: "35" });
     setShowSemesterForm(false);
     setExpandedSemesterIds([]);
@@ -7550,7 +7548,6 @@ function App() {
       return;
     }
 
-    const isLecture = taskDraft.subtype === "Lecture";
     const task: Task = {
       id: makeId(),
       semesterId: taskDraft.semesterId,
@@ -7558,8 +7555,8 @@ function App() {
       title: taskDraft.title.trim(),
       subtype: taskDraft.subtype,
       unitLabel: cleanUnitLabel(taskDraft.unitLabel, taskDraft.title),
-      totalUnits: isLecture ? 0 : Math.max(1, Number(taskDraft.totalUnits) || 1),
-      completedUnits: isLecture ? 0 : clamp(Number(taskDraft.completedUnits) || 0, 0, Number(taskDraft.totalUnits) || 1),
+      totalUnits: 0,
+      completedUnits: 0,
       dueDate: subtypeHidesDueDate(taskDraft.subtype) ? null : (taskDraft.dueDate || null),
       priority: taskDraft.priority,
       notes: taskDraft.notes.trim(),
@@ -7571,29 +7568,50 @@ function App() {
     // Manage Semesters just to schedule what was already configured here.
     const scheduledEvents: TimetableEvent[] = [];
     let scheduled = false;
+    const pastMidnight = "That duration runs past midnight - shorten it or start earlier.";
     if (task.subtype === "Sheet") {
-      if (taskDraft.scheduleReleaseDate && taskDraft.scheduleReleaseTime && taskDraft.scheduleDueDate && taskDraft.scheduleDueTime) {
+      const releaseEnd = endTimeFor(taskDraft.scheduleReleaseTime, taskDraft.scheduleReleaseDuration);
+      const dueEnd = endTimeFor(taskDraft.scheduleDueTime, taskDraft.scheduleDueDuration);
+      const anyFilled = taskDraft.scheduleReleaseDate || taskDraft.scheduleReleaseTime || taskDraft.scheduleDueDate || taskDraft.scheduleDueTime;
+      if (anyFilled && !(taskDraft.scheduleReleaseDate && taskDraft.scheduleReleaseTime && taskDraft.scheduleDueDate && taskDraft.scheduleDueTime)) {
+        setMessage("Fill in a date and time for both release and due to schedule this sheet, or clear them.");
+        return;
+      }
+      if (anyFilled && (!releaseEnd || !dueEnd)) {
+        setMessage(pastMidnight);
+        return;
+      }
+      if (releaseEnd && dueEnd) {
         const createdAt = new Date().toISOString();
         const url = taskDraft.scheduleUrl.trim() || null;
         scheduledEvents.push(makeTimetableEvent({
           id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
           kind: "sheet-release", label: task.title,
-          date: taskDraft.scheduleReleaseDate, time: taskDraft.scheduleReleaseTime,
+          date: taskDraft.scheduleReleaseDate, time: taskDraft.scheduleReleaseTime, endTime: releaseEnd,
           repeatWeekly: taskDraft.scheduleReleaseWeekly, url, createdAt,
         }));
         scheduledEvents.push(makeTimetableEvent({
           id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
           kind: "sheet-deadline", label: task.title,
-          date: taskDraft.scheduleDueDate, time: taskDraft.scheduleDueTime,
+          date: taskDraft.scheduleDueDate, time: taskDraft.scheduleDueTime, endTime: dueEnd,
           repeatWeekly: taskDraft.scheduleDueWeekly, url, createdAt,
         }));
         scheduled = true;
       }
-    } else if (taskDraft.scheduleDate && taskDraft.scheduleTime) {
+    } else if (taskDraft.scheduleDate || taskDraft.scheduleTime) {
+      const end = endTimeFor(taskDraft.scheduleTime, taskDraft.scheduleDuration);
+      if (!taskDraft.scheduleDate || !taskDraft.scheduleTime) {
+        setMessage("Fill in both a date and a start time to schedule it, or clear them.");
+        return;
+      }
+      if (!end) {
+        setMessage(pastMidnight);
+        return;
+      }
       scheduledEvents.push(makeTimetableEvent({
         id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
         kind: "occurrence", label: task.title,
-        date: taskDraft.scheduleDate, time: taskDraft.scheduleTime, endTime: taskDraft.scheduleEndTime || null,
+        date: taskDraft.scheduleDate, time: taskDraft.scheduleTime, endTime: end,
         repeatWeekly: taskDraft.scheduleRepeatWeekly,
       }));
       scheduled = true;
@@ -7609,8 +7627,6 @@ function App() {
       title: "",
       subtype: "Other",
       unitLabel: "Task",
-      totalUnits: "10",
-      completedUnits: "0",
       dueDate: "",
       notes: "",
       ...emptyScheduleDraftFields(),
@@ -7668,8 +7684,6 @@ function App() {
       title: task.title,
       subtype: task.subtype,
       unitLabel: task.unitLabel || inferUnitLabel(task.title),
-      totalUnits: task.totalUnits.toString(),
-      completedUnits: task.completedUnits.toString(),
       dueDate: task.dueDate ?? "",
       priority: task.priority,
       notes: task.notes,
@@ -7681,7 +7695,7 @@ function App() {
 
   /** Opens the same task-create modal the field-notebook sidebar's "+ add task" uses, so "Add Unit"/"Add Course Task" everywhere shares one entity and one UI. */
   function openAddTaskModalFor(semesterId: string, courseId: string) {
-    setTaskDraft((current) => ({ ...current, semesterId, courseId, title: "", subtype: "Other", unitLabel: "Task", totalUnits: "10", completedUnits: "0", dueDate: "", priority: "medium", notes: "", ...emptyScheduleDraftFields() }));
+    setTaskDraft((current) => ({ ...current, semesterId, courseId, title: "", subtype: "Other", unitLabel: "Task", dueDate: "", priority: "medium", notes: "", ...emptyScheduleDraftFields() }));
     setFieldPlannerTaskId(null);
     setFieldPlannerTaskMode("create");
     setTaskSubtypeChosen(false);
@@ -7702,9 +7716,6 @@ function App() {
 
     const title = taskEditDraft.title.trim();
     const unitLabel = cleanUnitLabel(taskEditDraft.unitLabel, title);
-    const isLecture = taskEditDraft.subtype === "Lecture";
-    const totalUnits = isLecture ? 0 : Math.max(1, Number(taskEditDraft.totalUnits) || 1);
-    const completedUnits = isLecture ? 0 : clamp(Number(taskEditDraft.completedUnits) || 0, 0, totalUnits);
     setState((current) => ({
       ...current,
       tasks: current.tasks.map((task) =>
@@ -7714,8 +7725,6 @@ function App() {
               title,
               subtype: taskEditDraft.subtype,
               unitLabel,
-              totalUnits,
-              completedUnits,
               dueDate: subtypeHidesDueDate(taskEditDraft.subtype) ? null : (taskEditDraft.dueDate || null),
               priority: taskEditDraft.priority,
               notes: taskEditDraft.notes.trim(),
@@ -7757,15 +7766,6 @@ function App() {
     setMessage(`${exam.title} added to the runway.`);
   }
 
-
-  function adjustTask(taskId: string, delta: number) {
-    setState((current) => ({
-      ...current,
-      tasks: current.tasks.map((task) =>
-        task.id === taskId ? { ...task, completedUnits: clamp(task.completedUnits + delta, 0, task.totalUnits) } : task,
-      ),
-    }));
-  }
 
   /** Wraps a destructive setState update with an "Undo" toast: records what the update
    * changes, applies it, and lets undoLastDelete put exactly that back. Only for
@@ -11418,7 +11418,6 @@ function App() {
     const renderTaskForm = () => {
       const draft = creating ? taskDraft : taskEditDraft;
       const setDraft = creating ? setTaskDraft : setTaskEditDraft;
-      const isLecture = draft.subtype === "Lecture";
       const hideDueDate = subtypeHidesDueDate(draft.subtype);
       const showRestOfForm = !creating || taskSubtypeChosen;
       const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -11472,20 +11471,7 @@ function App() {
               <span>Progress label</span>
               <input value={draft.unitLabel} onChange={(event) => setDraft((current) => ({ ...current, unitLabel: event.target.value }))} />
             </label>
-            {isLecture ? (
-              <p className="section-note fn-task-form-notice">Totals are tracked automatically from the Lecture items scheduled on the calendar.</p>
-            ) : (
-              <>
-                <label className="field">
-                  <span>Total</span>
-                  <input type="number" min="1" value={draft.totalUnits} onChange={(event) => setDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
-                </label>
-                <label className="field">
-                  <span>Done</span>
-                  <input type="number" min="0" value={draft.completedUnits} onChange={(event) => setDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
-                </label>
-              </>
-            )}
+            <p className="section-note fn-task-form-notice">Totals are counted automatically from the items scheduled on the calendar.</p>
             <label className="field">
               <span>Priority</span>
               <select value={draft.priority} onChange={(event) => setDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
@@ -11514,7 +11500,7 @@ function App() {
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Release</span>
                     <input type="date" value={draft.scheduleReleaseDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseDate: event.target.value }))} />
-                    <input type="time" value={draft.scheduleReleaseTime} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseTime: event.target.value }))} />
+                    <TimeSpanFields time={draft.scheduleReleaseTime} duration={draft.scheduleReleaseDuration} onTimeChange={(scheduleReleaseTime) => setDraft((current) => ({ ...current, scheduleReleaseTime }))} onDurationChange={(scheduleReleaseDuration) => setDraft((current) => ({ ...current, scheduleReleaseDuration }))} />
                     <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleReleaseWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseWeekly: event.target.checked }))} />
                       <span>Weekly</span>
@@ -11523,7 +11509,7 @@ function App() {
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Due</span>
                     <input type="date" value={draft.scheduleDueDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueDate: event.target.value }))} />
-                    <input type="time" value={draft.scheduleDueTime} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueTime: event.target.value }))} />
+                    <TimeSpanFields time={draft.scheduleDueTime} duration={draft.scheduleDueDuration} onTimeChange={(scheduleDueTime) => setDraft((current) => ({ ...current, scheduleDueTime }))} onDurationChange={(scheduleDueDuration) => setDraft((current) => ({ ...current, scheduleDueDuration }))} />
                     <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleDueWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueWeekly: event.target.checked }))} />
                       <span>Weekly</span>
@@ -11534,8 +11520,7 @@ function App() {
               ) : (
                 <div className="manage-semesters-schedule-row">
                   <input type="date" value={draft.scheduleDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleDate: event.target.value }))} />
-                  <input type="time" value={draft.scheduleTime} onChange={(event) => setDraft((current) => ({ ...current, scheduleTime: event.target.value }))} />
-                  <input type="time" value={draft.scheduleEndTime} onChange={(event) => setDraft((current) => ({ ...current, scheduleEndTime: event.target.value }))} placeholder="End" />
+                  <TimeSpanFields time={draft.scheduleTime} duration={draft.scheduleDuration} onTimeChange={(scheduleTime) => setDraft((current) => ({ ...current, scheduleTime }))} onDurationChange={(scheduleDuration) => setDraft((current) => ({ ...current, scheduleDuration }))} />
                   <label className="timetable-modal-toggle compact">
                     <input type="checkbox" checked={draft.scheduleRepeatWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleRepeatWeekly: event.target.checked }))} />
                     <span>Weekly</span>
@@ -11576,8 +11561,6 @@ function App() {
               <div className="fn-task-modal-progress"><div className="health-track tight wide"><div className="health-fill" style={{ width: `${progress}%`, background: modalCourse?.color ?? "var(--fn-course-blue)" }} /></div></div>
               {task.notes ? <p className="fn-task-modal-note">{task.notes}</p> : null}
               <div className="fn-task-modal-actions">
-                <button type="button" onClick={() => adjustTask(task.id, -1)}>-</button>
-                <button type="button" onClick={() => adjustTask(task.id, 1)}>+</button>
                 <button type="button" className="ghost-button" onClick={() => { startEditingTask(task); setFieldPlannerTaskMode("edit"); }}>Edit</button>
                 <button type="button" className="ghost-button" onClick={() => focusTaskFromDashboard(task)}>Focus</button>
                 <button type="button" className="mini-danger" onClick={() => removeTask(task.id)}>Remove</button>
@@ -12935,20 +12918,7 @@ function App() {
                                                 <span>Progress label</span>
                                                 <input data-tour="planner-task-unit-label" value={taskDraft.unitLabel} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
                                               </label>
-                                              {taskDraft.subtype === "Lecture" ? (
-                                                <p className="section-note task-notes-field">Totals are tracked automatically from the Lecture items scheduled on the calendar.</p>
-                                              ) : (
-                                                <>
-                                                  <label className="field">
-                                                    <span>Total</span>
-                                                    <input data-tour="planner-task-total" type="number" min="1" value={taskDraft.totalUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, totalUnits: event.target.value }))} />
-                                                  </label>
-                                                  <label className="field">
-                                                    <span>Done</span>
-                                                    <input data-tour="planner-task-done" type="number" min="0" value={taskDraft.completedUnits} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, completedUnits: event.target.value }))} />
-                                                  </label>
-                                                </>
-                                              )}
+                                              <p className="section-note task-notes-field">Totals are counted automatically from the items scheduled on the calendar.</p>
                                               <label className="field">
                                                 <span>Priority</span>
                                                 <select data-tour="planner-task-priority" value={taskDraft.priority} onChange={(event) => setTaskDraft((current) => ({ ...current, semesterId: semester.id, courseId: course.id, priority: event.target.value as Priority }))}>
@@ -13044,12 +13014,6 @@ function App() {
                                                       </div>
                                                     </div>
                                                     <div className="task-row-actions" data-tour={task.id === TUTORIAL_TASK_ID ? "planner-tutorial-task-progress" : "planner-task-progress"}>
-                                                      <button type="button" onClick={() => adjustTask(task.id, -1)}>
-                                                        -
-                                                      </button>
-                                                      <button type="button" onClick={() => adjustTask(task.id, 1)}>
-                                                        +
-                                                      </button>
                                                       <button type="button" className="ghost-button small-button" onClick={() => startEditingTask(task)}>
                                                         Edit
                                                       </button>
@@ -13103,20 +13067,7 @@ function App() {
                                                           <span>Progress label</span>
                                                           <input value={taskEditDraft.unitLabel} onChange={(event) => setTaskEditDraft((current) => ({ ...current, unitLabel: event.target.value }))} placeholder="Lecture, Sheet, Exam..." />
                                                         </label>
-                                                        {taskEditDraft.subtype === "Lecture" ? (
-                                                          <p className="section-note task-notes-field">Totals are tracked automatically from the Lecture items scheduled on the calendar.</p>
-                                                        ) : (
-                                                          <>
-                                                            <label className="field">
-                                                              <span>Total</span>
-                                                              <input type="number" min="1" value={taskEditDraft.totalUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, totalUnits: event.target.value }))} />
-                                                            </label>
-                                                            <label className="field">
-                                                              <span>Done</span>
-                                                              <input type="number" min="0" value={taskEditDraft.completedUnits} onChange={(event) => setTaskEditDraft((current) => ({ ...current, completedUnits: event.target.value }))} />
-                                                            </label>
-                                                          </>
-                                                        )}
+                                                        <p className="section-note task-notes-field">Totals are counted automatically from the items scheduled on the calendar.</p>
                                                         <label className="field">
                                                           <span>Priority</span>
                                                           <select value={taskEditDraft.priority} onChange={(event) => setTaskEditDraft((current) => ({ ...current, priority: event.target.value as Priority }))}>
@@ -13141,10 +13092,7 @@ function App() {
                                                           <textarea value={taskEditDraft.notes} onChange={(event) => setTaskEditDraft((current) => ({ ...current, notes: event.target.value }))} />
                                                         </label>
                                                       </div>
-                                                      {taskEditDraft.subtype === "Lecture" ? null : (
-                                                        <p className="unit-label-hint">This controls labels like {cleanUnitLabel(taskEditDraft.unitLabel, taskEditDraft.title)} {Math.min(Math.max(1, Number(taskEditDraft.completedUnits) + 1 || 1), Math.max(1, Number(taskEditDraft.totalUnits) || 1))} of {Math.max(1, Number(taskEditDraft.totalUnits) || 1)}.</p>
-                                                      )}
-                                                      <div className="inline-form-actions">
+                                                                                                            <div className="inline-form-actions">
                                                         <button type="submit">Save task</button>
                                                         <button type="button" className="ghost-button" onClick={() => setEditingTaskId(null)}>
                                                           Cancel

@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { formatDate, getCourseTasks, getSemesterCourses } from "../../lib/metrics";
-import { getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
+import { durationBetween, endTimeFor, getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
+import { TimeSpanFields } from "./TimeSpanFields";
 import { makeId } from "../../lib/storage";
 import type { AppState, Course, Holiday, Semester, Task, TimetableEvent } from "../../types";
 
@@ -59,20 +60,20 @@ export function ManageSemestersModal({
   const [taskRemoveConfirm, setTaskRemoveConfirm] = useState<string | null>(null);
   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState({
-    date: today, time: "10:00", endTime: "", repeatWeekly: true,
-    releaseDate: today, releaseTime: "20:00", releaseWeekly: true,
-    dueDate: today, dueTime: "23:59", dueWeekly: true,
+    date: today, time: "10:00", duration: 90, repeatWeekly: true,
+    releaseDate: today, releaseTime: "20:00", releaseDuration: 30, releaseWeekly: true,
+    dueDate: today, dueTime: "23:00", dueDuration: 30, dueWeekly: true,
     sheetUrl: "",
   });
 
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
-  const [eventEditDraft, setEventEditDraft] = useState({ date: "", time: "", endTime: "", repeatWeekly: true });
+  const [eventEditDraft, setEventEditDraft] = useState({ date: "", time: "", duration: 60, repeatWeekly: true });
   const [eventRemoveConfirm, setEventRemoveConfirm] = useState<string | null>(null);
 
   function startEditEvent(event: TimetableEvent) {
     setSchedulingTaskId(null);
     setEditingEventId(event.id);
-    setEventEditDraft({ date: event.date, time: event.time, endTime: event.endTime ?? "", repeatWeekly: event.repeatWeekly });
+    setEventEditDraft({ date: event.date, time: event.time, duration: durationBetween(event.time, event.endTime, event.kind === "occurrence" ? 60 : 30), repeatWeekly: event.repeatWeekly });
   }
 
   function cancelEditEvent() {
@@ -84,11 +85,16 @@ export function ManageSemestersModal({
       setMessage("Pick a date and time first.");
       return;
     }
+    const editedEnd = endTimeFor(eventEditDraft.time, eventEditDraft.duration);
+    if (!editedEnd) {
+      setMessage("That duration runs past midnight - shorten it or start earlier.");
+      return;
+    }
     setState((current) => ({
       ...current,
       timetableEvents: current.timetableEvents.map((event) =>
         event.id === editingEventId
-          ? { ...event, date: eventEditDraft.date, time: eventEditDraft.time, endTime: eventEditDraft.endTime || null, repeatWeekly: eventEditDraft.repeatWeekly }
+          ? { ...event, date: eventEditDraft.date, time: eventEditDraft.time, endTime: editedEnd, repeatWeekly: eventEditDraft.repeatWeekly }
           : event,
       ),
     }));
@@ -238,6 +244,11 @@ export function ManageSemestersModal({
       setMessage("Pick a date and time first.");
       return;
     }
+    const end = endTimeFor(scheduleDraft.time, scheduleDraft.duration);
+    if (!end) {
+      setMessage("That duration runs past midnight - shorten it or start earlier.");
+      return;
+    }
     const event = makeTimetableEvent({
       id: makeId(),
       semesterId: semester.id,
@@ -247,7 +258,7 @@ export function ManageSemestersModal({
       label: task.title,
       date: scheduleDraft.date,
       time: scheduleDraft.time,
-      endTime: scheduleDraft.endTime || null,
+      endTime: end,
       repeatWeekly: scheduleDraft.repeatWeekly,
     });
     setState((current) => ({ ...current, timetableEvents: [...current.timetableEvents, event] }));
@@ -267,18 +278,24 @@ export function ManageSemestersModal({
       setMessage("Pick a release and due date/time first.");
       return;
     }
+    const releaseEnd = endTimeFor(scheduleDraft.releaseTime, scheduleDraft.releaseDuration);
+    const dueEnd = endTimeFor(scheduleDraft.dueTime, scheduleDraft.dueDuration);
+    if (!releaseEnd || !dueEnd) {
+      setMessage("That duration runs past midnight - shorten it or start earlier.");
+      return;
+    }
     const url = scheduleDraft.sheetUrl.trim() || null;
     const createdAt = new Date().toISOString();
     const releaseEvent = makeTimetableEvent({
       id: makeId(), semesterId: semester.id, courseId: course.id, taskId: task.id,
       kind: "sheet-release", label: task.title,
-      date: scheduleDraft.releaseDate, time: scheduleDraft.releaseTime,
+      date: scheduleDraft.releaseDate, time: scheduleDraft.releaseTime, endTime: releaseEnd,
       repeatWeekly: scheduleDraft.releaseWeekly, url, createdAt,
     });
     const dueEvent = makeTimetableEvent({
       id: makeId(), semesterId: semester.id, courseId: course.id, taskId: task.id,
       kind: "sheet-deadline", label: task.title,
-      date: scheduleDraft.dueDate, time: scheduleDraft.dueTime,
+      date: scheduleDraft.dueDate, time: scheduleDraft.dueTime, endTime: dueEnd,
       repeatWeekly: scheduleDraft.dueWeekly, url, createdAt,
     });
     setState((current) => ({ ...current, timetableEvents: [...current.timetableEvents, releaseEvent, dueEvent] }));
@@ -537,7 +554,7 @@ export function ManageSemestersModal({
                                     <div className="manage-semesters-sheet-schedule-section">
                                       <span className="section-note">Release</span>
                                       <input type="date" value={scheduleDraft.releaseDate} onChange={(event) => setScheduleDraft((current) => ({ ...current, releaseDate: event.target.value }))} />
-                                      <input type="time" value={scheduleDraft.releaseTime} onChange={(event) => setScheduleDraft((current) => ({ ...current, releaseTime: event.target.value }))} />
+                                      <TimeSpanFields time={scheduleDraft.releaseTime} duration={scheduleDraft.releaseDuration} onTimeChange={(releaseTime) => setScheduleDraft((current) => ({ ...current, releaseTime }))} onDurationChange={(releaseDuration) => setScheduleDraft((current) => ({ ...current, releaseDuration }))} />
                                       <label className="timetable-modal-toggle compact">
                                         <input type="checkbox" checked={scheduleDraft.releaseWeekly} onChange={(event) => setScheduleDraft((current) => ({ ...current, releaseWeekly: event.target.checked }))} />
                                         <span>Weekly</span>
@@ -546,7 +563,7 @@ export function ManageSemestersModal({
                                     <div className="manage-semesters-sheet-schedule-section">
                                       <span className="section-note">Due</span>
                                       <input type="date" value={scheduleDraft.dueDate} onChange={(event) => setScheduleDraft((current) => ({ ...current, dueDate: event.target.value }))} />
-                                      <input type="time" value={scheduleDraft.dueTime} onChange={(event) => setScheduleDraft((current) => ({ ...current, dueTime: event.target.value }))} />
+                                      <TimeSpanFields time={scheduleDraft.dueTime} duration={scheduleDraft.dueDuration} onTimeChange={(dueTime) => setScheduleDraft((current) => ({ ...current, dueTime }))} onDurationChange={(dueDuration) => setScheduleDraft((current) => ({ ...current, dueDuration }))} />
                                       <label className="timetable-modal-toggle compact">
                                         <input type="checkbox" checked={scheduleDraft.dueWeekly} onChange={(event) => setScheduleDraft((current) => ({ ...current, dueWeekly: event.target.checked }))} />
                                         <span>Weekly</span>
@@ -558,8 +575,7 @@ export function ManageSemestersModal({
                                 ) : schedulingTaskId === task.id ? (
                                   <div className="manage-semesters-schedule-row">
                                     <input type="date" value={scheduleDraft.date} onChange={(event) => setScheduleDraft((current) => ({ ...current, date: event.target.value }))} />
-                                    <input type="time" value={scheduleDraft.time} onChange={(event) => setScheduleDraft((current) => ({ ...current, time: event.target.value }))} />
-                                    <input type="time" value={scheduleDraft.endTime} onChange={(event) => setScheduleDraft((current) => ({ ...current, endTime: event.target.value }))} placeholder="End" />
+                                    <TimeSpanFields time={scheduleDraft.time} duration={scheduleDraft.duration} onTimeChange={(time) => setScheduleDraft((current) => ({ ...current, time }))} onDurationChange={(duration) => setScheduleDraft((current) => ({ ...current, duration }))} />
                                     <label className="timetable-modal-toggle compact">
                                       <input type="checkbox" checked={scheduleDraft.repeatWeekly} onChange={(event) => setScheduleDraft((current) => ({ ...current, repeatWeekly: event.target.checked }))} />
                                       <span>Weekly</span>
@@ -577,8 +593,7 @@ export function ManageSemestersModal({
                                         editingEventId === event.id ? (
                                           <div key={event.id} className="manage-semesters-schedule-row manage-semesters-scheduled-edit-row">
                                             <input type="date" value={eventEditDraft.date} onChange={(edit) => setEventEditDraft((current) => ({ ...current, date: edit.target.value }))} />
-                                            <input type="time" value={eventEditDraft.time} onChange={(edit) => setEventEditDraft((current) => ({ ...current, time: edit.target.value }))} />
-                                            <input type="time" value={eventEditDraft.endTime} onChange={(edit) => setEventEditDraft((current) => ({ ...current, endTime: edit.target.value }))} placeholder="End" />
+                                            <TimeSpanFields time={eventEditDraft.time} duration={eventEditDraft.duration} onTimeChange={(time) => setEventEditDraft((current) => ({ ...current, time }))} onDurationChange={(duration) => setEventEditDraft((current) => ({ ...current, duration }))} />
                                             <label className="timetable-modal-toggle compact">
                                               <input type="checkbox" checked={eventEditDraft.repeatWeekly} onChange={(edit) => setEventEditDraft((current) => ({ ...current, repeatWeekly: edit.target.checked }))} />
                                               <span>Weekly</span>

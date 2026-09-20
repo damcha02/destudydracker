@@ -42,6 +42,27 @@ export function makeTimetableEvent(params: {
   };
 }
 
+function clockToMinutes(time: string): number {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+/** The clock time `durationMinutes` after `start`, or null if that would run past midnight. */
+export function endTimeFor(start: string, durationMinutes: number): string | null {
+  if (!/^\d{1,2}:\d{2}$/.test(start) || !(durationMinutes > 0)) return null;
+  const total = clockToMinutes(start) + durationMinutes;
+  if (total > 24 * 60) return null;
+  const clamped = Math.min(total, 23 * 60 + 59);
+  return `${String(Math.floor(clamped / 60)).padStart(2, "0")}:${String(clamped % 60).padStart(2, "0")}`;
+}
+
+/** Minutes between two clock times, or `fallback` when the end is missing or not after the start. */
+export function durationBetween(start: string, end: string | null | undefined, fallback: number): number {
+  if (!end) return fallback;
+  const minutes = clockToMinutes(end) - clockToMinutes(start);
+  return minutes > 0 ? minutes : fallback;
+}
+
 export function parseIsoDate(iso: string): Date {
   const [year, month, day] = iso.split("-").map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
