@@ -493,11 +493,13 @@
   color-scheme: light;
 }
 
-[data-app-style="field-notebook"][data-palette="sakura"] body {
+[data-app-style="field-notebook"][data-palette="sakura"] body,
+[data-app-style="wabi-sabi"][data-palette="sakura"] body {
   background-color: #f7eeed;
 }
 
-[data-app-style="field-notebook"][data-palette="sakura"] body::after {
+[data-app-style="field-notebook"][data-palette="sakura"] body::after,
+[data-app-style="wabi-sabi"][data-palette="sakura"] body::after {
   content: "";
   position: fixed;
   inset: 0;
@@ -510,11 +512,14 @@
 }
 
 [data-app-style="field-notebook"][data-palette="sakura"] .shell,
-[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay {
+[data-app-style="wabi-sabi"][data-palette="sakura"] .shell,
+[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay,
+[data-app-style="wabi-sabi"][data-palette="sakura"] .exam-fullscreen-overlay {
   position: relative;
 }
 
-[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay::before {
+[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay::before,
+[data-app-style="wabi-sabi"][data-palette="sakura"] .exam-fullscreen-overlay::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -527,8 +532,11 @@
 }
 
 [data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-face,
+[data-app-style="wabi-sabi"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-face,
 [data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-actions,
-[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-exit {
+[data-app-style="wabi-sabi"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-actions,
+[data-app-style="field-notebook"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-exit,
+[data-app-style="wabi-sabi"][data-palette="sakura"] .exam-fullscreen-overlay .exam-fullscreen-exit {
   position: relative;
   z-index: 1;
 }

@@ -16,6 +16,8 @@ const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
 
 type View = "main" | "wizard" | "archive";
 
+const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
+
 type Props = {
   state: AppState;
   setState: Dispatch<SetStateAction<AppState>>;
@@ -29,12 +31,14 @@ type Props = {
   onEditTask: (task: Task) => void;
   initialSemesterId?: string | null;
   initialCourseId?: string | null;
+  /** "semesters": semester-level only. "courses": courses/tasks of one semester only (collapsible). "full": everything. */
+  mode?: "full" | "semesters" | "courses";
 };
 
 export function ManageSemestersModal({
   state, setState, setMessage, onClose, onDeleteWithUndo,
   onRemoveSemester, onRemoveCourse, onRemoveTask, onAddTask, onEditTask,
-  initialSemesterId, initialCourseId,
+  initialSemesterId, initialCourseId, mode = "full",
 }: Props) {
   const activeSemesters = useMemo(() => state.semesters.filter((semester) => !semester.archived), [state.semesters]);
   const archivedSemesters = useMemo(() => state.semesters.filter((semester) => semester.archived), [state.semesters]);
@@ -53,10 +57,13 @@ export function ManageSemestersModal({
 
   const [holidayDraft, setHolidayDraft] = useState({ label: "", startDate: "", endDate: "" });
 
+  const [wizardCourseCount, setWizardCourseCount] = useState(0);
+  const [openCourseIds, setOpenCourseIds] = useState<string[]>(() => (initialCourseId ? [initialCourseId] : []));
+  const collapsibleCourses = mode === "courses";
   const [addingCourse, setAddingCourse] = useState(false);
   const [courseDraft, setCourseDraft] = useState({ name: "", color: "#8fb4ff", externalUrl: "" });
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
-  const [courseEditDraft, setCourseEditDraft] = useState({ name: "", color: "#8fb4ff", externalUrl: "" });
+  const [courseEditDraft, setCourseEditDraft] = useState({ name: "", color: "#8fb4ff", externalUrl: "", targetGrade: "4" });
   const [courseRemoveConfirm, setCourseRemoveConfirm] = useState<string | null>(null);
   const [taskRemoveConfirm, setTaskRemoveConfirm] = useState<string | null>(null);
   const [schedulingTaskId, setSchedulingTaskId] = useState<string | null>(null);
@@ -116,7 +123,7 @@ export function ManageSemestersModal({
 
   function startEditCourse(course: Course) {
     setEditingCourseId(course.id);
-    setCourseEditDraft({ name: course.name, color: course.color, externalUrl: course.externalUrl ?? "" });
+    setCourseEditDraft({ name: course.name, color: course.color, externalUrl: course.externalUrl ?? "", targetGrade: String(course.targetGrade) });
   }
 
   useEffect(() => {
@@ -124,7 +131,7 @@ export function ManageSemestersModal({
     const course = state.courses.find((item) => item.id === initialCourseId);
     if (!course) return;
     if (course.semesterId !== semesterId) setSemesterId(course.semesterId);
-    startEditCourse(course);
+    if (mode !== "courses") startEditCourse(course);
     // Only ever act on the initial trigger - subsequent re-renders shouldn't re-open this.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialCourseId]);
@@ -232,7 +239,7 @@ export function ManageSemestersModal({
       ...current,
       courses: current.courses.map((course) =>
         course.id === editingCourseId
-          ? { ...course, name: courseEditDraft.name.trim(), color: courseEditDraft.color, externalUrl: courseEditDraft.externalUrl.trim() || null }
+          ? { ...course, name: courseEditDraft.name.trim(), color: courseEditDraft.color, ...(mode === "courses" ? { targetGrade: Number(courseEditDraft.targetGrade) || course.targetGrade } : {}), externalUrl: courseEditDraft.externalUrl.trim() || null }
           : course,
       ),
     }));
@@ -347,19 +354,20 @@ export function ManageSemestersModal({
       courses: [...current.courses, ...newCourses],
     }));
     setSemesterId(newSemester.id);
+    setWizardCourseCount(0);
     setView("main");
     setMessage(`${newSemester.name} set up with ${newCourses.length} subject${newCourses.length === 1 ? "" : "s"}. Add course tasks below to start scheduling.`);
   }
 
   return createPortal(
     <div className="timetable-modal-backdrop manage-semesters-backdrop" onMouseDown={onClose}>
-      <section className="timetable-modal manage-semesters-modal" role="dialog" aria-modal="true" aria-label="Manage semesters" onMouseDown={(event) => event.stopPropagation()}>
+      <section className="timetable-modal manage-semesters-modal" role="dialog" aria-modal="true" aria-label={mode === "courses" ? "Edit semester" : "Manage semesters"} onMouseDown={(event) => event.stopPropagation()}>
         <header className="timetable-modal-head">
-          <strong>Manage Semesters</strong>
+          <strong>{mode === "courses" ? `Edit Semester${semester ? ` · ${semester.name}` : ""}` : "Manage Semesters"}</strong>
           <button type="button" className="ghost-button" onClick={onClose}>Close</button>
         </header>
 
-        {view === "wizard" ? (
+        {view === "wizard" && mode !== "courses" ? (
           <form onSubmit={submitWizard} className="timetable-modal-form">
             <button type="button" className="ghost-button" onClick={() => setView("main")}>&larr; Back</button>
             <label className="field">
@@ -376,16 +384,30 @@ export function ManageSemestersModal({
                 <input name="endDate" type="date" />
               </label>
             </div>
-            <p className="section-note">Add subjects (optional link to the course page or LMS).</p>
-            {[0, 1, 2, 3].map((index) => (
-              <div key={index} className="timetable-modal-course-row">
-                <input name="courseName" placeholder={`Subject ${index + 1} name`} />
-                <input name="courseUrl" placeholder="https://... (optional)" />
-              </div>
-            ))}
+            {mode === "full" ? (
+              <>
+                <p className="section-note">Add subjects (optional link to the course page or LMS).</p>
+                {[0, 1, 2, 3].map((index) => (
+                  <div key={index} className="timetable-modal-course-row">
+                    <input name="courseName" placeholder={`Subject ${index + 1} name`} />
+                    <input name="courseUrl" placeholder="https://... (optional)" />
+                  </div>
+                ))}
+              </>
+            ) : (
+              <>
+                {Array.from({ length: wizardCourseCount }, (_, index) => (
+                  <div key={index} className="timetable-modal-course-row">
+                    <input name="courseName" placeholder={`Course ${index + 1} name`} autoFocus={index === wizardCourseCount - 1} />
+                    <input name="courseUrl" placeholder="https://... (optional)" />
+                  </div>
+                ))}
+                <button type="button" className="ghost-button small-button" onClick={() => setWizardCourseCount((count) => count + 1)}>+ Add course</button>
+              </>
+            )}
             <button type="submit">Create</button>
           </form>
-        ) : view === "archive" ? (
+        ) : view === "archive" && mode !== "courses" ? (
           <div className="timetable-modal-form">
             <button type="button" className="ghost-button" onClick={() => setView("main")}>&larr; Back</button>
             <div className="stack-list compact">
@@ -409,16 +431,17 @@ export function ManageSemestersModal({
           </div>
         ) : (
           <div className="timetable-modal-form manage-semesters-main">
-            <div className="manage-semesters-toolbar">
+            {mode !== "courses" ? <div className="manage-semesters-toolbar">
               <select value={semesterId} onChange={(event) => setSemesterId(event.target.value)}>
                 {activeSemesters.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
               <button type="button" className="ghost-button small-button" onClick={() => setView("wizard")}>+ New</button>
               <button type="button" className="ghost-button small-button" onClick={() => setView("archive")}>Archived ({archivedSemesters.length})</button>
-            </div>
+            </div> : null}
 
             {semester ? (
               <>
+                {mode !== "courses" ? (<>
                 <div className="manage-semesters-summary">
                   <span className="semester-phase-pill">{semester.phase === "exam-prep" ? "Exam Prep" : "Active"}</span>
                   <span>{weekNumber ? `Week ${weekNumber}` : semester.startDate ? "Not started yet" : "No start date"}</span>
@@ -489,7 +512,9 @@ export function ManageSemestersModal({
                     ))}
                   </div>
                 </details>
+                </>) : null}
 
+                {mode !== "semesters" ? (
                 <div className="manage-semesters-subjects">
                   <div className="manage-semesters-subjects-head">
                     <strong>Subjects</strong>
@@ -508,9 +533,37 @@ export function ManageSemestersModal({
                   <div className="stack-list compact">
                     {courses.map((course) => {
                       const tasks = getCourseTasks(state, course.id);
+                      const expanded = !collapsibleCourses || openCourseIds.includes(course.id);
+                      const courseActions = (
+                        <span className="manage-semesters-subject-actions">
+                          <button type="button" className="ghost-button small-button" onClick={() => startEditCourse(course)}>Edit</button>
+                          {courseRemoveConfirm === course.id ? (
+                            <>
+                              <button type="button" className="mini-danger" onClick={() => { onRemoveCourse(course.id); setCourseRemoveConfirm(null); }}>Confirm</button>
+                              <button type="button" className="ghost-button small-button" onClick={() => setCourseRemoveConfirm(null)}>Cancel</button>
+                            </>
+                          ) : (
+                            <button type="button" className="ghost-button small-button danger" onClick={() => setCourseRemoveConfirm(course.id)}>Remove</button>
+                          )}
+                        </span>
+                      );
                       return (
                         <div key={course.id} className="manage-semesters-subject-row">
-                          {editingCourseId === course.id ? (
+                          {collapsibleCourses ? (
+                            <div className="manage-semesters-course-head">
+                              <button
+                                type="button"
+                                className="manage-semesters-course-toggle"
+                                aria-expanded={expanded}
+                                onClick={() => setOpenCourseIds((current) => (current.includes(course.id) ? current.filter((id) => id !== course.id) : [...current, course.id]))}
+                              >
+                                <span><span className="course-chip" style={{ background: course.color }} /> {course.name}</span>
+                                <span className="section-note">{tasks.length} task{tasks.length === 1 ? "" : "s"} {expanded ? "▾" : "▸"}</span>
+                              </button>
+                              {expanded ? courseActions : null}
+                            </div>
+                          ) : null}
+                          {editingCourseId === course.id && !collapsibleCourses ? (
                             <div className="timetable-modal-course-row">
                               <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} />
                               <input type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
@@ -518,29 +571,45 @@ export function ManageSemestersModal({
                               <button type="button" onClick={saveEditCourse}>Save</button>
                               <button type="button" className="ghost-button" onClick={() => setEditingCourseId(null)}>Cancel</button>
                             </div>
-                          ) : (
+                          ) : editingCourseId === course.id ? (
+                            <div className="manage-semesters-course-edit">
+                              <label className="field">
+                                <span>Name</span>
+                                <input value={courseEditDraft.name} onChange={(event) => setCourseEditDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Course name" />
+                              </label>
+                              <label className="field">
+                                <span>Colour</span>
+                                <input className="manage-semesters-color-input" type="color" value={courseEditDraft.color} onChange={(event) => setCourseEditDraft((current) => ({ ...current, color: event.target.value }))} />
+                              </label>
+                              <label className="field">
+                                <span>Target grade</span>
+                                <select value={courseEditDraft.targetGrade} onChange={(event) => setCourseEditDraft((current) => ({ ...current, targetGrade: event.target.value }))}>
+                                  {swissGrades.map((grade) => <option key={grade} value={grade.toString()}>{grade}</option>)}
+                                </select>
+                              </label>
+                              <label className="field manage-semesters-course-edit-link">
+                                <span>Link (optional)</span>
+                                <input value={courseEditDraft.externalUrl} onChange={(event) => setCourseEditDraft((current) => ({ ...current, externalUrl: event.target.value }))} placeholder="https://..." />
+                              </label>
+                              <div className="manage-semesters-course-edit-actions">
+                                <button type="button" onClick={saveEditCourse}>Save</button>
+                                <button type="button" className="ghost-button" onClick={() => setEditingCourseId(null)}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : !collapsibleCourses ? (
                             <div className="overview-row">
                               <span><span className="course-chip" style={{ background: course.color }} /> {course.name}</span>
-                              <span className="manage-semesters-subject-actions">
-                                <button type="button" className="ghost-button small-button" onClick={() => startEditCourse(course)}>Edit</button>
-                                {courseRemoveConfirm === course.id ? (
-                                  <>
-                                    <button type="button" className="mini-danger" onClick={() => { onRemoveCourse(course.id); setCourseRemoveConfirm(null); }}>Confirm</button>
-                                    <button type="button" className="ghost-button small-button" onClick={() => setCourseRemoveConfirm(null)}>Cancel</button>
-                                  </>
-                                ) : (
-                                  <button type="button" className="ghost-button small-button danger" onClick={() => setCourseRemoveConfirm(course.id)}>Remove</button>
-                                )}
-                              </span>
+                              {courseActions}
                             </div>
-                          )}
+                          ) : null}
 
+                          {expanded && !(collapsibleCourses && editingCourseId === course.id) ? (
                           <div className="manage-semesters-units">
                             {tasks.map((task) => (
                               <div key={task.id} className="manage-semesters-unit-row">
                                 <span className="manage-semesters-unit-label">{task.title}</span>
                                 <span className="section-note">{task.completedUnits}/{task.totalUnits} {task.unitLabel}</span>
-                                <button type="button" className="ghost-button small-button" onClick={() => setSchedulingTaskId((current) => (current === task.id ? null : task.id))}>Schedule</button>
+                                {collapsibleCourses ? null : <button type="button" className="ghost-button small-button" onClick={() => setSchedulingTaskId((current) => (current === task.id ? null : task.id))}>Schedule</button>}
                                 <button type="button" className="ghost-button small-button" onClick={() => onEditTask(task)}>Edit</button>
                                 {taskRemoveConfirm === task.id ? (
                                   <>
@@ -603,12 +672,12 @@ export function ManageSemestersModal({
                                             <button type="button" className="ghost-button small-button" onClick={cancelEditEvent}>Cancel</button>
                                           </div>
                                         ) : (
-                                          <div key={event.id} className="manage-semesters-scheduled-row">
+                                          <div key={event.id} className={`manage-semesters-scheduled-row ${collapsibleCourses ? "readonly" : ""}`}>
                                             <span className="section-note">
                                               {timetableEventKindLabel[event.kind]} · {formatDate(event.date)} · {displayTime(event.time)}{event.endTime ? `–${displayTime(event.endTime)}` : ""}{event.repeatWeekly ? " · weekly" : ""}
                                             </span>
-                                            <button type="button" className="ghost-button small-button" onClick={() => startEditEvent(event)}>Edit</button>
-                                            {eventRemoveConfirm === event.id ? (
+                                            {collapsibleCourses ? null : <button type="button" className="ghost-button small-button" onClick={() => startEditEvent(event)}>Edit</button>}
+                                            {collapsibleCourses ? null : eventRemoveConfirm === event.id ? (
                                               <>
                                                 <button type="button" className="mini-danger" onClick={() => removeScheduledEvent(event.id)}>Confirm</button>
                                                 <button type="button" className="ghost-button small-button" onClick={() => setEventRemoveConfirm(null)}>Cancel</button>
@@ -625,12 +694,14 @@ export function ManageSemestersModal({
                             ))}
                             <button type="button" className="ghost-button small-button" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task</button>
                           </div>
+                          ) : null}
                         </div>
                       );
                     })}
-                    {!courses.length ? <p className="empty-copy">No subjects yet. Add one above.</p> : null}
+                    {!courses.length ? <p className="empty-copy">{collapsibleCourses ? "No courses yet. Add one above." : "No subjects yet. Add one above."}</p> : null}
                   </div>
                 </div>
+                ) : null}
               </>
             ) : (
               <p className="empty-copy">No active semesters yet. Start one above.</p>

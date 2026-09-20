@@ -22332,3 +22332,129 @@ input[type="color"] {
   outline: 2px solid var(--danger, #d64545);
   outline-offset: -1px;
 }
+
+/* Quiet mode's opaque overlay hides the app-level petals, so it hosts its own, clipped to the overlay. */
+.wabi-quiet-overlay .sakura-scatter {
+  position: absolute !important;
+}
+
+/* Wabi-Sabi sidebar: Plan submenu (current semester -> courses) */
+.wabi-plan-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 22px 10px 34px;
+}
+
+.wabi-plan-semester,
+.wabi-plan-course,
+.wabi-plan-link {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wabi-plan-semester {
+  padding: 5px 0;
+  font: 500 13px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-plan-semester:hover,
+.wabi-plan-course:hover {
+  color: var(--wabi-vermilion);
+}
+
+.wabi-plan-chevron {
+  color: var(--wabi-muted);
+  font: 400 13px var(--font-serif);
+}
+
+.wabi-plan-course {
+  justify-content: flex-start;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--wabi-course, var(--wabi-rule-soft));
+  font: 400 12.5px var(--font-serif);
+  color: var(--wabi-muted);
+}
+
+.wabi-plan-link {
+  margin-top: 4px;
+  justify-content: flex-start;
+  font: 400 11px var(--font-serif);
+  letter-spacing: 0.04em;
+  color: var(--wabi-faint);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.wabi-plan-link:hover {
+  color: var(--wabi-vermilion);
+}
+
+.wabi-plan-empty {
+  padding: 4px 0 4px 10px;
+  font: italic 400 12px var(--font-serif);
+  color: var(--wabi-faint);
+}
+
+/* Edit Semester window: collapsible course rows */
+.manage-semesters-course-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.manage-semesters-course-toggle {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0;
+  font-weight: 500;
+}
+
+.manage-semesters-course-toggle:hover {
+  color: var(--accent);
+}
+
+/* Edit Semester: course edit form (labelled fields so colour/grade/link are visible) */
+.manage-semesters-course-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+  padding: 8px 0 12px;
+}
+
+.manage-semesters-course-edit .field { flex: 1 1 160px; min-width: 0; }
+.manage-semesters-course-edit .manage-semesters-course-edit-link { flex-basis: 100%; }
+.manage-semesters-course-edit-actions { display: flex; gap: 8px; }
+
+.manage-semesters-color-input {
+  width: 56px;
+  height: 36px;
+  padding: 2px;
+  cursor: pointer;
+}
+
+/* Read-only occurrence lines in the Edit Semester window: small; editing happens in the task editor. */
+.manage-semesters-scheduled-row.readonly .section-note {
+  font-size: 11px;
+}
+
+.task-schedule-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+}

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useEffectEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties, ChangeEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -73,6 +73,7 @@ import { displayTime } from "./lib/timeInput";
 import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
+import { TaskScheduleEditor } from "./features/planner/TaskScheduleEditor";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
 import type { TimetableModalState } from "./features/planner/TimetableEventModal";
 import privacyPolicyText from "../../PRIVACY.md?raw";
@@ -3751,9 +3752,12 @@ function App() {
     const loaded = loadAppState();
     return { ...loaded, sessions: pruneSessionHistory(loaded.sessions) };
   });
-  const [theme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
+  const [savedTheme, setTheme] = useState(() => localStorage.getItem("study-tracker-theme") || "dark");
   const [palette, setPalette] = useState<ThemePalette>(loadThemePalette);
   const [appStyle, setAppStyle] = useState<AppStyle>(loadAppStyle);
+  // Sakura is light-only in Wabi-Sabi (for now); the saved preference is kept for other styles/palettes.
+  const themeLocked = appStyle === "wabi-sabi" && palette === "sakura";
+  const theme = themeLocked ? "light" : savedTheme;
   const [themePanelView, setThemePanelView] = useState<ThemePanelView>("themes");
   const [wabiQuietMode, setWabiQuietMode] = useState(false);
   const [wabiQuietTaskId, setWabiQuietTaskId] = useState<string | null>(null);
@@ -3873,6 +3877,11 @@ function App() {
   const [timetableEditMode, setTimetableEditMode] = useState(false);
   const [manageSemestersOpen, setManageSemestersOpen] = useState(false);
   const [manageSemestersInitialCourseId, setManageSemestersInitialCourseId] = useState<string | null>(null);
+  const [manageSemestersInitialSemesterId, setManageSemestersInitialSemesterId] = useState<string | null>(null);
+  const [manageSemestersMode, setManageSemestersMode] = useState<"full" | "semesters" | "courses">("full");
+  const [taskScheduleOpen, setTaskScheduleOpen] = useState(false);
+  const [wabiPlanMenuOpen, setWabiPlanMenuOpen] = useState(false);
+  const [wabiSemesterMenuOpen, setWabiSemesterMenuOpen] = useState(false);
   const [calendarEditEntryId, setCalendarEditEntryId] = useState<string | null>(null);
   const [calendarEditDraft, setCalendarEditDraft] = useState<CalendarEditDraft>({ startTime: "09:00", endTime: "10:00" });
   const [calendarDragEntryId, setCalendarDragEntryId] = useState<string | null>(null);
@@ -4178,8 +4187,8 @@ function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("study-tracker-theme", theme);
-  }, [theme]);
+    localStorage.setItem("study-tracker-theme", savedTheme);
+  }, [theme, savedTheme]);
 
   useEffect(() => {
     document.documentElement.dataset.appStyle = appStyle;
@@ -11138,6 +11147,7 @@ function App() {
 
     return (
       <div className="wabi-quiet-overlay">
+        {palette === "sakura" ? <SakuraScatter /> : null}
         <div className="wabi-quiet-inner">
           <span className="wabi-eyebrow">NOW</span>
           <div className="wabi-quiet-task-picker">
@@ -11204,6 +11214,16 @@ function App() {
     const wabiTabKanji: Record<TabKey, string> = { dashboard: "今日", planner: "計画", timer: "時計", vault: "記録", break: "休み", friends: "仲間" };
     const { goalProgress } = getFieldDashboardData();
     const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
+    // "Current" semester: the active one whose date range contains today, else the first active one.
+    const currentSemester = activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0] ?? null;
+    const currentSemesterCourses = currentSemester ? getSemesterCourses(state, currentSemester.id) : [];
+    function openSemesterManager(semesterId: string | null, courseId: string | null) {
+      // Wabi-Sabi: "Manage semesters" is semester-level only; "Edit semester" / a course is that semester's courses.
+      setManageSemestersMode(semesterId ? "courses" : "semesters");
+      setManageSemestersInitialSemesterId(semesterId);
+      setManageSemestersInitialCourseId(courseId);
+      setManageSemestersOpen(true);
+    }
     return (
       <aside className="wabi-sidebar">
         <div className="wabi-brand">
@@ -11235,7 +11255,8 @@ function App() {
             type="button"
             className="wabi-toolbar-button"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-            title="Toggle theme"
+            disabled={themeLocked}
+            title={themeLocked ? "Sakura is light-only" : "Toggle theme"}
           >
             {theme === "dark" ? (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -11278,12 +11299,16 @@ function App() {
           {primaryTabs.filter(({ id }) => visibleTabs[id] !== false).map(({ id: key }) => {
             const active = state.activeTab === key && !wabiQuietMode;
             return (
+              <Fragment key={key}>
               <button
-                key={key}
                 type="button"
                 className={`wabi-nav-item ${active ? "active" : ""}`}
                 onClick={() => {
                   setWabiQuietMode(false);
+                  if (key === "planner") {
+                    // Already on Plan: toggle the submenu. Coming from elsewhere: open it.
+                    setWabiPlanMenuOpen(active ? (open) => !open : true);
+                  }
                   setActiveTab(key);
                 }}
               >
@@ -11294,6 +11319,37 @@ function App() {
                 </span>
                 <span className="wabi-nav-sub">{key}</span>
               </button>
+              {key === "planner" && wabiPlanMenuOpen ? (
+                <div className="wabi-plan-menu">
+                  {currentSemester ? (
+                    <button type="button" className="wabi-plan-semester" aria-expanded={wabiSemesterMenuOpen} onClick={() => setWabiSemesterMenuOpen((open) => !open)}>
+                      <span>{currentSemester.name}</span>
+                      <span className="wabi-plan-chevron" aria-hidden="true">{wabiSemesterMenuOpen ? "−" : "+"}</span>
+                    </button>
+                  ) : null}
+                  {currentSemester && wabiSemesterMenuOpen ? (
+                    <>
+                      {currentSemesterCourses.map((course) => (
+                        <button
+                          key={course.id}
+                          type="button"
+                          className="wabi-plan-course"
+                          style={{ "--wabi-course": course.color } as CSSProperties}
+                          onClick={() => openSemesterManager(currentSemester.id, course.id)}
+                          title="Edit this course's tasks"
+                        >
+                          {course.name}
+                        </button>
+                      ))}
+                      {currentSemesterCourses.length === 0 ? <span className="wabi-plan-empty">No courses yet.</span> : null}
+                      <button type="button" className="wabi-plan-link" onClick={() => openSemesterManager(currentSemester.id, null)}>Edit semester</button>
+                    </>
+                  ) : (
+                    <button type="button" className="wabi-plan-link" onClick={() => openSemesterManager(null, null)}>Manage semesters</button>
+                  )}
+                </div>
+              ) : null}
+              </Fragment>
             );
           })}
         </nav>
@@ -11402,7 +11458,9 @@ function App() {
       setFieldPlannerTaskMode(null);
       setFieldPlannerTaskId(null);
       setEditingTaskId(null);
+      setTaskScheduleOpen(false);
     };
+    const wabiScheduling = appStyle === "wabi-sabi" && Boolean(editing && task && modalCourse);
     const renderTaskForm = () => {
       const draft = creating ? taskDraft : taskEditDraft;
       const setDraft = creating ? setTaskDraft : setTaskEditDraft;
@@ -11468,6 +11526,14 @@ function App() {
                 <option value="low">Low</option>
               </select>
             </label>
+            {wabiScheduling ? (
+              <div className="field">
+                <span>Schedule</span>
+                <button type="button" className="ghost-button" aria-expanded={taskScheduleOpen} onClick={() => setTaskScheduleOpen((open) => !open)}>
+                  {taskScheduleOpen ? "Hide schedule" : "Schedule"}
+                </button>
+              </div>
+            ) : null}
             {hideDueDate ? null : (
               <label className="field">
                 <span>Due date (optional)</span>
@@ -11479,6 +11545,20 @@ function App() {
               <textarea value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} placeholder="Definition of done, rubric hints, professor notes..." />
             </label>
           </div>
+
+          {wabiScheduling && task && modalCourse ? (
+            <TaskScheduleEditor
+              key={task.id}
+              state={state}
+              setState={setState}
+              setMessage={setMessage}
+              onDeleteWithUndo={performDelete}
+              task={task}
+              course={modalCourse}
+              open={taskScheduleOpen}
+              onClose={() => setTaskScheduleOpen(false)}
+            />
+          ) : null}
 
           {creating ? (
             <div className="fn-task-form-schedule">
@@ -11613,14 +11693,9 @@ function App() {
                 ))}
               </div>
               {themePanelView === "themes" ? (
-                appStyle === "wabi-sabi" ? (
-                  <div className="arena-empty">
-                    <strong>Coming soon</strong>
-                    <span>Wabi-Sabi doesn&apos;t support color themes yet. Switch back to Modern in Styles to pick a palette.</span>
-                  </div>
-                ) : (
+                (
                   <div className="theme-choice-grid">
-                    {(appStyle === "field-notebook" ? themePalettes.filter((p) => p.id === "sakura" || p.id === "default") : themePalettes.filter((p) => p.id !== "sakura")).map((p) => (
+                    {(appStyle === "field-notebook" || appStyle === "wabi-sabi" ? themePalettes.filter((p) => p.id === "sakura" || p.id === "default") : themePalettes.filter((p) => p.id !== "sakura")).map((p) => (
                       <button
                         key={p.id}
                         type="button"
@@ -11667,6 +11742,8 @@ function App() {
                     type="button"
                     className={theme === mode ? "active" : ""}
                     onClick={() => setTheme(mode)}
+                    disabled={themeLocked && mode === "dark"}
+                    title={themeLocked && mode === "dark" ? "Sakura is light-only" : undefined}
                   >
                     {mode === "light" ? "Light" : "Dark"}
                   </button>
@@ -11959,7 +12036,7 @@ function App() {
       ) : null}
 
       <div className={`shell ${showWindowTitlebar ? "with-window-titlebar" : ""}`} style={{ "--accent": state.settings.accent } as CSSProperties}>
-      {appStyle === "field-notebook" && palette === "sakura" ? <SakuraScatter /> : null}
+      {(appStyle === "field-notebook" || appStyle === "wabi-sabi") && palette === "sakura" ? <SakuraScatter /> : null}
       {appStyle === "wabi-sabi" ? renderWabiSidebar() : null}
       {appStyle === "wabi-sabi" && wabiQuietMode ? renderWabiQuietMode() : null}
       <header className="topbar">
@@ -12004,7 +12081,8 @@ function App() {
             className="theme-toggle"
             onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
             type="button"
-            title="Toggle theme"
+            disabled={themeLocked}
+            title={themeLocked ? "Sakura is light-only" : "Toggle theme"}
             style={{ display: "grid", placeItems: "center" }}
           >
             {theme === "dark" ? (
@@ -12188,13 +12266,15 @@ function App() {
           state={state}
           setState={setState}
           setMessage={setMessage}
-          onClose={() => { setManageSemestersOpen(false); setManageSemestersInitialCourseId(null); }}
+          onClose={() => { setManageSemestersOpen(false); setManageSemestersInitialCourseId(null); setManageSemestersInitialSemesterId(null); setManageSemestersMode("full"); }}
           onDeleteWithUndo={performDelete}
           onRemoveSemester={removeSemester}
           onRemoveCourse={removeCourse}
           onRemoveTask={removeTask}
           onAddTask={openAddTaskModalFor}
           onEditTask={openTaskEditor}
+          initialSemesterId={manageSemestersInitialSemesterId}
+          mode={manageSemestersMode}
           initialCourseId={manageSemestersInitialCourseId}
         />
       ) : null}
@@ -12653,7 +12733,7 @@ function App() {
                 <p className="section-note">{appStyle === "wabi-sabi" ? "Open a semester to manage its courses. Select a course to edit it." : "Click a semester or course to expand it. Click it again to collapse."}</p>
               </div>
               <div className="page-head-actions">
-                <button type="button" className="ghost-button" onClick={() => setManageSemestersOpen(true)}>Manage Semesters</button>
+                <button type="button" className="ghost-button" onClick={() => { setManageSemestersMode(appStyle === "wabi-sabi" ? "semesters" : "full"); setManageSemestersOpen(true); }}>Manage Semesters</button>
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
                   {showSemesterForm ? "Close" : "+ Add semester"}
                 </button>
