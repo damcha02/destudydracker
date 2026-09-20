@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildDailyTimeline,
   computeOverlapLayout,
+  countEventOccurrenceDates,
+  expandDailyTodoDates,
   expandTimetableEvents,
   getSemesterWeekNumber,
   isHoliday,
@@ -10,7 +12,7 @@ import {
   shouldAutoTransitionToExamPrep,
   splitRecurringEventAt,
 } from "./plannerSchedule";
-import type { Holiday, Semester, TimetableEvent } from "../types";
+import type { DailyTodo, Holiday, Semester, TimetableEvent } from "../types";
 
 function semester(overrides: Partial<Semester>): Semester {
   return {
@@ -43,6 +45,23 @@ function timetableEvent(overrides: Partial<TimetableEvent>): TimetableEvent {
     url: null,
     completedOccurrences: [],
     createdAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function dailyTodo(overrides: Partial<DailyTodo>): DailyTodo {
+  return {
+    id: "todo",
+    date: "2026-09-07",
+    time: null,
+    endTime: null,
+    title: "Buy pens",
+    notes: "",
+    completed: false,
+    completedAt: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    repeatWeekly: false,
+    completedOccurrences: [],
     ...overrides,
   };
 }
@@ -152,6 +171,51 @@ describe("expandTimetableEvents", () => {
   });
 });
 
+describe("countEventOccurrenceDates", () => {
+  it("counts one weekly-recurring event across a 14-week semester as 14 occurrences, not 1", () => {
+    const event = timetableEvent({ date: "2026-09-07" });
+    const dates = countEventOccurrenceDates(event, [], "semester", "2026-09-07", "2026-12-13");
+    expect(dates).toHaveLength(14);
+  });
+
+  it("is independent of semester phase - unlike expandTimetableEvents it doesn't need a Semester object at all", () => {
+    const event = timetableEvent({ date: "2026-09-07" });
+    const dates = countEventOccurrenceDates(event, [], "semester", "2026-09-07", "2026-09-28");
+    expect(dates).toEqual(["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28"]);
+  });
+
+  it("excludes a holiday week", () => {
+    const event = timetableEvent({ date: "2026-09-07" });
+    const dates = countEventOccurrenceDates(event, [holiday({ startDate: "2026-09-14", endDate: "2026-09-14" })], "semester", "2026-09-07", "2026-09-28");
+    expect(dates).toEqual(["2026-09-07", "2026-09-21", "2026-09-28"]);
+  });
+
+  it("counts a non-repeating event as at most one occurrence, only if its date falls in range", () => {
+    const inRange = timetableEvent({ repeatWeekly: false, date: "2026-09-10" });
+    const outOfRange = timetableEvent({ repeatWeekly: false, date: "2026-10-10" });
+    expect(countEventOccurrenceDates(inRange, [], "semester", "2026-09-07", "2026-09-28")).toEqual(["2026-09-10"]);
+    expect(countEventOccurrenceDates(outOfRange, [], "semester", "2026-09-07", "2026-09-28")).toEqual([]);
+  });
+});
+
+describe("expandDailyTodoDates", () => {
+  it("returns just its own date for a non-repeating to-do, when in range", () => {
+    const todo = dailyTodo({ date: "2026-09-10" });
+    expect(expandDailyTodoDates(todo, "2026-09-07", "2026-09-28")).toEqual(["2026-09-10"]);
+    expect(expandDailyTodoDates(todo, "2026-09-11", "2026-09-28")).toEqual([]);
+  });
+
+  it("projects a repeating to-do onto every matching weekday from its anchor date onward", () => {
+    const todo = dailyTodo({ date: "2026-09-07", repeatWeekly: true });
+    expect(expandDailyTodoDates(todo, "2026-09-01", "2026-09-28")).toEqual(["2026-09-07", "2026-09-14", "2026-09-21", "2026-09-28"]);
+  });
+
+  it("never projects a repeating to-do before its own anchor date", () => {
+    const todo = dailyTodo({ date: "2026-09-14", repeatWeekly: true });
+    expect(expandDailyTodoDates(todo, "2026-09-01", "2026-09-28")).toEqual(["2026-09-14", "2026-09-21", "2026-09-28"]);
+  });
+});
+
 describe("moveSingleOccurrence", () => {
   it("writes an override entry keyed by the original occurrence date", () => {
     const event = timetableEvent({});
@@ -231,8 +295,7 @@ describe("buildDailyTimeline", () => {
       ],
       exams: [{ id: "exam", semesterId: "semester", courseId: "course", title: "Midterm", examDate: "2026-09-07", weight: 30, preparedness: 0, location: "" }],
       calendarEntries: [],
-      dailyTodos: [{ id: "todo", date: "2026-09-07", time: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
-      studyUnits: [],
+      dailyTodos: [dailyTodo({})],
     });
 
     expect(rows.map((row) => row.kind)).toEqual(["occurrence", "sheet-release", "exam", "todo"]);
@@ -245,9 +308,20 @@ describe("buildDailyTimeline", () => {
       exams: [],
       calendarEntries: [],
       dailyTodos: [],
-      studyUnits: [],
     });
     expect(rows[0].completed).toBe(true);
+  });
+
+  it("projects a repeating to-do onto a later matching weekday, with its own per-date completion", () => {
+    const todo = dailyTodo({ date: "2026-09-07", repeatWeekly: true, completedOccurrences: ["2026-09-14"] });
+    const rowsOnAnchor = buildDailyTimeline("2026-09-07", { eventOccurrences: [], exams: [], calendarEntries: [], dailyTodos: [todo] });
+    const rowsOnRepeat = buildDailyTimeline("2026-09-14", { eventOccurrences: [], exams: [], calendarEntries: [], dailyTodos: [todo] });
+    const rowsOffWeekday = buildDailyTimeline("2026-09-08", { eventOccurrences: [], exams: [], calendarEntries: [], dailyTodos: [todo] });
+    expect(rowsOnAnchor).toHaveLength(1);
+    expect(rowsOnAnchor[0].completed).toBe(false);
+    expect(rowsOnRepeat).toHaveLength(1);
+    expect(rowsOnRepeat[0].completed).toBe(true);
+    expect(rowsOffWeekday).toHaveLength(0);
   });
 });
 

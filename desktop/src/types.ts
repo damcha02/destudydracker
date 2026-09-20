@@ -109,24 +109,17 @@ export interface DailyTodo {
   id: string;
   date: string;
   time: string | null;
+  endTime: string | null;
   title: string;
   notes: string;
   completed: boolean;
   completedAt: string | null;
   createdAt: string;
-}
-
-export interface StudyUnit {
-  id: string;
-  semesterId: string;
-  courseId: string | null;
-  date: string;
-  title: string;
-  startTime: string | null;
-  endTime: string | null;
-  notes: string;
-  completed: boolean;
-  createdAt: string;
+  // A weekly-repeating to-do keeps completed/completedAt for its own (anchor) date, but every
+  // projected occurrence's completion is tracked separately here, by date - the same
+  // completedOccurrences pattern TimetableEvent already uses for recurring items.
+  repeatWeekly: boolean;
+  completedOccurrences: string[];
 }
 
 export interface CalendarEntry {
@@ -482,7 +475,6 @@ export interface AppState {
   timetableEvents: TimetableEvent[];
   holidays: Holiday[];
   dailyTodos: DailyTodo[];
-  studyUnits: StudyUnit[];
   sessions: StudySession[];
   lifetimeStudyMinutes: number;
   lifetimeStudySessions: number;

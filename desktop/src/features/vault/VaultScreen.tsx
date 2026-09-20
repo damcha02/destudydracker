@@ -270,6 +270,9 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
     () => new Map(state.semesters.map((semester) => [semester.id, semester])),
     [state.semesters],
   );
+  // Archived semesters' subjects are hidden from every Vault selector below - references and
+  // summaries are only ever browsed/edited for currently-active semesters.
+  const activeSemesters = useMemo(() => state.semesters.filter((semester) => !semester.archived), [state.semesters]);
   const courseLookup = useMemo(
     () => new Map(state.courses.map((course) => [course.id, course])),
     [state.courses],
@@ -294,16 +297,16 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
   const openVaultNoteEvent = useEffectEvent(openVaultNote);
 
   useEffect(() => {
-    const firstSemester = state.semesters[0]?.id ?? "";
+    const firstSemester = activeSemesters[0]?.id ?? "";
     if (!referenceSemesterId && firstSemester) {
       setReferenceSemesterId(firstSemester);
       return;
     }
-    if (referenceSemesterId && !state.semesters.some((semester) => semester.id === referenceSemesterId)) {
+    if (referenceSemesterId && !activeSemesters.some((semester) => semester.id === referenceSemesterId)) {
       setReferenceSemesterId(firstSemester);
       setReferenceCourseId("");
     }
-  }, [referenceSemesterId, state.semesters]);
+  }, [referenceSemesterId, activeSemesters]);
 
   useEffect(() => {
     const firstCourse = referenceCourses[0]?.id ?? "";
@@ -330,16 +333,16 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
   }, [selectedReferenceCourse, selectedReferenceSemester, state.settings.vaultPath, vaultSpace]);
 
   useEffect(() => {
-    const firstSemester = state.semesters[0]?.id ?? "";
+    const firstSemester = activeSemesters[0]?.id ?? "";
     if (!summarySemesterId && firstSemester) {
       setSummarySemesterId(firstSemester);
       return;
     }
-    if (summarySemesterId && !state.semesters.some((semester) => semester.id === summarySemesterId)) {
+    if (summarySemesterId && !activeSemesters.some((semester) => semester.id === summarySemesterId)) {
       setSummarySemesterId(firstSemester);
       setSummaryCourseId("");
     }
-  }, [state.semesters, summarySemesterId]);
+  }, [activeSemesters, summarySemesterId]);
 
   useEffect(() => {
     const firstCourse = summaryCourses[0]?.id ?? "";
@@ -749,7 +752,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
     const selectedCourseId = space === "references" ? referenceCourseId : summaryCourseId;
     return (
       <aside className="wabi-vault-shelf" aria-label={`${space} by semester`}>
-        {state.semesters.map((semester) => {
+        {activeSemesters.map((semester) => {
           const courses = getSemesterCourses(state, semester.id);
           const expanded = expandedSemesterIds.includes(semester.id);
           return (
@@ -829,7 +832,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
               ) : (
                 <div className="fn-rail-section fn-vault-tree">
                   <div className="fn-rail-label">Course drawers</div>
-                  {state.semesters.map((semester) => {
+                  {activeSemesters.map((semester) => {
                     const courses = getSemesterCourses(state, semester.id);
                     const activeSemester = expandedSemesterIds.includes(semester.id);
                     return (
@@ -1169,7 +1172,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                             setReferenceCourseId("");
                           }}
                         >
-                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                          {activeSemesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
                         </select>
                       </label>
                       <div className="vault-course-chips">
@@ -1259,7 +1262,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                             setSummaryCourseId("");
                           }}
                         >
-                          {state.semesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
+                          {activeSemesters.map((semester) => <option key={semester.id} value={semester.id}>{semester.name}</option>)}
                         </select>
                       </label>
                       <div className="vault-course-chips">
