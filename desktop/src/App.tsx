@@ -70,6 +70,7 @@ import type { UndoPatch } from "./lib/plannerActions";
 import { TimeSpanFields } from "./features/planner/TimeSpanFields";
 import { TimeField } from "./features/planner/TimeField";
 import { displayTime } from "./lib/timeInput";
+import { formatSwissGrade, swissGrades } from "./lib/grades";
 import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
@@ -480,7 +481,6 @@ const stretchIdeas = [
   "Take 3 deep belly breaths, exhale slowly",
 ];
 
-const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 const TOTAL_WORKLOAD_ID = "__total_workload__";
 const DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-layout";
 const CUSTOM_DASHBOARD_LAYOUT_KEY = "study-tracker-dashboard-custom-layout";
@@ -2869,14 +2869,6 @@ function formatClock(totalSeconds: number) {
   const remaining = String(seconds % 60).padStart(2, "0");
   return `${minutes}:${remaining}`;
 }
-
-function formatSwissGrade(grade: number) {
-  const fixed = grade.toFixed(2);
-  if (fixed.endsWith("00")) return fixed.slice(0, -1);
-  if (fixed.endsWith("0")) return fixed.slice(0, -1);
-  return fixed;
-}
-
 
 function toggleId(list: string[], id: string) {
   return list.includes(id) ? list.filter((item) => item !== id) : [...list, id];
