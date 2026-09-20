@@ -8,11 +8,13 @@ const BLOSSOMS = [
 type ScatterDot = {
   src: string;
   left: number;
-  top: number;
   size: number;
   opacity: number;
-  rotate: number;
-  blur: number;
+  drift: number;
+  spin: number;
+  fallDuration: number;
+  delay: number;
+  swayDuration: number;
 };
 
 function mulberry32(seed: number) {
@@ -28,16 +30,18 @@ export function SakuraScatter() {
   const dots = useMemo<ScatterDot[]>(() => {
     const rnd = mulberry32(0x534b5552);
     const out: ScatterDot[] = [];
-    const count = 10;
+    const count = 22;
     for (let i = 0; i < count; i += 1) {
       out.push({
         src: BLOSSOMS[i % BLOSSOMS.length],
-        left: 4 + rnd() * 88,
-        top: 6 + rnd() * 82,
-        size: 18 + rnd() * 26,
-        opacity: 0.09 + rnd() * 0.07,
-        rotate: rnd() * 360,
-        blur: rnd() > 0.6 ? 0.6 : 0,
+        left: rnd() * 100,
+        size: 16 + rnd() * 20,
+        opacity: 0.22 + rnd() * 0.2,
+        drift: (rnd() - 0.5) * 160,
+        spin: (rnd() > 0.5 ? 1 : -1) * (180 + rnd() * 360),
+        fallDuration: 14 + rnd() * 14,
+        delay: -rnd() * 28,
+        swayDuration: 3 + rnd() * 3,
       });
     }
     return out;
@@ -51,28 +55,34 @@ export function SakuraScatter() {
         position: "fixed",
         inset: 0,
         pointerEvents: "none",
-        zIndex: 0,
+        zIndex: 40,
         overflow: "hidden",
       }}
     >
       {dots.map((d, idx) => (
-        <img
+        <div
           key={idx}
-          src={d.src}
-          alt=""
-          draggable={false}
+          className="sakura-petal"
           style={{
-            position: "absolute",
             left: `${d.left}%`,
-            top: `${d.top}%`,
-            width: `${d.size}px`,
-            height: `${d.size}px`,
-            opacity: d.opacity,
-            transform: `rotate(${d.rotate}deg)`,
-            filter: d.blur ? `blur(${d.blur}px)` : undefined,
-            objectFit: "contain",
+            animationDuration: `${d.fallDuration}s`,
+            animationDelay: `${d.delay}s`,
+            ["--petal-drift" as string]: `${d.drift}px`,
+            ["--petal-spin" as string]: `${d.spin}deg`,
+            ["--petal-opacity" as string]: d.opacity,
           }}
-        />
+        >
+          <img
+            src={d.src}
+            alt=""
+            draggable={false}
+            style={{
+              width: `${d.size}px`,
+              height: `${d.size}px`,
+              animationDuration: `${d.swayDuration}s`,
+            }}
+          />
+        </div>
       ))}
     </div>
   );

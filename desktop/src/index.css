@@ -429,7 +429,8 @@
 }
 
 /* ---------- SAKURA — whitish-pink notebook, fallen petals ---------- */
-[data-app-style="field-notebook"][data-palette="sakura"] {
+:root[data-app-style="field-notebook"][data-palette="sakura"],
+:root[data-app-style="field-notebook"][data-palette="sakura"][data-theme="dark"] {
   --bg: #f7eeed;
   --bg-top: #fae6e7;
   --bg-grad-1: #f7eeed;
@@ -1118,4 +1119,36 @@ p {
   --wabi-sage: #7fa077;
   --wabi-sage-deep: #97b78f;
   --wabi-vermilion: #d97a5e;
+}
+
+/* Falling sakura petals: outer element falls + drifts, inner image sways. */
+.sakura-petal {
+  position: absolute;
+  top: -60px;
+  opacity: 0;
+  animation: sakura-fall linear infinite;
+  will-change: transform, opacity;
+}
+
+.sakura-petal img {
+  display: block;
+  object-fit: contain;
+  animation: sakura-sway ease-in-out infinite alternate;
+}
+
+@keyframes sakura-fall {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 0; }
+  8% { opacity: var(--petal-opacity, 0.3); }
+  92% { opacity: var(--petal-opacity, 0.3); }
+  100% { transform: translate3d(var(--petal-drift, 40px), calc(100vh + 80px), 0) rotate(var(--petal-spin, 360deg)); opacity: 0; }
+}
+
+@keyframes sakura-sway {
+  from { transform: translateX(-14px) rotate(-18deg); }
+  to { transform: translateX(14px) rotate(18deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sakura-petal { animation: none; opacity: var(--petal-opacity, 0.25); top: 20%; }
+  .sakura-petal img { animation: none; }
 }
