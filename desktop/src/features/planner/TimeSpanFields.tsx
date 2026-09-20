@@ -12,8 +12,10 @@ function formatDuration(minutes: number) {
 }
 
 /** Start time + duration instead of a free-form end time: the block always runs exactly start -> start + duration. */
-export function TimeSpanFields({ label, time, duration, onTimeChange, onDurationChange }: {
+export function TimeSpanFields({ label, time, duration, onTimeChange, onDurationChange, hideDuration }: {
   label?: string;
+  /** Show only the start time (the caller keeps a fixed default duration). */
+  hideDuration?: boolean;
   time: string;
   duration: number;
   onTimeChange: (time: string) => void;
@@ -28,13 +30,13 @@ export function TimeSpanFields({ label, time, duration, onTimeChange, onDuration
         <span>Start</span>
         <TimeField value={time} onChange={onTimeChange} ariaLabel="Start time" />
       </label>
-      <label className="manage-semesters-timespan-field">
+      {hideDuration ? null : <><label className="manage-semesters-timespan-field">
         <span>Duration</span>
         <select value={duration} onChange={(event) => onDurationChange(Number(event.target.value))}>
           {options.map((minutes) => <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>)}
         </select>
       </label>
-      <span className="section-note manage-semesters-timespan-end">{time && end ? `ends ${displayTime(end)}` : time ? "runs past midnight" : ""}</span>
+      <span className="section-note manage-semesters-timespan-end">{time && end ? `ends ${displayTime(end)}` : time ? "runs past midnight" : ""}</span></>}
     </span>
   );
 }

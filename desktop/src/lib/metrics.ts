@@ -193,7 +193,7 @@ function getDueSoonTasks(tasks: Task[]) {
   });
 }
 
-function getExamPressure(exams: Exam[]) {
+export function getExamPressure(exams: Exam[]) {
   return exams.reduce((penalty, exam) => {
     const dueIn = daysUntil(exam.examDate);
     if (dueIn < 0 || dueIn > 10) return penalty;

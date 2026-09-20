@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import type { Dispatch, FormEvent, SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dispatch, FormEvent, ReactNode, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { formatDate, getCourseTasks, getSemesterCourses } from "../../lib/metrics";
 import { durationBetween, endTimeFor, isValidIsoDate, getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
@@ -15,6 +15,26 @@ const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
 };
 
 type View = "main" | "wizard" | "archive";
+
+/** A small "more actions" menu (three dots); closes on outside click, Escape, or choosing an item. */
+function RowMenu({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (event: MouseEvent) => { if (!ref.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
+  }, [open]);
+  return (
+    <div className="msm-menu" ref={ref}>
+      <button type="button" className="msm-icon-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((current) => !current)}>&#8943;</button>
+      {open ? <div className="msm-menu-list" role="menu" onClick={() => setOpen(false)}>{children}</div> : null}
+    </div>
+  );
+}
 
 const swissGrades = [4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0];
 
@@ -534,7 +554,12 @@ export function WabiManageSemestersModal({
                     {courses.map((course) => {
                       const tasks = getCourseTasks(state, course.id);
                       const expanded = !collapsibleCourses || openCourseIds.includes(course.id);
-                      const courseActions = (
+                      const courseActions = collapsibleCourses ? (
+                        <RowMenu label={`${course.name} actions`}>
+                          <button type="button" role="menuitem" onClick={() => startEditCourse(course)}>Edit course</button>
+                          <button type="button" role="menuitem" className="danger" onClick={() => setCourseRemoveConfirm(course.id)}>Remove course</button>
+                        </RowMenu>
+                      ) : (
                         <span className="manage-semesters-subject-actions">
                           <button type="button" className="ghost-button small-button" onClick={() => startEditCourse(course)}>Edit</button>
                           {courseRemoveConfirm === course.id ? (
@@ -561,6 +586,13 @@ export function WabiManageSemestersModal({
                                 <span className="section-note">{tasks.length} task{tasks.length === 1 ? "" : "s"} {expanded ? "▾" : "▸"}</span>
                               </button>
                               {expanded ? courseActions : null}
+                            </div>
+                          ) : null}
+                          {collapsibleCourses && courseRemoveConfirm === course.id ? (
+                            <div className="msm-confirm">
+                              <span>Remove "{course.name}" and its tasks?</span>
+                              <button type="button" className="mini-danger" onClick={() => { onRemoveCourse(course.id); setCourseRemoveConfirm(null); }}>Remove</button>
+                              <button type="button" className="ghost-button small-button" onClick={() => setCourseRemoveConfirm(null)}>Cancel</button>
                             </div>
                           ) : null}
                           {editingCourseId === course.id && !collapsibleCourses ? (
@@ -609,7 +641,21 @@ export function WabiManageSemestersModal({
                               <div key={task.id} className="manage-semesters-unit-row">
                                 <span className="manage-semesters-unit-label">{task.title}</span>
                                 <span className="section-note">{task.completedUnits}/{task.totalUnits} {task.unitLabel}</span>
-                                {collapsibleCourses ? null : <button type="button" className="ghost-button small-button" onClick={() => setSchedulingTaskId((current) => (current === task.id ? null : task.id))}>Schedule</button>}
+                                {collapsibleCourses ? (
+                                  taskRemoveConfirm === task.id ? (
+                                    <>
+                                      <button type="button" className="mini-danger" onClick={() => { onRemoveTask(task.id); setTaskRemoveConfirm(null); }}>Delete</button>
+                                      <button type="button" className="ghost-button small-button" onClick={() => setTaskRemoveConfirm(null)}>Cancel</button>
+                                    </>
+                                  ) : (
+                                    <RowMenu label={`${task.title} actions`}>
+                                      <button type="button" role="menuitem" onClick={() => onEditTask(task)}>Edit task</button>
+                                      <button type="button" role="menuitem" className="danger" onClick={() => setTaskRemoveConfirm(task.id)}>Delete task</button>
+                                    </RowMenu>
+                                  )
+                                ) : (
+                                  <>
+                                <button type="button" className="ghost-button small-button" onClick={() => setSchedulingTaskId((current) => (current === task.id ? null : task.id))}>Schedule</button>
                                 <button type="button" className="ghost-button small-button" onClick={() => onEditTask(task)}>Edit</button>
                                 {taskRemoveConfirm === task.id ? (
                                   <>
@@ -618,6 +664,8 @@ export function WabiManageSemestersModal({
                                   </>
                                 ) : (
                                   <button type="button" className="ghost-button small-button danger" onClick={() => setTaskRemoveConfirm(task.id)}>Delete</button>
+                                )}
+                                  </>
                                 )}
                                 {schedulingTaskId === task.id && task.subtype === "Sheet" ? (
                                   <div className="manage-semesters-schedule-row manage-semesters-sheet-schedule">

@@ -76,6 +76,9 @@ import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule"
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { WabiManageSemestersModal } from "./features/planner/WabiManageSemestersModal";
 import { TaskScheduleEditor } from "./features/planner/TaskScheduleEditor";
+import { RowMenu } from "./components/RowMenu";
+import { getScheduleHealth, withScheduleHealth } from "./lib/scheduleHealth";
+import { calculateScheduledDailyWork, calculateScheduledWorkload, getScheduledUnits } from "./lib/scheduleWorkload";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
 import type { TimetableModalState } from "./features/planner/TimetableEventModal";
 import privacyPolicyText from "../../PRIVACY.md?raw";
@@ -2655,7 +2658,7 @@ const themePalettes: { id: ThemePalette; name: string; desc: string; swatch: str
 const appStyles: { id: AppStyle; name: string; desc: string; swatch: string }[] = [
   { id: "modern", name: "Modern", desc: "Current rounded study dashboard with palette themes.", swatch: "linear-gradient(135deg, #8fb4ff, #98c379)" },
   { id: "field-notebook", name: "Field Notebook", desc: "Paper, ink, course tabs, ruled ledgers, and study-circle social styling.", swatch: "linear-gradient(135deg, #fbf8f0 0 45%, #23211d 45% 55%, #9c5a34 55%)" },
-  { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "Quiet paper and ink: one thing at a time, a sidebar of kanji, and a circle with no ranks unless you want them.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
+  { id: "wabi-sabi", name: "Wabi-Sabi 侘寂", desc: "The beauty of what is humble, impermanent and unfinished - a cracked bowl, moss on stone, the quiet of a single breath.", swatch: "linear-gradient(135deg, #e9e5d8 0 45%, #4f6b4a 45% 80%, #b0472e 80%)" },
 ];
 
 function isAppStyle(value: string | null): value is AppStyle {
@@ -3873,12 +3876,26 @@ function App() {
   const [manageSemestersInitialSemesterId, setManageSemestersInitialSemesterId] = useState<string | null>(null);
   const [manageSemestersMode, setManageSemestersMode] = useState<"full" | "semesters" | "courses">("full");
   const [taskScheduleOpen, setTaskScheduleOpen] = useState(false);
+  // Wabi-Sabi calendar: the small "mark done" window for a scheduled timetable item.
+  const [calendarItemPopup, setCalendarItemPopup] = useState<{ eventId: string; date: string } | null>(null);
   function closeManageSemesters() {
     setManageSemestersOpen(false);
     setManageSemestersInitialCourseId(null);
     setManageSemestersInitialSemesterId(null);
     setManageSemestersMode("full");
   }
+  const [wabiNotesMenuOpen, setWabiNotesMenuOpen] = useState(false);
+  // Wabi-Sabi dashboard "Something else": pick what to work on from today or the coming days.
+  const [wabiPickerOpen, setWabiPickerOpen] = useState(false);
+  const [wabiOneThingPick, setWabiOneThingPick] = useState<{ refId: string; date: string } | null>(null);
+  const [wabiCircleMenuOpen, setWabiCircleMenuOpen] = useState(false);
+  const [wabiRestMenuOpen, setWabiRestMenuOpen] = useState(false);
+  const [wabiVaultSpace, setWabiVaultSpace] = useState<"daily" | "references" | "summaries">("daily");
+  const [wabiTimerMenuOpen, setWabiTimerMenuOpen] = useState(false);
+  const [wabiTimerSemesterOpen, setWabiTimerSemesterOpen] = useState(false);
+  const [wabiTimerOpenCourseIds, setWabiTimerOpenCourseIds] = useState<string[]>([]);
+  const [sessionLogsOpen, setSessionLogsOpen] = useState(false);
+  const [sessionNoteEdit, setSessionNoteEdit] = useState<{ id: string; draft: string } | null>(null);
   const [wabiPlanMenuOpen, setWabiPlanMenuOpen] = useState(false);
   const [wabiSemesterMenuOpen, setWabiSemesterMenuOpen] = useState(false);
   const [calendarEditEntryId, setCalendarEditEntryId] = useState<string | null>(null);
@@ -4732,23 +4749,63 @@ function App() {
   // would silently freeze past midnight until courses/tasks/exams changed for some other
   // reason. Mirrors the same pattern already used by weeklyActivity/todayMinutes/streakDays/
   // focusMomentum below.
+  // Health is measured against the calendar (what should be done by now vs done) wherever something
+  // is scheduled; the completion-based figure is only the fallback.
   const courseHealthByCourseId = useMemo(
-    () => getCourseHealthMap(state.courses, courseTasksByCourseId, state.exams),
+    () => {
+      const base = getCourseHealthMap(state.courses, courseTasksByCourseId, state.exams);
+      for (const course of state.courses) {
+        const semester = state.semesters.find((item) => item.id === course.semesterId);
+        const record = base.get(course.id);
+        if (!semester || !record) continue;
+        const schedule = getScheduleHealth({
+          events: state.timetableEvents.filter((event) => event.courseId === course.id),
+          holidays: state.holidays,
+          semesters: [semester],
+          exams: state.exams.filter((exam) => exam.courseId === course.id),
+          today: calendarToday,
+        });
+        base.set(course.id, withScheduleHealth(record, schedule));
+      }
+      return base;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
-    [state.courses, courseTasksByCourseId, state.exams, calendarToday],
+    [state.courses, state.semesters, state.timetableEvents, state.holidays, courseTasksByCourseId, state.exams, calendarToday],
   );
   const semesterHealthBySemesterId = useMemo(
-    () => getSemesterHealthMap(state.semesters, semesterTasksBySemesterId, state.exams),
+    () => {
+      const base = getSemesterHealthMap(state.semesters, semesterTasksBySemesterId, state.exams);
+      for (const semester of state.semesters) {
+        const record = base.get(semester.id);
+        if (!record) continue;
+        const schedule = getScheduleHealth({
+          events: state.timetableEvents.filter((event) => event.semesterId === semester.id),
+          holidays: state.holidays,
+          semesters: [semester],
+          exams: state.exams.filter((exam) => exam.semesterId === semester.id),
+          today: calendarToday,
+        });
+        base.set(semester.id, withScheduleHealth(record, schedule));
+      }
+      return base;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- calendarToday forces day-boundary invalidation, see comment above
-    [state.semesters, semesterTasksBySemesterId, state.exams, calendarToday],
+    [state.semesters, state.timetableEvents, state.holidays, semesterTasksBySemesterId, state.exams, calendarToday],
   );
   const selectedTask = useMemo(
     () => state.tasks.find((task) => task.id === selectedTaskId) ?? null,
     [selectedTaskId, state.tasks],
   );
+  // Workload is read from the calendar (each scheduled lecture / session / sheet due date), since
+  // those tasks carry no due date of their own.
+  const scheduledUnits = useMemo(
+    () => getScheduledUnits(state.timetableEvents, state.holidays, activeSemesters, calendarToday),
+    [state.timetableEvents, state.holidays, activeSemesters, calendarToday],
+  );
+  const taskDailyWork = (task: Task) => calculateScheduledDailyWork(task, scheduledUnits.get(task.id), calendarToday) ?? calculateDailyWork(task);
   const totalWorkload = useMemo(() => {
-    return calculateAggregateWorkload(activeTasks);
-  }, [activeTasks]);
+    return calculateScheduledWorkload(activeTasks, scheduledUnits, calendarToday);
+  }, [activeTasks, scheduledUnits, calendarToday]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
   const fieldPlannerWorkload = useMemo(() => {
     if (fieldPlannerWorkloadId === TOTAL_WORKLOAD_ID) return { ...totalWorkload, label: "Total workload" };
@@ -4763,18 +4820,27 @@ function App() {
       };
     }
 
-    return { ...calculateAggregateWorkload(courseTasks), label: course.name };
-  }, [fieldPlannerWorkloadId, activeCourses, activeTasks, totalWorkload]);
+    return { ...calculateScheduledWorkload(courseTasks, scheduledUnits, calendarToday), label: course.name };
+  }, [fieldPlannerWorkloadId, activeCourses, activeTasks, totalWorkload, scheduledUnits, calendarToday]);
 
   const weeklyActivity = useMemo(() => getWeeklyActivity(state.sessions, new Date(`${calendarToday}T00:00:00`)), [state.sessions, calendarToday]);
   const upcomingExams = useMemo(() => getUpcomingExams({ exams: state.exams } as AppState), [state.exams]);
-  const overallHealth = useMemo(() => getOverallHealth({ tasks: activeTasks, exams: activeExams } as AppState), [activeExams, activeTasks]);
+  // The overall score is measured against the calendar (what should be done by now vs done), falling
+  // back to the completion-based score while nothing is scheduled.
+  const wabiScheduleHealth = useMemo(
+    () => getScheduleHealth({ events: state.timetableEvents, holidays: state.holidays, semesters: activeSemesters, exams: activeExams, today: calendarToday }),
+    [state.timetableEvents, state.holidays, activeSemesters, activeExams, calendarToday],
+  );
+  const overallHealth = useMemo(
+    () => wabiScheduleHealth?.score ?? getOverallHealth({ tasks: activeTasks, exams: activeExams } as AppState),
+    [wabiScheduleHealth, activeExams, activeTasks],
+  );
   const healthLabel = overallHealth >= 75 ? "Strong" : overallHealth >= 55 ? "Steady" : overallHealth >= 35 ? "Watch" : "Critical";
   const healthState = overallHealth >= 75 ? "strong" : overallHealth >= 55 ? "steady" : overallHealth >= 35 ? "watch" : "critical";
   const scoreColor = overallHealth >= 75 ? "var(--ok)" : overallHealth >= 55 ? "var(--steady)" : overallHealth >= 35 ? "var(--watch)" : "var(--critical)";
   const greetingName = state.settings.userName.trim();
   const dashboardGreeting = `${getTimeGreeting()}${greetingName ? `, ${greetingName}` : ""}`;
-  const selectedTaskCalc = selectedTask ? calculateDailyWork(selectedTask) : null;
+  const selectedTaskCalc = selectedTask ? taskDailyWork(selectedTask) : null;
   const selectedTaskProgress = isTotalWorkloadSelected ? totalWorkload.progress : selectedTask ? getTaskProgress(selectedTask) : 0;
   const weeklyTotalMinutes = weeklyActivity.reduce((sum, entry) => sum + entry.minutes, 0);
   const gardenStage = Math.max(0, [0, 30, 90, 210, 420, 720].filter((threshold) => weeklyTotalMinutes >= threshold).length - 1);
@@ -5206,13 +5272,15 @@ function App() {
     const rangeEnd = calendarDays[calendarDays.length - 1].iso;
     for (const semester of activeSemesters) {
       for (const occurrence of expandTimetableEvents(state.timetableEvents, state.holidays, semester, rangeStart, rangeEnd)) {
+        // Wabi-Sabi shows a sheet once, on its due date - not also on the day it is released.
+        if (appStyle === "wabi-sabi" && occurrence.event.kind === "sheet-release") continue;
         const list = map.get(occurrence.date) ?? [];
         list.push(occurrence);
         map.set(occurrence.date, list);
       }
     }
     return map;
-  }, [calendarDays, activeSemesters, state.timetableEvents, state.holidays]);
+  }, [calendarDays, activeSemesters, state.timetableEvents, state.holidays, appStyle]);
   const todayCalendarEntries = useMemo(
     () =>
       state.calendarEntries
@@ -7580,18 +7648,40 @@ function App() {
     let scheduled = false;
     const pastMidnight = "That duration runs past midnight - shorten it or start earlier.";
     if (task.subtype === "Sheet") {
+      // Wabi-Sabi: times are optional - a sheet with only dates is scheduled for those days, untimed.
+      const timesOptional = appStyle === "wabi-sabi";
       const releaseEnd = endTimeFor(taskDraft.scheduleReleaseTime, taskDraft.scheduleReleaseDuration);
       const dueEnd = endTimeFor(taskDraft.scheduleDueTime, taskDraft.scheduleDueDuration);
       const anyFilled = taskDraft.scheduleReleaseDate || taskDraft.scheduleReleaseTime || taskDraft.scheduleDueDate || taskDraft.scheduleDueTime;
-      if (anyFilled && !(taskDraft.scheduleReleaseDate && taskDraft.scheduleReleaseTime && taskDraft.scheduleDueDate && taskDraft.scheduleDueTime)) {
-        setMessage("Fill in a date and time for both release and due to schedule this sheet, or clear them.");
+      const allFilled = timesOptional
+        ? Boolean(taskDraft.scheduleReleaseDate && taskDraft.scheduleDueDate)
+        : Boolean(taskDraft.scheduleReleaseDate && taskDraft.scheduleReleaseTime && taskDraft.scheduleDueDate && taskDraft.scheduleDueTime);
+      if (anyFilled && !allFilled) {
+        setMessage(timesOptional ? "Pick both a release date and a due date to schedule this sheet, or clear them." : "Fill in a date and time for both release and due to schedule this sheet, or clear them.");
         return;
       }
-      if (anyFilled && (!releaseEnd || !dueEnd)) {
+      if (anyFilled && !timesOptional && (!releaseEnd || !dueEnd)) {
         setMessage(pastMidnight);
         return;
       }
-      if (releaseEnd && dueEnd) {
+      if (timesOptional && anyFilled) {
+        const createdAt = new Date().toISOString();
+        const url = taskDraft.scheduleUrl.trim() || null;
+        scheduledEvents.push(makeTimetableEvent({
+          id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
+          kind: "sheet-release", label: task.title,
+          date: taskDraft.scheduleReleaseDate, time: taskDraft.scheduleReleaseTime, endTime: releaseEnd, // null when untimed or too late for a 30 min slot (no end shown)
+         
+          repeatWeekly: taskDraft.scheduleReleaseWeekly, url, createdAt,
+        }));
+        scheduledEvents.push(makeTimetableEvent({
+          id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
+          kind: "sheet-deadline", label: task.title,
+          date: taskDraft.scheduleDueDate, time: taskDraft.scheduleDueTime, endTime: dueEnd,
+          repeatWeekly: taskDraft.scheduleDueWeekly, url, createdAt,
+        }));
+        scheduled = true;
+      } else       if (releaseEnd && dueEnd) {
         const createdAt = new Date().toISOString();
         const url = taskDraft.scheduleUrl.trim() || null;
         scheduledEvents.push(makeTimetableEvent({
@@ -9207,7 +9297,10 @@ function App() {
   function renderTimetableTimelineEntry(row: DailyTimelineRow, layout?: OverlapLayoutSlot) {
     const course = row.courseId ? courseLookup.get(row.courseId) : null;
     const isUnscheduled = row.kind === "todo" && !row.time;
-    const startMinutes = row.time ? timeToMinutes(row.time) : calendarTimelineStartMinutes;
+    let startMinutes = row.time ? timeToMinutes(row.time) : calendarTimelineStartMinutes;
+    // Wabi-Sabi: an item due right before midnight (e.g. 23:59) would be clipped to a 1-minute sliver
+    // at the very bottom - keep it a clickable block by pulling it up to fit one hour before the end.
+    if (appStyle === "wabi-sabi" && row.time && !row.endTime) startMinutes = Math.min(startMinutes, calendarTimelineEndMinutes - 60);
     const endMinutes = row.endTime ? timeToMinutes(row.endTime) : startMinutes + 60;
     const geometry = getTimelineBlockGeometry(startMinutes, endMinutes);
     const style = isUnscheduled ? ({ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties) : ({
@@ -9228,6 +9321,11 @@ function App() {
         className={`calendar-timeline-entry ${isUnscheduled ? "unscheduled" : "scheduled"} density-${isUnscheduled ? "roomy" : geometry.density} generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""} ${isStandaloneTodo ? "standalone-todo" : "subject-bound"}`}
         style={style}
         onMouseDown={isUnscheduled ? (event) => startUnscheduledTodoDrag(event, row) : (event) => startTimetableRowMove(event, row)}
+        onClick={appStyle === "wabi-sabi" && !timetableEditMode && row.kind !== "todo" ? (event) => {
+          if ((event.target as HTMLElement).closest("input, button")) return;
+          event.stopPropagation();
+          setCalendarItemPopup({ eventId: row.refId, date: row.occurrenceDate });
+        } : undefined}
         title={isUnscheduled && timetableEditMode ? "Drag onto the timeline to schedule" : undefined}
       >
         <div className="calendar-timeline-entry-copy">
@@ -9268,6 +9366,118 @@ function App() {
     );
   }
 
+  function saveSessionNote() {
+    if (!sessionNoteEdit) return;
+    const { id, draft } = sessionNoteEdit;
+    setState((current) => ({ ...current, sessions: current.sessions.map((session) => (session.id === id ? { ...session, learned: draft.trim() } : session)) }));
+    setSessionNoteEdit(null);
+  }
+
+  function renderSessionLogsModal() {
+    if (!sessionLogsOpen) return null;
+    const close = () => { setSessionLogsOpen(false); setSessionNoteEdit(null); };
+    const dayFormat = new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short" });
+    const sessions = [...state.sessions].sort((a, b) => b.endedAt.localeCompare(a.endedAt));
+    const groups: { day: string; rows: StudySession[] }[] = [];
+    for (const session of sessions) {
+      const day = isoDate(new Date(session.endedAt));
+      const group = groups[groups.length - 1];
+      if (group && group.day === day) group.rows.push(session);
+      else groups.push({ day, rows: [session] });
+    }
+    return createPortal(
+      <div className="wabi-logs-backdrop" onMouseDown={close}>
+        <section className="wabi-logs" role="dialog" aria-modal="true" aria-label="Session logs" onMouseDown={(event) => event.stopPropagation()}>
+          <header className="wabi-logs-head">
+            <div>
+              <p className="wabi-eyebrow">TIMER</p>
+              <h2>Session logs</h2>
+            </div>
+            <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
+          </header>
+          <div className="wabi-logs-body">
+            {groups.length ? groups.map((group) => (
+              <div key={group.day} className="wabi-logs-day">
+                <p className="wabi-logs-day-label">{group.day === calendarToday ? "Today" : dayFormat.format(new Date(`${group.day}T00:00:00`))}</p>
+                {group.rows.map((session) => {
+                  const course = courseLookup.get(session.courseId ?? "");
+                  const editing = sessionNoteEdit?.id === session.id;
+                  return (
+                    <div key={session.id} className="wabi-logs-row">
+                      <div className="wabi-logs-main">
+                        <div className="wabi-logs-line">
+                          <span className="wabi-logs-time">{new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(session.endedAt))}</span>
+                          <strong>{session.goal || session.presetLabel}</strong>
+                          <span className="wabi-logs-mins">{formatMinutes(session.minutes)}</span>
+                        </div>
+                        <p className="wabi-logs-meta">{session.kind === "study" ? "" : `${session.kind} · `}{course?.name ?? "General"}</p>
+                        {editing ? (
+                          <div className="wabi-logs-note-edit">
+                            <textarea
+                              autoFocus
+                              rows={3}
+                              value={sessionNoteEdit.draft}
+                              onChange={(event) => setSessionNoteEdit({ id: session.id, draft: event.target.value })}
+                              placeholder="What happened in this session?"
+                            />
+                            <div className="wabi-logs-note-actions">
+                              <button type="button" onClick={saveSessionNote}>Save</button>
+                              <button type="button" className="ghost-button small-button" onClick={() => setSessionNoteEdit(null)}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : session.learned ? (
+                          <p className="wabi-logs-note">{session.learned}</p>
+                        ) : null}
+                      </div>
+                      <RowMenu label={`${session.goal || session.presetLabel} actions`}>
+                        <button type="button" role="menuitem" onClick={() => setSessionNoteEdit({ id: session.id, draft: session.learned })}>{session.learned ? "Edit note" : "Add note"}</button>
+                        <button type="button" role="menuitem" className="danger" onClick={() => removeSession(session.id)}>Delete session</button>
+                      </RowMenu>
+                    </div>
+                  );
+                })}
+              </div>
+            )) : <p className="wabi-empty">No sessions yet. Finish a timer block and it lands here.</p>}
+          </div>
+        </section>
+      </div>,
+      document.body,
+    );
+  }
+
+  function renderCalendarItemPopup() {
+    if (!calendarItemPopup) return null;
+    const event = state.timetableEvents.find((item) => item.id === calendarItemPopup.eventId);
+    if (!event) return null;
+    const course = courseLookup.get(event.courseId);
+    const done = event.completedOccurrences.includes(calendarItemPopup.date);
+        const close = () => setCalendarItemPopup(null);
+    return createPortal(
+      <div className="calendar-item-popup-backdrop" onMouseDown={close}>
+        <section className="calendar-item-popup" role="dialog" aria-modal="true" aria-label={event.label} onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}>
+          <p className="calendar-item-popup-eyebrow">{course?.name ?? "General"}</p>
+          <h3>{event.label}</h3>
+          <p className="calendar-item-popup-when">
+            {formatDate(calendarItemPopup.date)}{event.time ? ` · ${displayTime(event.time)}${event.endTime ? `–${displayTime(event.endTime)}` : ""}` : " · any time"}
+          </p>
+          <button
+            type="button"
+            className={`calendar-item-popup-done ${done ? "is-done" : ""}`}
+            aria-pressed={done}
+            onClick={() => toggleGeneratedRowDone({ kind: event.kind, refId: event.id, occurrenceDate: calendarItemPopup.date } as DailyTimelineRow)}
+          >
+            {done ? "\u2713 Completed \u00b7 undo" : "Mark as completed"}
+          </button>
+          <div className="calendar-item-popup-actions">
+            {event.url ? <button type="button" className="ghost-button small-button" onClick={() => openExternalLink(event.url!)}>Open link</button> : null}
+            <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
+          </div>
+        </section>
+      </div>,
+      document.body,
+    );
+  }
+
   function renderCalendarDayOverlay() {
     const selectedDate = selectedCalendarDate ? parseCalendarDate(selectedCalendarDate) : null;
     if (!selectedCalendarDate || !selectedDate) return null;
@@ -9285,7 +9495,7 @@ function App() {
     // are gathered across every active semester rather than gating on a single date-range match.
     const dayEventOccurrences = activeSemesters.flatMap((semester) =>
       expandTimetableEvents(state.timetableEvents, state.holidays, semester, selectedCalendarDate, selectedCalendarDate),
-    );
+    ).filter((occurrence) => !(appStyle === "wabi-sabi" && occurrence.event.kind === "sheet-release"));
     const generatedRows = buildDailyTimeline(selectedCalendarDate, {
       eventOccurrences: dayEventOccurrences,
       exams: [],
@@ -9643,8 +9853,9 @@ function App() {
                     return (
                       <div
                         key={`${occurrence.event.id}:${occurrence.date}`}
-                        className={`calendar-pill timetable-pill timetable-pill--${occurrence.event.kind}`}
+                        className={`calendar-pill timetable-pill timetable-pill--${occurrence.event.kind} ${appStyle === "wabi-sabi" && occurrence.event.completedOccurrences.includes(occurrence.date) ? "done" : ""}`}
                         style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}
+                        onClick={appStyle === "wabi-sabi" ? (event) => { event.stopPropagation(); setCalendarItemPopup({ eventId: occurrence.event.id, date: occurrence.date }); } : undefined}
                       >
                         <span>{unitLabel}: {occurrence.event.label}</span>
                       </div>
@@ -10829,16 +11040,21 @@ function App() {
       : state.timer.mode === "exam" ? state.timer.examMinutes
       : state.timer.studyMinutes;
     const phaseDetail = state.timer.phase === "stopwatch" ? "COUNTING UP" : `${phaseMinutes} MIN`;
-    const todaySessions = state.sessions.filter((session) => isoDate(new Date(session.endedAt)) === calendarToday);
+
+    // "Serie 2" rather than just "Serie": the sheet/lecture/session number is the next unit to do.
+    const unitBased = timerTask && timerTask.totalUnits > 0 && timerTask.subtype !== "Other";
+    const unitNumber = timerTask ? Math.min(timerTask.totalUnits, Math.max(1, Math.floor(timerTask.completedUnits) + 1)) : 0;
+    const timerHeading = timerTask ? (unitBased ? `${timerTask.title} ${unitNumber}` : timerTask.title) : (timerCourse?.name ?? "General focus");
+    const timerSubline = timerTask ? [timerCourse?.name, unitBased ? `${unitNumber} of ${timerTask.totalUnits}` : null].filter(Boolean).join(" \u00b7 ") : "";
 
     return (
       <section className="wabi-timer-grid fade-up">
         <div className="wabi-timer-head">
           <p className="wabi-eyebrow">TIMER</p>
-          <h2>{timerTask?.title ?? timerCourse?.name ?? "General focus"}</h2>
+          <h2>{timerHeading}</h2>
+          {timerSubline ? <p className="wabi-timer-subline">{timerSubline}</p> : null}
         </div>
 
-        {renderTimerLinkStrip()}
 
         <div className="wabi-timer-body">
           <div className="wabi-timer-clock-col">
@@ -10871,6 +11087,42 @@ function App() {
                 <TimerClockDigits timer={state.timer} formatClock={formatClock} />
               </button>
             )}
+            <div className="wabi-timer-actions">
+              <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
+                {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
+              </button>
+              <button type="button" className="wabi-btn-outline" onClick={resetTimer}>RESET</button>
+              <button type="button" className="wabi-btn-outline" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
+                LOG AND CLOSE
+              </button>
+              {state.timer.mode !== "exam" && state.timer.mode !== "endless" ? (
+                <button
+                  type="button"
+                  className="wabi-text-link"
+                  onClick={() => {
+                    if (state.timer.phase === "study" && getTimerMinutes(state.timer) > 0) {
+                      setMessage("Save or reset the current study session before switching to break.");
+                      return;
+                    }
+                    setState((current) => ({
+                      ...current,
+                      timer: {
+                        ...current.timer,
+                        running: false,
+                        phase: current.timer.phase === "break" ? "study" : "break",
+                        remainingSeconds: (current.timer.phase === "break" ? current.timer.studyMinutes : current.timer.breakMinutes) * 60,
+                        startedAt: null,
+                        endsAt: null,
+                        loggedSplitSeconds: 0,
+                        activeSegments: [],
+                      },
+                    }));
+                  }}
+                >
+                  Switch to {state.timer.phase === "break" ? "study" : "break"} →
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <div className="wabi-timer-modes-col">
@@ -10964,60 +11216,7 @@ function App() {
           </div>
         </div>
 
-        <div className="wabi-timer-actions">
-          <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
-            {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
-          </button>
-          <button type="button" className="wabi-btn-outline" onClick={resetTimer}>RESET</button>
-          <button type="button" className="wabi-btn-outline" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
-            LOG AND CLOSE
-          </button>
-          {state.timer.mode !== "exam" && state.timer.mode !== "endless" ? (
-            <button
-              type="button"
-              className="wabi-text-link"
-              onClick={() => {
-                if (state.timer.phase === "study" && getTimerMinutes(state.timer) > 0) {
-                  setMessage("Save or reset the current study session before switching to break.");
-                  return;
-                }
-                setState((current) => ({
-                  ...current,
-                  timer: {
-                    ...current.timer,
-                    running: false,
-                    phase: current.timer.phase === "break" ? "study" : "break",
-                    remainingSeconds: (current.timer.phase === "break" ? current.timer.studyMinutes : current.timer.breakMinutes) * 60,
-                    startedAt: null,
-                    endsAt: null,
-                    loggedSplitSeconds: 0,
-                    activeSegments: [],
-                  },
-                }));
-              }}
-            >
-              Switch to {state.timer.phase === "break" ? "study" : "break"} →
-            </button>
-          ) : null}
-        </div>
 
-        {renderTimerAdvancedPanel()}
-
-        <div className="wabi-timer-log">
-          <p className="wabi-eyebrow">LOGGED TODAY</p>
-          {todaySessions.length ? (
-            todaySessions.map((session) => (
-              <div className="wabi-timer-log-row" key={session.id}>
-                <span className="wabi-timer-log-time">{new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(session.endedAt))}</span>
-                <span className="wabi-timer-log-title">{session.goal || session.presetLabel}</span>
-                <span className="wabi-timer-log-mins">{formatMinutes(session.minutes)}</span>
-                <button type="button" className="wabi-timer-log-remove" aria-label={`Delete session ${session.goal || session.presetLabel}`} onClick={() => removeSession(session.id)}>×</button>
-              </div>
-            ))
-          ) : (
-            <p className="wabi-empty">Nothing logged yet today.</p>
-          )}
-        </div>
       </section>
     );
   }
@@ -11044,11 +11243,6 @@ function App() {
         : 170 - ((breathStep - 11) / 8) * 110;
     return (
       <section className="wabi-break-grid">
-        <div className="wabi-rest-room-tabs" role="tablist" aria-label="Break room">
-          <button type="button" role="tab" aria-selected={wabiRestRoom === "games"} className={wabiRestRoom === "games" ? "active" : ""} onClick={() => setWabiRestRoom("games")}>GAMES</button>
-          <button type="button" role="tab" aria-selected={wabiRestRoom === "meditation"} className={wabiRestRoom === "meditation" ? "active" : ""} onClick={() => setWabiRestRoom("meditation")}>MEDITATION</button>
-        </div>
-
         {wabiRestRoom === "games" ? <>
           <div className="wabi-rest-card">
             <WabiRestFluidRing progress={breakProgress} running={breakTimerRunning} dark={theme === "dark"} />
@@ -11127,17 +11321,23 @@ function App() {
     );
   }
 
+  /** "Serie 2" / "2 of 13": the next unit to do, for tasks that count units. */
+  function getWabiUnitInfo(task: Task) {
+    const unitBased = task.totalUnits > 0 && task.subtype !== "Other";
+    const number = Math.min(task.totalUnits, Math.max(1, Math.floor(task.completedUnits) + 1));
+    return { heading: unitBased ? `${task.title} ${number}` : task.title, position: unitBased ? `${number} of ${task.totalUnits}` : null };
+  }
+
   function renderWabiQuietMode() {
-    const { nextTask, nextEntry, nextTitle, nextMeta } = getFieldDashboardData();
+    const { nextTask, nextTitle, nextMeta } = getFieldDashboardData();
     // The active Timer task is authoritative; a quiet-mode pick is only a fallback.
     const quietTask = timerTask ?? (wabiQuietTaskId ? taskLookup.get(wabiQuietTaskId) ?? null : null);
     const quietEntry = quietTask ? todayCalendarEntries.find((entry) => entry.taskId === quietTask.id) ?? null : null;
     const useQuietTask = quietTask !== null && (quietTask.id === timerTask?.id || !quietEntry?.completed);
     const focusTask = useQuietTask ? quietTask : nextTask;
-    const focusEntry = useQuietTask ? quietEntry : nextEntry;
-    const focusTitle = useQuietTask && quietTask ? quietTask.title : nextTitle;
+    const focusTitle = focusTask ? getWabiUnitInfo(focusTask).heading : nextTitle;
     const focusMeta = useQuietTask && quietTask
-      ? `${focusEntry ? getCalendarEntryUnitLabel(focusEntry) + " · " : ""}${courseLookup.get(quietTask.courseId)?.name ?? "General focus"}${quietTask.dueDate ? ` · due ${formatDate(quietTask.dueDate)}` : ""}`
+      ? [courseLookup.get(quietTask.courseId)?.name ?? "General focus", getWabiUnitInfo(quietTask).position, quietTask.dueDate ? `due ${formatDate(quietTask.dueDate)}` : null].filter(Boolean).join(" \u00b7 ")
       : nextMeta;
     const otherOpenTasks = todayCalendarEntries
       .filter((entry) => !entry.completed && entry.taskId !== focusTask?.id)
@@ -11212,6 +11412,9 @@ function App() {
     const wabiTabLabels: Record<TabKey, string> = { dashboard: "Today", planner: "Plan", timer: "Timer", vault: "Notes", break: "Rest", friends: "Circle" };
     const wabiTabKanji: Record<TabKey, string> = { dashboard: "今日", planner: "計画", timer: "時計", vault: "記録", break: "休み", friends: "仲間" };
     const { goalProgress } = getFieldDashboardData();
+    const wabiHealth = wabiScheduleHealth?.score ?? overallHealth;
+    const wabiHealthLabel = wabiHealth >= 75 ? "Strong" : wabiHealth >= 55 ? "Steady" : wabiHealth >= 35 ? "Watch" : "Critical";
+    const wabiScoreColor = wabiHealth >= 75 ? "var(--ok)" : wabiHealth >= 55 ? "var(--steady)" : wabiHealth >= 35 ? "var(--watch)" : "var(--critical)";
     const visibleTabs = state.settings.visibleTabs ?? defaultState.settings.visibleTabs;
     // "Current" semester: the active one whose date range contains today, else the first active one.
     const currentSemester = activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0] ?? null;
@@ -11229,23 +11432,23 @@ function App() {
           <span className="wabi-brand-mark" />
           <span className="wabi-brand-name">Kokoro</span>
         </div>
-        <div className="wabi-health" title="Heuristic score based on task progress, overdue work, and exam pressure.">
+        <div className="wabi-health" title={wabiScheduleHealth ? `On schedule: ${wabiScheduleHealth.onTime} done, ${wabiScheduleHealth.missed} missed of everything dated before today.` : "Heuristic score based on task progress, overdue work, and exam pressure."}>
           <div className="wabi-health-ring">
             <svg width="36" height="36" style={{ transform: "rotate(-90deg)" }}>
               <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--ring-track)" strokeWidth="4" />
               <circle
-                cx="18" cy="18" r="15.5" fill="none" stroke={scoreColor} strokeWidth="4"
+                cx="18" cy="18" r="15.5" fill="none" stroke={wabiScoreColor} strokeWidth="4"
                 strokeDasharray="97.39"
-                strokeDashoffset={97.39 - (overallHealth / 100) * 97.39}
+                strokeDashoffset={97.39 - (wabiHealth / 100) * 97.39}
                 strokeLinecap="round"
                 style={{ transition: "stroke-dashoffset 0.7s cubic-bezier(0.2,0.7,0.3,1)" }}
               />
             </svg>
-            <div className="wabi-health-ring-value">{overallHealth}</div>
+            <div className="wabi-health-ring-value">{wabiHealth}</div>
           </div>
           <div>
             <div className="wabi-eyebrow">Overall</div>
-            <span className="wabi-health-label" style={{ color: scoreColor }}>{healthLabel}</span>
+            <span className="wabi-health-label" style={{ color: wabiScoreColor }}>{wabiHealthLabel}</span>
           </div>
         </div>
 
@@ -11304,10 +11507,20 @@ function App() {
                 className={`wabi-nav-item ${active ? "active" : ""}`}
                 onClick={() => {
                   setWabiQuietMode(false);
+                  // Only the item you are on keeps its dropdown open.
+                  if (key !== "planner") setWabiPlanMenuOpen(false);
+                  if (key !== "timer") setWabiTimerMenuOpen(false);
+                  if (key !== "vault") setWabiNotesMenuOpen(false);
+                  if (key !== "break") setWabiRestMenuOpen(false);
+                  if (key !== "friends") setWabiCircleMenuOpen(false);
                   if (key === "planner") {
                     // Already on Plan: toggle the submenu. Coming from elsewhere: open it.
                     setWabiPlanMenuOpen(active ? (open) => !open : true);
                   }
+                  if (key === "timer") setWabiTimerMenuOpen(active ? (open) => !open : true);
+                  if (key === "vault") setWabiNotesMenuOpen(active ? (open) => !open : true);
+                  if (key === "friends") setWabiCircleMenuOpen(active ? (open) => !open : true);
+                  if (key === "break") setWabiRestMenuOpen(active ? (open) => !open : true);
                   setActiveTab(key);
                 }}
               >
@@ -11318,6 +11531,110 @@ function App() {
                 </span>
                 <span className="wabi-nav-sub">{key}</span>
               </button>
+              {key === "break" && wabiRestMenuOpen ? (
+                <div className="wabi-plan-menu wabi-notes-menu">
+                  {([["games", "Games"], ["meditation", "Meditation"]] as const).map(([room, label]) => (
+                    <button
+                      key={room}
+                      type="button"
+                      className={`wabi-plan-task wabi-notes-menu-item ${state.activeTab === "break" && wabiRestRoom === room ? "selected" : ""}`}
+                      onClick={() => { setWabiQuietMode(false); setWabiRestRoom(room); setActiveTab("break"); }}
+                    >
+                      <span className="wabi-plan-course-name">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {key === "friends" && wabiCircleMenuOpen ? (
+                <div className="wabi-plan-menu wabi-notes-menu">
+                  {socialSubtabs.filter((space) => space.id !== "leaderboard" || wabiCircleCompetitive).map((space) => (
+                    <button
+                      key={space.id}
+                      type="button"
+                      className={`wabi-plan-task wabi-notes-menu-item ${state.activeTab === "friends" && socialSubtab === space.id ? "selected" : ""}`}
+                      onClick={() => { setWabiQuietMode(false); setSocialSubtab(space.id); setActiveTab("friends"); }}
+                    >
+                      <span className="wabi-plan-course-name">{space.id === "leaderboard" ? "Standings" : space.label}</span>
+                      {space.id === "friends" && incomingFriendRequestCount > 0 ? <span className="nav-badge" aria-label={`${incomingFriendRequestCount} incoming friend requests`} /> : null}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="wabi-plan-link"
+                    onClick={() => setWabiCircleCompetitive((current) => {
+                      const next = !current;
+                      if (!next && socialSubtab === "leaderboard") setSocialSubtab("feed");
+                      return next;
+                    })}
+                  >
+                    {wabiCircleCompetitive ? "Competitive on \u00b7 turn off" : "Turn on competitive"}
+                  </button>
+                </div>
+              ) : null}
+              {key === "vault" && wabiNotesMenuOpen ? (
+                <div className="wabi-plan-menu wabi-notes-menu">
+                  {([["references", "References"], ["summaries", "Summaries"], ["daily", "Notes"]] as const).map(([space, label]) => (
+                    <button
+                      key={space}
+                      type="button"
+                      className={`wabi-plan-task wabi-notes-menu-item ${state.activeTab === "vault" && wabiVaultSpace === space ? "selected" : ""}`}
+                      onClick={() => { setWabiQuietMode(false); setWabiVaultSpace(space); setActiveTab("vault"); }}
+                    >
+                      <span className="wabi-plan-course-name">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {key === "timer" && wabiTimerMenuOpen ? (
+                <div className="wabi-plan-menu">
+                  {currentSemester ? (
+                    <button type="button" className="wabi-plan-semester" aria-expanded={wabiTimerSemesterOpen} onClick={() => setWabiTimerSemesterOpen((open) => !open)}>
+                      <span>{currentSemester.name}</span>
+                      <span className="wabi-plan-chevron" aria-hidden="true">{wabiTimerSemesterOpen ? "\u2212" : "+"}</span>
+                    </button>
+                  ) : (
+                    <span className="wabi-plan-empty">No semester yet.</span>
+                  )}
+                  {currentSemester && wabiTimerSemesterOpen ? (
+                    <>
+                      {currentSemesterCourses.map((course) => {
+                        const courseOpen = wabiTimerOpenCourseIds.includes(course.id);
+                        const courseTasks = getCourseTasks(state, course.id);
+                        return (
+                          <Fragment key={course.id}>
+                            <button
+                              type="button"
+                              className="wabi-plan-course"
+                              style={{ "--wabi-course": course.color } as CSSProperties}
+                              aria-expanded={courseOpen}
+                              title={course.name}
+                              onClick={() => setWabiTimerOpenCourseIds((current) => (current.includes(course.id) ? current.filter((id) => id !== course.id) : [...current, course.id]))}
+                            >
+                              <span className="wabi-plan-course-name">{course.name}</span>
+                              <span className="wabi-plan-chevron" aria-hidden="true">{courseOpen ? "\u2212" : "+"}</span>
+                            </button>
+                            {courseOpen ? (
+                              courseTasks.length ? courseTasks.map((task) => (
+                                <button
+                                  key={task.id}
+                                  type="button"
+                                  className={`wabi-plan-task ${state.timer.taskId === task.id ? "selected" : ""}`}
+                                  title={`Work on ${task.title}`}
+                                  onClick={() => selectTaskForNow(task)}
+                                >
+                                  <span className="wabi-plan-course-name">{task.title}</span>
+                                </button>
+                              )) : <span className="wabi-plan-empty wabi-plan-task-empty">No tasks yet.</span>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })}
+                      {currentSemesterCourses.length === 0 ? <span className="wabi-plan-empty">No courses yet.</span> : null}
+                    </>
+                  ) : null}
+                  <button type="button" className="wabi-plan-link" onClick={() => setSessionLogsOpen(true)}>Session logs</button>
+                </div>
+              ) : null}
               {key === "planner" && wabiPlanMenuOpen ? (
                 <div className="wabi-plan-menu">
                   {currentSemester ? (
@@ -11335,9 +11652,9 @@ function App() {
                           className="wabi-plan-course"
                           style={{ "--wabi-course": course.color } as CSSProperties}
                           onClick={() => openSemesterManager(currentSemester.id, course.id)}
-                          title="Edit this course's tasks"
+                          title={course.name}
                         >
-                          {course.name}
+                          <span className="wabi-plan-course-name">{course.name}</span>
                         </button>
                       ))}
                       {currentSemesterCourses.length === 0 ? <span className="wabi-plan-empty">No courses yet.</span> : null}
@@ -11371,10 +11688,168 @@ function App() {
     );
   }
 
+  /** Open (not ticked off) to-dos and course items on one date, sheets by their due entry only. */
+  function getOpenRowsForDate(date: string) {
+    return buildDailyTimeline(date, {
+      eventOccurrences: activeSemesters.flatMap((semester) => expandTimetableEvents(state.timetableEvents, state.holidays, semester, date, date)),
+      exams: [],
+      calendarEntries: [],
+      dailyTodos: state.dailyTodos,
+    }).filter((row) => row.kind !== "sheet-release" && !row.completed);
+  }
+
+  function describeTimelineRow(row: DailyTimelineRow) {
+    const task = row.taskId ? taskLookup.get(row.taskId) ?? null : null;
+    const course = row.courseId ? courseLookup.get(row.courseId)?.name ?? null : null;
+    return {
+      task,
+      title: task ? getWabiUnitInfo(task).heading : row.title,
+      course: row.kind === "todo" ? "To-do" : course,
+      when: row.kind === "sheet-deadline" ? "due" : row.time ? displayTime(row.time) : "any time",
+    };
+  }
+
+  function renderWabiPickerModal() {
+    if (!wabiPickerOpen) return null;
+    const close = () => setWabiPickerOpen(false);
+    const dayFormat = new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short" });
+    const openEntries = todayCalendarEntries.filter((entry) => !entry.completed);
+    const todayRows = getOpenRowsForDate(calendarToday);
+    const ahead: { date: string; rows: DailyTimelineRow[] }[] = [];
+    for (let offset = 1; offset <= 14; offset += 1) {
+      const date = localIsoDate(addCalendarDays(new Date(`${calendarToday}T00:00:00`), offset));
+      const rows = getOpenRowsForDate(date);
+      if (rows.length) ahead.push({ date, rows });
+    }
+    const chooseRow = (row: DailyTimelineRow) => { setWabiOneThingPick({ refId: row.refId, date: row.occurrenceDate }); setSelectedTaskId(null); close(); };
+    const renderRow = (row: DailyTimelineRow) => {
+      const info = describeTimelineRow(row);
+      return (
+        <button key={`${row.id}:${row.occurrenceDate}`} type="button" className="wabi-picker-item" onClick={() => chooseRow(row)}>
+          <span>{info.title}</span>
+          <em>{[info.course, info.when].filter(Boolean).join(" \u00b7 ")}</em>
+        </button>
+      );
+    };
+    return createPortal(
+      <div className="wabi-logs-backdrop" onMouseDown={close}>
+        <section className="wabi-logs wabi-picker" role="dialog" aria-modal="true" aria-label="Choose what to work on" onMouseDown={(event) => event.stopPropagation()}>
+          <header className="wabi-logs-head">
+            <div>
+              <p className="wabi-eyebrow">SOMETHING ELSE</p>
+              <h2>Choose what to work on</h2>
+            </div>
+            <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
+          </header>
+          <div className="wabi-logs-body">
+            <p className="wabi-logs-day-label">Planned today</p>
+            {openEntries.length || todayRows.length ? (
+              <>
+                {openEntries.map((entry) => {
+                  const task = taskLookup.get(entry.taskId);
+                  const course = task ? courseLookup.get(task.courseId)?.name : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId)?.name : null;
+                  return (
+                    <button key={entry.id} type="button" className="wabi-picker-item" onClick={() => { setWabiOneThingPick(null); setSelectedTaskId(entry.taskId); close(); }}>
+                      <span>{task?.title ?? entry.adHocTitle ?? "Study block"}</span>
+                      <em>{[course, formatTimeRange(entry)].filter(Boolean).join(" \u00b7 ")}</em>
+                    </button>
+                  );
+                })}
+                {todayRows.map(renderRow)}
+              </>
+            ) : <p className="wabi-empty">Nothing else open today.</p>}
+
+            {ahead.length ? (
+              <>
+                <p className="wabi-logs-day-label wabi-picker-ahead">Work ahead</p>
+                {ahead.map((group) => (
+                  <div key={group.date}>
+                    <p className="wabi-picker-day">{dayFormat.format(new Date(`${group.date}T00:00:00`))}</p>
+                    {group.rows.map(renderRow)}
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </div>
+          <footer className="wabi-picker-foot">
+            <button type="button" className="wabi-text-link" onClick={() => { close(); openDashboardTodoModal(); }}>+ NEW TO-DO OR COURSE TASK</button>
+          </footer>
+        </section>
+      </div>,
+      document.body,
+    );
+  }
+
   function renderWabiSabiDashboard() {
     const { todayLabel, dailyGoalMinutes, nextEntry, nextTask, nextTitle, nextMeta, queueCount } = getFieldDashboardData();
     const minutesToGoal = Math.max(0, dailyGoalMinutes - todayMinutes);
-    const remainingLabel = queueCount > 0 ? `${queueCount} open · ${minutesToGoal > 0 ? `${formatMinutes(minutesToGoal)} to today's goal` : "goal met"}` : "goal met";
+    // "Goal met" only when the daily goal is actually reached, not merely when nothing is queued.
+    const remainingLabel = `${queueCount > 0 ? `${queueCount} open · ` : ""}${minutesToGoal > 0 ? `${formatMinutes(minutesToGoal)} to today's goal` : "goal met"}`;
+
+    // Coming-up deadlines: every unsolved sheet due date in the next ~two months, nearest first.
+    // A sheet counts as "released" once its release for that week has passed.
+    const horizonEnd = localIsoDate(addCalendarDays(new Date(`${calendarToday}T00:00:00`), 60));
+    const horizonStart = localIsoDate(addCalendarDays(new Date(`${calendarToday}T00:00:00`), -14));
+    const horizonOccurrences = activeSemesters.flatMap((semester) => expandTimetableEvents(state.timetableEvents, state.holidays, semester, horizonStart, horizonEnd));
+    const comingDeadlines = horizonOccurrences
+      .filter((occurrence) => occurrence.event.kind === "sheet-deadline" && occurrence.date >= calendarToday && !occurrence.event.completedOccurrences.includes(occurrence.date))
+      .map((occurrence) => {
+        // A sheet's release belongs to its due date by the gap between the two series' first dates
+        // (released the 17th, due the 24th => 7 days). Matching "the latest release before the due
+        // date" is wrong for weekly series, where a new copy is released on every due date.
+        const releaseEvent = state.timetableEvents.find((item) => item.kind === "sheet-release" && item.taskId === occurrence.event.taskId) ?? null;
+        const gapDays = releaseEvent ? Math.round((new Date(`${occurrence.event.date}T00:00:00`).getTime() - new Date(`${releaseEvent.date}T00:00:00`).getTime()) / 86400000) : 0;
+        const releaseDate = releaseEvent ? localIsoDate(addCalendarDays(new Date(`${occurrence.date}T00:00:00`), -gapDays)) : null;
+        const daysLeft = Math.round((new Date(`${occurrence.date}T00:00:00`).getTime() - new Date(`${calendarToday}T00:00:00`).getTime()) / 86400000);
+        return { occurrence, task: taskLookup.get(occurrence.event.taskId) ?? null, releaseDate, daysLeft };
+      })
+      // Only sheets that are already out (no release scheduled counts as out).
+      .filter((item) => item.releaseDate === null || item.releaseDate <= calendarToday)
+      .sort((a, b) => (a.occurrence.date + (a.occurrence.event.time || "99:99")).localeCompare(b.occurrence.date + (b.occurrence.event.time || "99:99")))
+      .slice(0, 6);
+
+    // Today's to-dos and course items (lectures etc.) placed on the calendar. Sheets show under
+    // COMING UP instead, so they are left out here.
+    const todayRows = buildDailyTimeline(calendarToday, {
+      eventOccurrences: activeSemesters.flatMap((semester) => expandTimetableEvents(state.timetableEvents, state.holidays, semester, calendarToday, calendarToday)),
+      exams: [],
+      calendarEntries: [],
+      dailyTodos: state.dailyTodos,
+    }).filter((row) => row.kind !== "sheet-release" && row.kind !== "sheet-deadline");
+
+    // ONE THING: today's study block if there is one, otherwise the first open item planned today
+    // (a to-do or lecture), otherwise the nearest released sheet.
+    let oneTitle = nextTitle;
+    let oneMeta = nextMeta;
+    let oneTask: Task | null = nextTask;
+    let oneRow: DailyTimelineRow | null = null;
+    const pickedRow = wabiOneThingPick
+      ? getOpenRowsForDate(wabiOneThingPick.date).find((row) => row.refId === wabiOneThingPick.refId) ?? null
+      : null;
+    if (pickedRow) {
+      const info = describeTimelineRow(pickedRow);
+      oneRow = pickedRow;
+      oneTask = info.task;
+      oneTitle = info.title;
+      const dayLabel = pickedRow.occurrenceDate === calendarToday ? null : new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short" }).format(new Date(`${pickedRow.occurrenceDate}T00:00:00`));
+      oneMeta = [info.course, dayLabel, info.when].filter(Boolean).join(" \u00b7 ");
+    } else if (!nextEntry) {
+      const openRow = todayRows.find((row) => !row.completed) ?? null;
+      const rowEvent = openRow && openRow.kind !== "todo" ? state.timetableEvents.find((item) => item.id === openRow.refId) ?? null : null;
+      const rowTask = rowEvent ? taskLookup.get(rowEvent.taskId) ?? null : null;
+      if (openRow) {
+        oneRow = openRow;
+        oneTask = rowTask;
+        oneTitle = rowTask ? getWabiUnitInfo(rowTask).heading : openRow.title;
+        const rowCourse = openRow.courseId ? courseLookup.get(openRow.courseId)?.name : null;
+        oneMeta = [openRow.kind === "todo" ? "To-do" : rowCourse, openRow.time ? displayTime(openRow.time) : "any time today"].filter(Boolean).join(" \u00b7 ");
+      } else if (comingDeadlines[0]) {
+        const next = comingDeadlines[0];
+        oneTask = next.task;
+        oneTitle = next.task ? getWabiUnitInfo(next.task).heading : next.occurrence.event.label;
+        oneMeta = [courseLookup.get(next.occurrence.event.courseId)?.name, `due ${formatDate(next.occurrence.date)}`].filter(Boolean).join(" \u00b7 ");
+      }
+    }
 
     return (
       <section className="wabi-dashboard fade-up">
@@ -11388,25 +11863,90 @@ function App() {
 
         <div className="wabi-one-thing">
           <p className="wabi-eyebrow accent">ONE THING</p>
-          <h3>{nextTitle}</h3>
-          <p className="wabi-meta">{nextMeta}</p>
+          <h3>{oneTitle}</h3>
+          <p className="wabi-meta">{oneMeta}</p>
           <div className="wabi-one-thing-actions">
-            {nextTask ? (
-              <button type="button" className="wabi-btn-solid" onClick={() => focusTaskFromDashboard(nextTask)}>START</button>
+            {oneTask ? (
+              <button type="button" className="wabi-btn-solid" onClick={() => focusTaskFromDashboard(oneTask)}>START</button>
             ) : null}
-            {nextEntry ? (
+            {oneRow ? (
+              <button type="button" className="wabi-btn-outline" onClick={() => toggleGeneratedRowDone(oneRow)}>MARK DONE</button>
+            ) : nextEntry ? (
               <button type="button" className="wabi-btn-outline" onClick={() => toggleCalendarEntry(nextEntry.id)}>MARK DONE</button>
             ) : null}
-            <button type="button" className="wabi-text-link" onClick={openDashboardTodoModal}>SOMETHING ELSE</button>
+            <button type="button" className="wabi-text-link" onClick={() => setWabiPickerOpen(true)}>SOMETHING ELSE</button>
           </div>
         </div>
+
+        {comingDeadlines.length ? (
+          <>
+            <div className="wabi-task-list-head">
+              <span className="wabi-eyebrow">COMING UP</span>
+            </div>
+            <div className="wabi-deadline-list">
+              {comingDeadlines.map(({ occurrence, task, releaseDate, daysLeft }, index) => {
+                const course = courseLookup.get(occurrence.event.courseId);
+                const dueLabel = daysLeft === 0 ? "today" : daysLeft === 1 ? "tomorrow" : `in ${daysLeft} days`;
+                return (
+                  <div className={`wabi-deadline-row ${index === 0 ? "next" : ""}`} key={`${occurrence.event.id}:${occurrence.date}`}>
+                    <button
+                      type="button"
+                      className="wabi-task-dot"
+                      onClick={() => toggleGeneratedRowDone({ kind: "sheet-deadline", refId: occurrence.event.id, occurrenceDate: occurrence.date } as DailyTimelineRow)}
+                      aria-label="Mark solved"
+                      title="Mark solved"
+                    />
+                    <div className="wabi-deadline-main">
+                      <button type="button" className="wabi-task-title" onClick={() => (task ? selectTaskForNow(task) : openCalendarDrawer(occurrence.date))}>
+                        {occurrence.event.label}
+                      </button>
+                      <span className="wabi-deadline-status">
+                        {index === 0 ? <em className="wabi-deadline-next">NEXT</em> : null}
+                        {course?.name ?? "General"}{releaseDate ? ` · released ${formatDate(releaseDate)}` : ""}
+                      </span>
+                    </div>
+                    <span className="wabi-task-due">
+                      {formatDate(occurrence.date)}{occurrence.event.time ? ` · ${displayTime(occurrence.event.time)}` : ""}
+                      <small>{dueLabel}</small>
+                    </span>
+                    {task ? <button type="button" className="wabi-btn-outline wabi-deadline-focus" onClick={() => focusTaskFromDashboard(task)}>FOCUS</button> : <span />}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        ) : null}
 
         <div className="wabi-task-list-head">
           <span className="wabi-eyebrow">PLANNED TODAY</span>
         </div>
         <div className="wabi-task-list" data-tour="dashboard-urgent">
-          {todayCalendarEntries.length ? (
-            todayCalendarEntries.map((entry) => {
+          {todayCalendarEntries.length || todayRows.length ? (
+            <>
+            {todayRows.map((row) => {
+              const rowCourse = row.courseId ? courseLookup.get(row.courseId) : null;
+              return (
+                <div className="wabi-task-row" key={row.id}>
+                  <button
+                    type="button"
+                    className={`wabi-task-dot ${row.completed ? "done" : ""}`}
+                    onClick={() => toggleGeneratedRowDone(row)}
+                    aria-label={row.completed ? "Mark not done" : "Mark done"}
+                  />
+                  <button
+                    type="button"
+                    className={`wabi-task-title ${row.completed ? "done" : ""}`}
+                    onClick={() => openCalendarDrawer(calendarToday)}
+                  >
+                    {row.title}
+                  </button>
+                  <span className="wabi-task-subject">{row.kind === "todo" ? "To-do" : (rowCourse?.name ?? "General")}</span>
+                  <span className="wabi-task-amount" />
+                  <span className="wabi-task-due">{row.time ? `${displayTime(row.time)}${row.endTime ? `–${displayTime(row.endTime)}` : ""}` : "any time"}</span>
+                </div>
+              );
+            })}
+            {todayCalendarEntries.map((entry) => {
               const task = taskLookup.get(entry.taskId);
               const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
               const title = task?.title ?? entry.adHocTitle ?? "Calendar task";
@@ -11430,7 +11970,8 @@ function App() {
                   <span className="wabi-task-due">{task?.dueDate ? formatDate(task.dueDate) : formatTimeRange(entry)}</span>
                 </div>
               );
-            })
+            })}
+            </>
           ) : (
             <p className="wabi-empty">Nothing planned today. Add tasks from the planner calendar.</p>
           )}
@@ -11450,7 +11991,7 @@ function App() {
 
     const modalCourse = creating ? courseLookup.get(taskDraft.courseId) ?? null : task ? courseLookup.get(task.courseId) ?? null : null;
     const modalSemester = creating ? semesterLookup.get(taskDraft.semesterId) ?? null : task ? semesterLookup.get(task.semesterId) ?? null : null;
-    const calc = task ? calculateDailyWork(task) : null;
+    const calc = task ? taskDailyWork(task) : null;
     const progress = task ? getTaskProgress(task) : 0;
     const editing = fieldPlannerTaskMode === "edit" && task;
     const closeModal = () => {
@@ -11464,6 +12005,7 @@ function App() {
       const draft = creating ? taskDraft : taskEditDraft;
       const setDraft = creating ? setTaskDraft : setTaskEditDraft;
       const hideDueDate = subtypeHidesDueDate(draft.subtype);
+      const ScheduleWrap = appStyle === "wabi-sabi" ? "details" : "div";
       const showRestOfForm = !creating || taskSubtypeChosen;
       const submit = (event: FormEvent<HTMLFormElement>) => {
         if (creating) {
@@ -11560,14 +12102,14 @@ function App() {
           ) : null}
 
           {creating ? (
-            <div className="fn-task-form-schedule">
-              <p className="section-note">Schedule its first occurrence now (optional) - or leave blank and schedule later from Manage Semesters.</p>
+            <ScheduleWrap className="fn-task-form-schedule">
+              {appStyle === "wabi-sabi" ? <summary>Schedule first occurrence (optional)</summary> : <p className="section-note">Schedule its first occurrence now (optional) - or leave blank and schedule later from Manage Semesters.</p>}
               {draft.subtype === "Sheet" ? (
                 <div className="manage-semesters-schedule-row manage-semesters-sheet-schedule">
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Release</span>
                     <input type="date" value={draft.scheduleReleaseDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseDate: event.target.value }))} />
-                    <TimeSpanFields time={draft.scheduleReleaseTime} duration={draft.scheduleReleaseDuration} onTimeChange={(scheduleReleaseTime) => setDraft((current) => ({ ...current, scheduleReleaseTime }))} onDurationChange={(scheduleReleaseDuration) => setDraft((current) => ({ ...current, scheduleReleaseDuration }))} />
+                    <TimeSpanFields time={draft.scheduleReleaseTime} duration={draft.scheduleReleaseDuration} hideDuration={appStyle === "wabi-sabi"} onTimeChange={(scheduleReleaseTime) => setDraft((current) => ({ ...current, scheduleReleaseTime }))} onDurationChange={(scheduleReleaseDuration) => setDraft((current) => ({ ...current, scheduleReleaseDuration }))} />
                     <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleReleaseWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseWeekly: event.target.checked }))} />
                       <span>Weekly</span>
@@ -11576,7 +12118,7 @@ function App() {
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Due</span>
                     <input type="date" value={draft.scheduleDueDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueDate: event.target.value }))} />
-                    <TimeSpanFields time={draft.scheduleDueTime} duration={draft.scheduleDueDuration} onTimeChange={(scheduleDueTime) => setDraft((current) => ({ ...current, scheduleDueTime }))} onDurationChange={(scheduleDueDuration) => setDraft((current) => ({ ...current, scheduleDueDuration }))} />
+                    <TimeSpanFields time={draft.scheduleDueTime} duration={draft.scheduleDueDuration} hideDuration={appStyle === "wabi-sabi"} onTimeChange={(scheduleDueTime) => setDraft((current) => ({ ...current, scheduleDueTime }))} onDurationChange={(scheduleDueDuration) => setDraft((current) => ({ ...current, scheduleDueDuration }))} />
                     <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleDueWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueWeekly: event.target.checked }))} />
                       <span>Weekly</span>
@@ -11594,11 +12136,12 @@ function App() {
                   </label>
                 </div>
               )}
-            </div>
+            </ScheduleWrap>
           ) : null}
           </>
           )}
           <footer className="fn-task-modal-footer">
+            {appStyle === "wabi-sabi" && message ? <p className="wabi-task-message" role="alert">{message}</p> : null}
             {showRestOfForm ? <button type="submit">{creating ? "Create task" : "Save task"}</button> : null}
             <button type="button" className="ghost-button" onClick={creating ? closeModal : () => setFieldPlannerTaskMode("view")}>Cancel</button>
             {showRestOfForm && !hideDueDate && draft.dueDate ? <button type="button" className="ghost-button" onClick={() => setDraft((current) => ({ ...current, dueDate: "" }))}>Clear due date</button> : null}
@@ -11609,7 +12152,7 @@ function App() {
 
     return createPortal(
       <div className="fn-task-modal-backdrop" onMouseDown={closeModal}>
-        <section className="fn-task-modal" role="dialog" aria-modal="true" aria-labelledby="fn-task-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <section className={`fn-task-modal ${appStyle === "wabi-sabi" ? "wabi-task-modal" : ""}`} role="dialog" aria-modal="true" aria-labelledby="fn-task-modal-title" onMouseDown={(event) => event.stopPropagation()}>
           <header className="fn-task-modal-head">
             <div>
               <p className="fn-stamp-line">Task file · {modalSemester?.name ?? "No semester"} · {modalCourse?.name ?? "No course"}</p>
@@ -11702,10 +12245,10 @@ function App() {
                         onClick={() => setPalette(p.id)}
                       >
                         <div className="theme-choice-main">
-                          <span className="theme-choice-swatch" style={{ background: p.swatch }} />
+                          <span className="theme-choice-swatch" style={{ background: appStyle === "wabi-sabi" && p.id === "default" ? "#4f6b4a" : p.swatch }} />
                           <div>
                             <strong>{p.name}</strong>
-                            <span>{p.desc}</span>
+                            <span>{appStyle === "wabi-sabi" ? ({ default: "Moss, paper and ink at rest.", sakura: "Petals loved for falling." } as Record<string, string>)[p.id] ?? p.desc : p.desc}</span>
                           </div>
                         </div>
                         {palette === p.id ? <span className="design-chip">Active</span> : null}
@@ -12255,10 +12798,16 @@ function App() {
           setMessage={setMessage}
           target={timetableModalState}
           onClose={() => setTimetableModalState(null)}
-          onOpenManageSemesters={() => { setTimetableModalState(null); setManageSemestersOpen(true); }}
+          onOpenManageSemesters={() => { setTimetableModalState(null); if (appStyle === "wabi-sabi") setManageSemestersMode("semesters"); setManageSemestersOpen(true); }}
+          wabi={appStyle === "wabi-sabi"}
+          message={message ?? ""}
           onDeleteWithUndo={performDelete}
         />
       ) : null}
+
+      {appStyle === "wabi-sabi" ? renderCalendarItemPopup() : null}
+      {appStyle === "wabi-sabi" ? renderSessionLogsModal() : null}
+      {appStyle === "wabi-sabi" ? renderWabiPickerModal() : null}
 
       {manageSemestersOpen ? (
         appStyle === "wabi-sabi" ? (
@@ -12745,14 +13294,21 @@ function App() {
               <div>
                 <p className="eyebrow">{appStyle === "wabi-sabi" ? "Plan" : "Planner"}</p>
                 <h2>{appStyle === "wabi-sabi" ? `${openTaskCount} thing${openTaskCount === 1 ? "" : "s"} growing` : "Semesters, courses, and tasks"}</h2>
-                <p className="section-note">{appStyle === "wabi-sabi" ? "Open a semester to manage its courses. Select a course to edit it." : "Click a semester or course to expand it. Click it again to collapse."}</p>
+                {appStyle === "wabi-sabi" ? null : <p className="section-note">Click a semester or course to expand it. Click it again to collapse.</p>}
               </div>
+              {appStyle === "wabi-sabi" ? (
+                <span className="wabi-plan-current-semester">
+                  {(activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0])?.name ?? ""}
+                </span>
+              ) : null}
+              {appStyle === "wabi-sabi" ? null : (
               <div className="page-head-actions">
-                <button type="button" className="ghost-button" onClick={() => { setManageSemestersMode(appStyle === "wabi-sabi" ? "semesters" : "full"); setManageSemestersOpen(true); }}>Manage Semesters</button>
+                <button type="button" className="ghost-button" onClick={() => { setManageSemestersMode("full"); setManageSemestersOpen(true); }}>Manage Semesters</button>
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
                   {showSemesterForm ? "Close" : "+ Add semester"}
                 </button>
               </div>
+              )}
             </div>
 
             {showSemesterForm ? (
@@ -12765,7 +13321,7 @@ function App() {
               </form>
             ) : null}
 
-            <div className="semester-board roomy-top">
+            <div className="semester-board roomy-top" hidden={appStyle === "wabi-sabi"}>
               {activeSemesters.length ? (
                 activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
@@ -12783,10 +13339,12 @@ function App() {
                         <button type="button" className="accordion-toggle semester-toggle" onClick={() => toggleSemester(semester.id)}>
                           <span className="accordion-title-group">
                             <strong>{semester.name}</strong>
+                            {appStyle === "wabi-sabi" ? null : (
                             <small>
                               {courses.length} courses • {tasks.length} tasks • {tasks.filter((task) => getRemainingUnits(task) > 0).length} active • {semesterHealth.label}
                               {semester.phase === "exam-prep" ? " • Exam Prep" : semesterWeekNumber ? ` • Week ${semesterWeekNumber}` : ""}
                             </small>
+                            )}
                           </span>
                         </button>
 
@@ -13074,7 +13632,7 @@ function App() {
                                         <div className="task-table">
                                           {courseTasks.length ? (
                                             courseTasks.map((task) => {
-                                              const calc = calculateDailyWork(task);
+                                              const calc = taskDailyWork(task);
                                               const progress = getTaskProgress(task);
                                               return (
                                                 <div key={task.id}>
@@ -13664,7 +14222,7 @@ function App() {
 
       {state.activeTab === "vault" ? (
         <Suspense fallback={<section className="vault-shell"><p className="summary-pdf-status">Loading Vault...</p></section>}>
-          <LazyVaultScreen ref={vaultScreenRef} state={state} setState={setState} appStyle={appStyle} calendarToday={calendarToday} setMessage={setMessage} />
+          <LazyVaultScreen ref={vaultScreenRef} state={state} setState={setState} appStyle={appStyle} calendarToday={calendarToday} setMessage={setMessage} controlledSpace={appStyle === "wabi-sabi" ? wabiVaultSpace : undefined} onSpaceChange={appStyle === "wabi-sabi" ? setWabiVaultSpace : undefined} />
         </Suspense>
       ) : null}
 

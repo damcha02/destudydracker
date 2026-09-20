@@ -217,15 +217,19 @@ function renderMarkdownPreview(markdown: string) {
 }
 
 export type VaultScreenHandle = { flush: () => Promise<boolean> };
+export type { VaultSpace };
 type Props = {
   state: AppState;
   setState: Dispatch<SetStateAction<AppState>>;
   appStyle: AppStyle;
   calendarToday: string;
   setMessage: (message: string) => void;
+  /** Wabi-Sabi: the space (References / Summaries / Notes) is chosen from the sidebar instead of an in-page nav. */
+  controlledSpace?: VaultSpace;
+  onSpaceChange?: (space: VaultSpace) => void;
 };
 
-export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultScreen({ state, setState, appStyle, calendarToday, setMessage }, ref) {
+export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultScreen({ state, setState, appStyle, calendarToday, setMessage, controlledSpace, onSpaceChange }, ref) {
   const [vaultNoteDate, setVaultNoteDate] = useState(localIsoDate);
   const [vaultNoteContent, setVaultNoteContent] = useState("");
   const [vaultNotePath, setVaultNotePath] = useState<string | null>(null);
@@ -238,7 +242,13 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
   const [vaultSetupOpen, setVaultSetupOpen] = useState(() => !state.settings.vaultPath);
   const [vaultDailyEditing, setVaultDailyEditing] = useState(false);
   const [markdownCheatsheetOpen, setMarkdownCheatsheetOpen] = useState(false);
-  const [vaultSpace, setVaultSpace] = useState<VaultSpace>("daily");
+  const [vaultSpace, setVaultSpace] = useState<VaultSpace>(controlledSpace ?? "daily");
+  useEffect(() => {
+    if (controlledSpace) setVaultSpace(controlledSpace);
+  }, [controlledSpace]);
+  useEffect(() => {
+    onSpaceChange?.(vaultSpace);
+  }, [vaultSpace, onSpaceChange]);
   const [referenceSemesterId, setReferenceSemesterId] = useState("");
   const [referenceCourseId, setReferenceCourseId] = useState("");
   const [referenceContent, setReferenceContent] = useState("");
@@ -750,49 +760,40 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
 
   function renderWabiVaultCourseShelf(space: "references" | "summaries") {
     const selectedCourseId = space === "references" ? referenceCourseId : summaryCourseId;
+    const showSemesterNames = activeSemesters.length > 1;
     return (
-      <aside className="wabi-vault-shelf" aria-label={`${space} by semester`}>
-        {activeSemesters.map((semester) => {
-          const courses = getSemesterCourses(state, semester.id);
-          const expanded = expandedSemesterIds.includes(semester.id);
-          return (
-            <div key={semester.id} className={`wabi-vault-semester ${expanded ? "open" : ""}`}>
-              <button type="button" className="wabi-vault-semester-toggle" onClick={() => toggleSemester(semester.id)}>
-                <span>{semester.name}</span>
-                <small>{courses.length} courses</small>
+      <nav className="wabi-vault-tabs" aria-label={`${space} by course`}>
+        {activeSemesters.map((semester) => (
+          <div key={semester.id} className="wabi-vault-tab-group">
+            {showSemesterNames ? <span className="wabi-vault-tab-semester">{semester.name}</span> : null}
+            {getSemesterCourses(state, semester.id).map((course) => (
+              <button
+                key={course.id}
+                type="button"
+                className={`wabi-vault-tab ${course.id === selectedCourseId ? "active" : ""}`}
+                title={course.name}
+                onClick={() => {
+                  if (space === "references") {
+                    if (referenceDirty) {
+                      setMessage("Save the current reference note before switching courses.");
+                      return;
+                    }
+                    setReferenceSemesterId(semester.id);
+                    setReferenceCourseId(course.id);
+                    setReferenceEditing(false);
+                  } else {
+                    setSummarySemesterId(semester.id);
+                    setSummaryCourseId(course.id);
+                    setSelectedSummaryPath(null);
+                  }
+                }}
+              >
+                <span style={{ background: course.color }} />{course.name}
               </button>
-              {expanded ? (
-                <div className="wabi-vault-course-list">
-                  {courses.map((course) => (
-                    <button
-                      key={course.id}
-                      type="button"
-                      className={course.id === selectedCourseId ? "active" : ""}
-                      onClick={() => {
-                        if (space === "references") {
-                          if (referenceDirty) {
-                            setMessage("Save the current reference note before switching courses.");
-                            return;
-                          }
-                          setReferenceSemesterId(semester.id);
-                          setReferenceCourseId(course.id);
-                          setReferenceEditing(false);
-                        } else {
-                          setSummarySemesterId(semester.id);
-                          setSummaryCourseId(course.id);
-                          setSelectedSummaryPath(null);
-                        }
-                      }}
-                    >
-                      <span style={{ background: course.color }} />{course.name}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </aside>
+            ))}
+          </div>
+        ))}
+      </nav>
     );
   }
   return (
@@ -1020,7 +1021,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                 </nav>
               ) : null}
 
-              {appStyle === "wabi-sabi" ? (
+              {appStyle === "wabi-sabi" && !controlledSpace ? (
                 <nav className="wabi-notes-nav wabi-vault-space-nav" aria-label="Vault spaces" data-tour="vault-spaces">
                   {vaultSpaces.map((space) => (
                     <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>
@@ -1155,7 +1156,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                   )}
                 </div>
               ) : vaultSpace === "references" ? (
-                <div className="vault-space-panel">
+                <div className={`vault-space-panel ${appStyle === "wabi-sabi" ? "wabi-vault-tabbed" : ""}`}>
                   {appStyle === "wabi-sabi" ? renderWabiVaultCourseShelf("references") : null}
                   <div className="vault-toolbar">
                     {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">
@@ -1249,7 +1250,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                   )}
                 </div>
               ) : (
-                <div className="vault-space-panel">
+                <div className={`vault-space-panel ${appStyle === "wabi-sabi" ? "wabi-vault-tabbed" : ""}`}>
                   {appStyle === "wabi-sabi" ? renderWabiVaultCourseShelf("summaries") : null}
                   <div className="vault-toolbar">
                     {appStyle !== "field-notebook" ? <div className="vault-toolbar-main references-toolbar-main">

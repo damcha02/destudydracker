@@ -10,25 +10,14 @@ export function SocialScreen(props: Props) {
       {state.activeTab === "friends" ? (
         <section className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : appStyle === "wabi-sabi" ? "wabi-circle-root" : ""}`}>
           {appStyle === "modern" ? <ArenaBg /> : null}
+          {appStyle === "wabi-sabi" && socialSubtab !== "feed" ? null : (
           <div className="arena-hero-header">
             <span className="arena-hero-title">{appStyle === "field-notebook" ? "Study Circle" : appStyle === "wabi-sabi" ? "Circle" : "Study Arena"}</span>
             <span className="arena-hero-sub">{appStyle === "field-notebook" ? "Attendance sheet · friends · squads · quiet accountability" : appStyle === "wabi-sabi" ? "Who is sitting down today. Attendance, not a leaderboard." : "Compete. Focus. Rise."}</span>
-            {appStyle === "wabi-sabi" ? (
-              <button
-                type="button"
-                className={`wabi-competitive-toggle ${wabiCircleCompetitive ? "active" : ""}`}
-                onClick={() => setWabiCircleCompetitive((current) => {
-                  const next = !current;
-                  if (!next && socialSubtab === "leaderboard") setSocialSubtab("feed");
-                  return next;
-                })}
-              >
-                {wabiCircleCompetitive ? "COMPETITIVE ON · SHOWING LEADERBOARD" : "TURN ON COMPETITIVE →"}
-              </button>
-            ) : null}
           </div>
+          )}
 
-          <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
+          {appStyle === "wabi-sabi" ? null : <nav className="social-nav" aria-label="Social spaces" data-tour="social-nav">
             {socialSubtabs.filter((space) => appStyle !== "wabi-sabi" || space.id !== "leaderboard" || wabiCircleCompetitive).map((space) => {
               const active = space.id === socialSubtab;
               return (
@@ -43,7 +32,7 @@ export function SocialScreen(props: Props) {
                 </button>
               );
             })}
-          </nav>
+          </nav>}
 
           {appStyle === "wabi-sabi" && socialSubtab === "feed" ? (
             <div className="wabi-attendance" data-tour="social-live">
@@ -158,7 +147,7 @@ export function SocialScreen(props: Props) {
               </div>
 
               <div className={`social-feed-main ${appStyle === "wabi-sabi" ? "wabi-feed-main" : ""}`}>
-              <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : appStyle === "wabi-sabi" ? "Feed" : "Activity"} {appStyle === "wabi-sabi" ? "· oldest first · updates when synced" : ""} {feedLoading ? "· Refreshing" : ""}</div>
+              <div className="section-label" data-tour="social-feed">{appStyle === "field-notebook" ? "Circle log" : appStyle === "wabi-sabi" ? "Feed" : "Activity"} {feedLoading ? "· Refreshing" : ""}</div>
               {displayedSocialFeed.length ? displayedSocialFeed.map((item) => {
                 const isOwnPost = item.userId === state.social.userId || item.isSelf;
                 const profileTarget = { userId: item.userId, displayName: item.displayName, friendCode: item.friendCode, avatar: isOwnPost ? state.social.avatar : item.avatar };

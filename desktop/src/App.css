@@ -18007,7 +18007,7 @@ input[type="color"] {
 /* -------- Timer -------- */
 
 .wabi-timer-grid {
-  padding: 6px 0 40px;
+  padding: 6px 0 16px;
   font-family: var(--font-sans);
   color: var(--wabi-ink);
 }
@@ -18041,14 +18041,25 @@ input[type="color"] {
 
 .wabi-timer-body {
   display: flex;
-  align-items: flex-end;
-  gap: 40px;
-  margin-top: 34px;
+  align-items: center;
+  gap: 40px 56px;
+  margin-top: 22px;
   flex-wrap: wrap;
 }
 
 .wabi-timer-clock-col {
   flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+}
+
+.wabi-timer-subline {
+  margin: 4px 0 0;
+  font: 400 13px var(--font-sans);
+  letter-spacing: 0.06em;
+  color: var(--wabi-muted);
 }
 
 .wabi-timer-clock,
@@ -18077,7 +18088,7 @@ input[type="color"] {
 .wabi-timer-modes-col {
   flex: 1 1 380px;
   min-width: 300px;
-  padding-bottom: 12px;
+  padding-bottom: 0;
 }
 
 .wabi-timer-phase-label {
@@ -18161,7 +18172,7 @@ input[type="color"] {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 32px;
+  margin-top: 0;
 }
 
 :root[data-app-style="wabi-sabi"] .wabi-timer-grid .timer-advanced-toggle {
@@ -22898,3 +22909,1018 @@ input[type="color"] {
   align-self: center;
   white-space: nowrap;
 }
+
+/* Sidebar course rows: one line each, long names are cut off with an ellipsis. */
+.wabi-plan-course {
+  min-width: 0;
+}
+
+.wabi-plan-course-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Wabi-Sabi task window (add / edit task): one scroll region, quiet fields ---------- */
+.wabi-task-modal {
+  width: min(600px, 100%);
+  max-height: calc(100vh - 96px);
+  padding: 0 30px 22px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 2px;
+  background: var(--wabi-paper);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.22);
+  overflow-y: auto; /* the only scroll region */
+}
+
+.wabi-task-modal .fn-task-modal-head {
+  border-bottom: 1px solid var(--wabi-ink);
+  background: var(--wabi-paper);
+  padding: 28px 0 12px; /* the sticky header owns the top padding so scrolled content never peeks above it */
+}
+
+.wabi-task-modal .fn-task-modal-head h2 {
+  font-size: 24px;
+  color: var(--wabi-ink);
+}
+
+.wabi-task-modal .fn-stamp-line {
+  margin: 0 0 4px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+/* No nested scrollers: the form and its grid just flow inside the modal. */
+.wabi-task-modal .fn-task-form {
+  flex: none;
+  overflow: visible;
+}
+
+.wabi-task-modal .fn-task-form-subtype-picker {
+  display: flex;
+  gap: 6px;
+  margin-top: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.wabi-task-modal .fn-task-form-subtype-picker button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wabi-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.wabi-task-modal .fn-task-form-subtype-picker button.active {
+  border-color: var(--wabi-sage);
+  background: var(--wabi-sage);
+  color: var(--wabi-paper);
+  box-shadow: none;
+}
+
+.wabi-task-modal .fn-task-form-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 14px;
+  overflow: visible;
+  padding: 18px 0 8px;
+}
+
+.wabi-task-modal .fn-task-form-notice {
+  grid-column: 1 / -1;
+  order: 15;
+  margin: -6px 0 0;
+  font-size: 11.5px;
+  color: var(--wabi-faint);
+}
+
+.wabi-task-modal .fn-task-form-notes { order: 20; }
+
+.wabi-task-modal .fn-task-form .field span {
+  font-size: 10px;
+  color: var(--wabi-muted);
+}
+
+.wabi-task-modal .fn-task-form input,
+.wabi-task-modal .fn-task-form select,
+.wabi-task-modal .fn-task-form textarea {
+  border: 0;
+  border-bottom: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  font-size: 15px;
+  padding: 7px 2px;
+  min-height: 0;
+}
+
+.wabi-task-modal .fn-task-form input:focus,
+.wabi-task-modal .fn-task-form select:focus,
+.wabi-task-modal .fn-task-form textarea:focus {
+  outline: none;
+  border-bottom-color: var(--wabi-sage);
+}
+
+.wabi-task-modal .fn-task-form textarea {
+  min-height: 88px;
+  padding: 8px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper-1);
+}
+
+.wabi-task-modal .fn-task-form-schedule {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wabi-rule-soft, var(--line));
+}
+
+.wabi-task-modal details.fn-task-form-schedule summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--wabi-muted);
+}
+
+.wabi-task-modal details.fn-task-form-schedule[open] summary { margin-bottom: 10px; }
+
+.wabi-task-modal .fn-task-modal-footer {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper);
+}
+
+.wabi-task-modal .fn-task-modal-footer button[type="submit"] {
+  background: var(--wabi-ink);
+  color: var(--wabi-paper);
+  border: 0;
+}
+
+/* Wabi-Sabi Plan page: the current semester is plain text on the heading row (no card). */
+.wabi-plan-current-semester {
+  align-self: end;
+  font: 400 clamp(22px, 2.4vw, 34px) var(--font-serif);
+  color: var(--wabi-ink);
+  white-space: nowrap;
+}
+
+.semester-board[hidden] { display: none; }
+
+.wabi-task-message {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--wabi-vermilion);
+  font-size: 13px;
+}
+
+/* Wabi-Sabi calendar: small window to mark a scheduled item done */
+.calendar-item-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5300;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.28);
+}
+
+.calendar-item-popup {
+  box-sizing: border-box;
+  width: min(260px, calc(100vw - 32px));
+  padding: 14px 16px 12px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-left: 3px solid var(--entry-color, var(--wabi-sage));
+  background: var(--wabi-paper);
+  color: var(--wabi-ink);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 0.22);
+}
+
+.calendar-item-popup h3 { margin: 1px 0 2px; font: 500 17px var(--font-serif); overflow-wrap: anywhere; }
+.calendar-item-popup-eyebrow { margin: 0; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--wabi-muted); }
+.calendar-item-popup-when { margin: 0 0 12px; font-size: 12px; color: var(--wabi-muted); }
+
+.calendar-item-popup-done {
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid var(--wabi-sage);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--wabi-sage-deep, var(--wabi-sage));
+  font: 600 12.5px var(--font-sans, inherit);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.calendar-item-popup-done:hover { background: var(--wabi-paper-2); }
+.calendar-item-popup-done.is-done { background: var(--wabi-sage); color: var(--wabi-paper); }
+
+.calendar-item-popup-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.calendar-item-popup-actions .ghost-button { min-height: 0; padding: 3px 8px; font-size: 10.5px; }
+:root[data-app-style="wabi-sabi"] .calendar-pill.timetable-pill { cursor: pointer; }
+:root[data-app-style="wabi-sabi"] .calendar-pill.timetable-pill.done { opacity: 0.55; text-decoration: line-through; }
+
+/* ---------- Wabi-Sabi: new daily to-do window ---------- */
+.timetable-modal.wabi-todo-modal {
+  width: min(460px, calc(100vw - 32px));
+  padding: 22px 26px 18px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 2px;
+  background: var(--wabi-paper);
+}
+
+.wabi-todo-modal .timetable-modal-head {
+  border: 0;
+  padding: 0 0 4px;
+}
+
+.wabi-todo-modal .timetable-modal-head strong {
+  font: 400 12px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+.wabi-todo-modal .timetable-modal-form { gap: 14px; }
+
+/* The title is the hero: big, borderless, underlined */
+.wabi-todo-modal .wabi-todo-title input {
+  border: 0;
+  border-bottom: 1px solid var(--wabi-ink);
+  border-radius: 0;
+  background: transparent;
+  padding: 6px 0 8px;
+  font: 400 24px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-todo-modal .wabi-todo-title > span { display: none; }
+.wabi-todo-modal .wabi-todo-title input:focus { outline: none; border-bottom-color: var(--wabi-sage); }
+
+.wabi-todo-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 14px;
+}
+
+.wabi-todo-when .field { flex: 1 1 120px; min-width: 0; }
+
+.wabi-todo-modal .field > span {
+  font: 400 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+.wabi-todo-modal .field input:not([type="checkbox"]),
+.wabi-todo-modal .field textarea {
+  border: 0;
+  border-bottom: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 0;
+  background: transparent;
+  color: var(--wabi-ink);
+  padding: 6px 2px;
+}
+
+.wabi-todo-modal .field textarea {
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper-1);
+  padding: 8px;
+  min-height: 56px;
+}
+
+.wabi-todo-chip {
+  min-height: 0;
+  padding: 6px 12px;
+  border: 1px dashed var(--wabi-faint, var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wabi-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.wabi-todo-chip:hover { border-color: var(--wabi-sage); color: var(--wabi-sage-deep, var(--wabi-sage)); }
+
+.wabi-todo-modal .timetable-modal-toggle { font-size: 13px; color: var(--wabi-muted); }
+
+.wabi-todo-modal .timetable-modal-form > button:not(.ghost-button) {
+  align-self: flex-end;
+  min-width: 120px;
+  padding: 9px 22px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--wabi-ink);
+  color: var(--wabi-paper);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wabi-todo-modal .timetable-modal-manage-link {
+  align-self: center;
+  border: 0;
+  background: none;
+  padding: 0;
+  min-height: 0;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--wabi-faint);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------- Wabi-Sabi: unscheduled items in the day panel (round tick + calm row) ---------- */
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled {
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-left: 3px solid var(--entry-color, var(--wabi-sage));
+  border-radius: 2px;
+  background: var(--wabi-paper-1);
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy strong {
+  font: 500 15px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .timetable-todo-icon { display: none; }
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-copy span {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wabi-muted);
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-entry-actions {
+  grid-column: 1 / -1;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-checkbox {
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  aspect-ratio: 1;
+  align-self: center;
+  margin: 0;
+  border: 1.5px solid var(--wabi-faint, var(--line));
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-checkbox:hover { border-color: var(--wabi-sage); }
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled .calendar-timeline-checkbox:checked {
+  border-color: var(--wabi-sage);
+  background: var(--wabi-sage);
+}
+
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled.done .calendar-timeline-entry-copy {
+  opacity: 0.5;
+}
+
+:root[data-app-style="wabi-sabi"] .calendar-day-side-panel .calendar-timeline-entry.unscheduled.done .calendar-timeline-entry-copy strong { text-decoration: line-through; }
+
+.wabi-todo-kind {
+  display: flex;
+  gap: 6px;
+}
+
+.wabi-todo-kind button {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wabi-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wabi-todo-kind button.active {
+  border-color: var(--wabi-sage);
+  background: var(--wabi-sage);
+  color: var(--wabi-paper);
+}
+
+.wabi-todo-course { display: grid; gap: 12px; }
+.wabi-todo-modal select { border: 0; border-bottom: 1px solid var(--wabi-rule-soft, var(--line)); border-radius: 0; background: transparent; color: var(--wabi-ink); padding: 6px 2px; }
+
+/* Edit Semester: keep a task's scheduled lines tight under its name */
+.wabi-msm-scope .manage-semesters-unit-row {
+  row-gap: 0;
+}
+
+.wabi-msm-scope .manage-semesters-scheduled-list {
+  gap: 0;
+  margin-top: -2px;
+  padding-left: 6px;
+}
+
+.wabi-msm-scope .manage-semesters-scheduled-row {
+  padding: 0 0 0 2px;
+  background: transparent;
+  min-height: 0;
+}
+
+.wabi-msm-scope .manage-semesters-scheduled-row .section-note {
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Wabi-Sabi dashboard: coming-up deadlines */
+.wabi-deadline-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+.wabi-deadline-row.next .wabi-task-title { font-size: 18px; }
+.wabi-deadline-main { display: grid; gap: 3px; min-width: 0; }
+.wabi-deadline-status { font: 400 11.5px var(--font-sans); letter-spacing: 0.06em; color: var(--wabi-muted); }
+.wabi-deadline-next { margin-right: 8px; font-style: normal; font-weight: 600; letter-spacing: 0.14em; color: var(--wabi-vermilion); }
+.wabi-deadline-row .wabi-task-due { display: grid; gap: 2px; white-space: nowrap; }
+.wabi-deadline-row .wabi-task-due small { font-size: 11px; color: var(--wabi-faint); }
+.wabi-deadline-focus { padding: 6px 14px; }
+
+/* Wabi-Sabi sidebar: Timer submenu tasks */
+.wabi-plan-task {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  min-width: 0;
+  padding: 3px 0 3px 22px;
+  font: 400 12px var(--font-serif);
+  color: var(--wabi-muted);
+}
+
+.wabi-plan-task:hover { color: var(--wabi-vermilion); }
+.wabi-plan-task.selected { color: var(--wabi-ink); font-weight: 600; }
+.wabi-plan-task.selected::before { content: "\2022"; margin-left: -12px; margin-right: 6px; color: var(--wabi-sage); }
+.wabi-plan-task-empty { padding-left: 22px; }
+
+/* Wabi-Sabi: session logs window */
+.wabi-logs-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.34);
+  padding: 24px;
+}
+
+.wabi-logs {
+  box-sizing: border-box;
+  width: min(620px, 100%);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper);
+  color: var(--wabi-ink);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
+}
+
+.wabi-logs-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 22px 26px 12px;
+  border-bottom: 1px solid var(--wabi-ink);
+}
+
+.wabi-logs-head h2 { margin: 2px 0 0; font: 400 24px var(--font-serif); }
+
+.wabi-logs-body {
+  overflow-y: auto; /* the only scroll region */
+  padding: 6px 26px 20px;
+}
+
+.wabi-logs-day-label { margin: 18px 0 4px; font: 400 10.5px var(--font-mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--wabi-muted); }
+
+.wabi-logs-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--wabi-rule-soft, var(--line));
+}
+
+.wabi-logs-main { min-width: 0; flex: 1; }
+.wabi-logs-line { display: flex; align-items: baseline; gap: 10px; }
+.wabi-logs-line strong { font: 500 15px var(--font-serif); overflow-wrap: anywhere; }
+.wabi-logs-time { font: 400 12px var(--font-mono); color: var(--wabi-muted); }
+.wabi-logs-mins { margin-left: auto; font-size: 12.5px; color: var(--wabi-muted); white-space: nowrap; }
+.wabi-logs-meta { margin: 2px 0 0; font-size: 11.5px; letter-spacing: 0.04em; color: var(--wabi-faint); }
+.wabi-logs-note { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--wabi-sage); font-size: 13.5px; white-space: pre-wrap; }
+.wabi-logs-note-edit { margin-top: 8px; display: grid; gap: 6px; }
+.wabi-logs-note-edit textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--wabi-rule-soft, var(--line)); background: var(--wabi-paper-1); color: var(--wabi-ink); padding: 8px; font: inherit; resize: vertical; }
+.wabi-logs-note-actions { display: flex; gap: 8px; }
+.wabi-logs-row .msm-menu { flex: none; }
+.wabi-logs-body { padding-bottom: 72px; } /* room for the last row's menu to open */
+
+/* Wabi-Sabi timer: one centred column, vertically centred in the page */
+.wabi-timer-grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 150px);
+  padding: 0 0 24px;
+  text-align: center;
+}
+
+.wabi-timer-head { text-align: center; }
+.wabi-timer-head h2 { font-size: 30px; }
+
+.wabi-timer-body {
+  flex-direction: column;
+  align-items: center;
+  gap: 30px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.wabi-timer-clock-col {
+  align-items: center;
+  gap: 22px;
+}
+
+.wabi-timer-clock,
+.wabi-timer-clock-input {
+  font-size: 128px;
+  text-align: center;
+}
+
+.wabi-timer-actions { justify-content: center; flex-wrap: wrap; }
+
+.wabi-timer-modes-col {
+  flex: none;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.wabi-timer-mode-grid {
+  justify-content: center;
+  max-width: 620px;
+}
+
+.wabi-timer-mode-card { text-align: left; }
+.wabi-timer-custom-row { justify-content: center; }
+
+/* Wabi-Sabi sidebar: Notes submenu */
+.wabi-notes-menu { gap: 0; }
+.wabi-notes-menu-item { padding-left: 0; padding-top: 5px; padding-bottom: 5px; font-size: 13px; }
+.wabi-notes-menu-item.selected::before { margin-left: -12px; }
+
+/* Wabi-Sabi timer: title pinned to the top-left, the clock stays centred */
+.wabi-timer-grid { position: relative; }
+
+.wabi-timer-head {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  text-align: left;
+}
+
+/* Wabi-Sabi timer: all six presets on one line */
+.wabi-timer-mode-grid {
+  flex-wrap: nowrap;
+  max-width: 100%;
+  width: max-content;
+}
+
+.wabi-timer-mode-card {
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+/* Wabi-Sabi Notes: References / Summaries pick a course from tabs along the top (no side shelf) */
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-space-panel.wabi-vault-tabbed {
+  display: block;
+  padding-top: 8px;
+}
+
+.wabi-vault-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin: 0 0 18px;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+.wabi-vault-tab-group { display: contents; }
+
+.wabi-vault-tab-semester {
+  align-self: center;
+  margin-right: 4px;
+  font: 400 10px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--wabi-faint);
+}
+
+.wabi-vault-tab {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 220px;
+  padding: 7px 12px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  font: 400 13px var(--font-sans);
+  color: var(--wabi-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wabi-vault-tab > span { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.wabi-vault-tab:hover { color: var(--wabi-ink); }
+.wabi-vault-tab.active { color: var(--wabi-ink); border-bottom-color: var(--wabi-sage); }
+
+/* the course picker is the tabs now, so the old semester select + chips are hidden */
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-tabbed .vault-toolbar { display: flex; justify-content: flex-end; }
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-tabbed .vault-toolbar-main { display: none; }
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-tabbed > .vault-document-wrap,
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-tabbed > .summaries-layout,
+:root[data-app-style="wabi-sabi"] .wabi-vault .wabi-vault-tabbed > .vault-split { grid-column: auto; }
+
+/* ---------- Wabi-Sabi Circle feed: calmer, tighter ---------- */
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer {
+  padding: 10px 0 12px;
+  border-top: 0;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-input { font-size: 17px; }
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-action-icon { opacity: 0.55; }
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .feed-action-icon:hover { opacity: 1; }
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 999px;
+  color: var(--wabi-ink);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-composer .arena-btn:disabled { opacity: 0.4; }
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-main .section-label {
+  margin: 14px 0 0;
+  padding: 0 0 8px;
+  border-bottom: 0;
+  font-size: 10px;
+  color: var(--wabi-faint);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card {
+  grid-template-columns: 128px minmax(0, 1fr);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head { padding: 18px 14px 12px 0; }
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .social-name-button--strong { font-size: 16px; }
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head span { font-size: 10px; }
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__body {
+  gap: 6px;
+  padding: 16px 0 6px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__body > p {
+  font-size: 19px;
+  line-height: 1.4;
+}
+
+/* the session sits under the quote as one quiet line: subject · length · preset */
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session {
+  border-left: 0;
+  padding: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 8px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session strong,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session small {
+  font-size: 12px;
+  color: var(--wabi-faint);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__session small::before {
+  content: "\00b7";
+  margin-right: 8px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__reactions,
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__comments-shell {
+  padding: 0 0 6px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__comments-shell { padding-bottom: 14px; }
+
+/* ---------- Wabi-Sabi Circle: attendance as quiet chips ---------- */
+:root[data-app-style="wabi-sabi"] .wabi-attendance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: none;
+  margin: 14px 0 18px;
+  border-top: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-attendance-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 14px 6px 12px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  border-radius: 999px;
+  transition: border-color 0.15s;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-attendance-row:hover { border-color: var(--wabi-sage); }
+
+:root[data-app-style="wabi-sabi"] .wabi-attendance-name {
+  font-size: 14px;
+  color: var(--wabi-muted);
+}
+
+/* sitting = a filled green dot and full-ink name; resting = a hollow dot */
+:root[data-app-style="wabi-sabi"] .wabi-attendance-row::before {
+  content: "";
+  order: -1;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--wabi-faint);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-attendance-row:has(.sitting)::before {
+  border-color: var(--wabi-sage);
+  background: var(--wabi-sage);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-attendance-row:has(.sitting) .wabi-attendance-name { color: var(--wabi-ink); }
+
+/* the state is carried by the dot; keep the word for screen readers only */
+:root[data-app-style="wabi-sabi"] .wabi-attendance-state {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+/* Wabi-Sabi Rest: keep the games close under the header card */
+.wabi-break-lower { margin-top: 18px; }
+
+/* ---------- Wabi-Sabi standings: one calm ledger ---------- */
+:root[data-app-style="wabi-sabi"] .wabi-standings {
+  max-width: 860px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 36px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings > * { flex: 0 0 100%; }
+
+/* scope and period tabs share one line */
+:root[data-app-style="wabi-sabi"] .wabi-standings > .arena-scope-toggle,
+:root[data-app-style="wabi-sabi"] .wabi-standings > .arena-period-chips {
+  flex: 0 0 auto;
+  padding-bottom: 14px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings > .arena-period-chips { margin-left: auto; }
+
+/* podium: a slim top-three strip instead of tall cards */
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium { margin-top: 4px; }
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col {
+  min-height: 0;
+  gap: 3px;
+  padding: 12px 20px 14px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > strong { font-size: 18px; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-rank-badge { font-size: 26px; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-block small { display: none; }
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(2),
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(1),
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col:nth-child(3) { background: transparent; }
+
+/* the list: tighter rows, small rank, friend code and glow removed */
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+  padding: 9px 4px;
+  min-height: 0;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-person span { display: none; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-person strong { font-size: 16px; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-score { text-align: right; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-score strong { font-size: 15px; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-rank { font-size: 12px; }
+
+/* Wabi-Sabi Rest: original header size, with the clock at 0.75x and no dead space under the rock */
+/* the whole card at 0.75x: box, ring, text, clock and buttons */
+.wabi-rest-card {
+  width: auto;
+  margin: 0;
+  padding: 26px 0 22px;
+}
+
+.wabi-rest-card .wabi-rest-ring { width: 84px; height: 84px; }
+.wabi-rest-card h2 { font-size: 18px; margin-top: 18px; }
+.wabi-rest-card > p { font-size: 10.5px; margin-top: 6px; max-width: 300px; }
+
+.wabi-rest-card .wabi-rest-clock,
+.wabi-rest-card .wabi-rest-clock-input { font-size: 22.5px; margin-top: 13px; }
+
+.wabi-rest-card .wabi-rest-clock-input { width: 120px; }
+.wabi-rest-card .wabi-rest-actions { margin-top: 16px; gap: 10px; }
+.wabi-rest-card .wabi-btn-solid { font-size: 9px; padding: 9px 20px; }
+.wabi-rest-card .wabi-text-link { font-size: 9px; }
+
+.wabi-break-grid { padding-bottom: 4px; }
+.wabi-break-grid .wabi-pet-rock { margin-top: 18px; padding-top: 12px; padding-bottom: 0; gap: 4px; }
+
+/* Wabi-Sabi dashboard: "Something else" picker (reuses the session-logs window frame) */
+.wabi-picker { width: min(540px, 100%); }
+.wabi-picker-ahead { margin-top: 26px; }
+.wabi-picker-day { margin: 12px 0 2px; font: 400 12px var(--font-sans); letter-spacing: 0.06em; color: var(--wabi-muted); }
+
+.wabi-picker-item {
+  all: unset;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  width: 100%;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--wabi-rule-soft, var(--line));
+  font: 400 15px var(--font-serif);
+  color: var(--wabi-ink);
+}
+
+.wabi-picker-item:hover { color: var(--wabi-sage); }
+.wabi-picker-item em { font: 400 11.5px var(--font-sans); font-style: normal; letter-spacing: 0.04em; color: var(--wabi-faint); white-space: nowrap; }
+
+.wabi-picker-foot { padding: 12px 26px 18px; border-top: 1px solid var(--wabi-rule-soft, var(--line)); }
+
+/* Wabi-Sabi: keep the sidebar perfectly still while the page scrolls or reflows */
+:root[data-app-style="wabi-sabi"] {
+  scrollbar-gutter: stable; /* the earlier `:root ... html` selector never matched, so the gutter was never reserved */
+}
+
+
+/* Falling petals: isolate their constant animation from the rest of the page so it cannot cause repaints elsewhere (e.g. the sidebar) */
+.sakura-scatter {
+  contain: layout paint;
+  transform: translateZ(0);
+}
+
+.sakura-petal { backface-visibility: hidden; }
+
+/* Wabi-Sabi Rest: the header card spans exactly the games column; the rock sits top-left above the XP bar */
+.wabi-break-grid {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  column-gap: 30px;
+  align-items: start;
+}
+
+.wabi-break-grid > .wabi-rest-card { grid-column: 2; grid-row: 1; }
+.wabi-break-grid > .wabi-break-lower { grid-column: 1 / -1; grid-row: 2; }
+.wabi-break-grid > .wabi-meditation-room { grid-column: 1 / -1; }
+
+.wabi-break-grid > .wabi-pet-rock {
+  grid-column: 1;
+  grid-row: 1;
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+  text-align: center;
+  justify-self: center;
+}
+
+.wabi-break-grid > .wabi-pet-rock .wabi-faint-text { font-size: 10.5px; line-height: 1.3; }
+
+@media (max-width: 960px) {
+  .wabi-break-grid { display: block; }
+  .wabi-break-grid > .wabi-pet-rock { margin: 18px auto 0; }
+}
+
+/* Wabi-Sabi Rest room: everything fits the window, nothing scrolls */
+:root[data-app-style="wabi-sabi"]:has(.wabi-break-grid) { overflow: hidden; }
+
+.wabi-break-grid:has(> .wabi-rest-card) {
+  height: calc(100vh - 130px);
+  grid-template-rows: auto minmax(0, 1fr);
+  padding-bottom: 0;
+}
+
+/* the rock sits vertically centred beside the card */
+.wabi-break-grid > .wabi-pet-rock { align-self: center; }
+
+.wabi-break-grid > .wabi-break-lower {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 30px;
+  min-height: 0;
+  margin-top: 14px;
+  align-items: stretch;
+}
+
+.wabi-break-lower .wabi-xp-water { min-height: 0; padding: 14px 0; }
+.wabi-break-lower .wabi-xp-water-track { flex: 1; height: auto; min-height: 40px; }
+
+.wabi-break-lower .wabi-games-col { display: flex; flex-direction: column; min-height: 0; }
+.wabi-break-lower .wabi-games-grid {
+  flex: 1;
+  min-height: 0;
+  margin-top: 10px;
+  gap: 10px;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+.wabi-break-lower .wabi-game-card {
+  min-height: 0;
+  padding: 8px 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Wabi-Sabi: the sidebar never scrolls (its menus always fit) */
+:root[data-app-style="wabi-sabi"] .wabi-nav { overflow: visible; }
+
+/* Rest room: the games block fills the remaining height (no dead space at the bottom) */
+.wabi-break-grid > .wabi-break-lower { align-self: stretch; }
+
+/* Scrolling: the fixed sidebar and the fixed petal-texture layer each get their own compositor layer, so
+   scrolling the page never repaints them (that repaint is what made the sidebar lag). The wheel is left
+   to the browser now that the sidebar has no scroll area of its own. */
+:root[data-app-style="wabi-sabi"] .wabi-sidebar {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+[data-app-style="field-notebook"][data-palette="sakura"] body::after,
+[data-app-style="wabi-sabi"][data-palette="sakura"] body::after {
+  transform: translateZ(0);
+  will-change: transform;
+}
+
+/* Rest room: use the full window height (the earlier reservation left ~80px of dead space) and sit the rock lower */
+.wabi-break-grid:has(> .wabi-rest-card) { height: calc(100vh - 52px); }
+.wabi-break-grid > .wabi-pet-rock { transform: translateY(64px); }

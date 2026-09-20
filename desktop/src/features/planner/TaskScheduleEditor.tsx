@@ -30,8 +30,8 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
   const today = new Date().toISOString().slice(0, 10);
   const [draft, setDraft] = useState({
     date: today, time: "10:00", duration: 90, repeatWeekly: true,
-    releaseDate: today, releaseTime: "20:00", releaseDuration: 30, releaseWeekly: true,
-    dueDate: today, dueTime: "23:00", dueDuration: 30, dueWeekly: true,
+    releaseDate: today, releaseTime: "", releaseDuration: 30, releaseWeekly: true,
+    dueDate: today, dueTime: "", dueDuration: 30, dueWeekly: true,
     sheetUrl: "",
   });
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -62,16 +62,14 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
   }
 
   function scheduleSheet() {
-    if (!isValidIsoDate(draft.releaseDate) || !draft.releaseTime || !isValidIsoDate(draft.dueDate) || !draft.dueTime) {
-      setMessage("Pick a release and due date/time first.");
+    // Times are optional: a date-only release/due is scheduled for that day, untimed.
+    if (!isValidIsoDate(draft.releaseDate) || !isValidIsoDate(draft.dueDate)) {
+      setMessage("Pick a release date and a due date first.");
       return;
     }
-    const releaseEnd = endTimeFor(draft.releaseTime, draft.releaseDuration);
-    const dueEnd = endTimeFor(draft.dueTime, draft.dueDuration);
-    if (!releaseEnd || !dueEnd) {
-      setMessage("That duration runs past midnight - shorten it or start earlier.");
-      return;
-    }
+    // The duration isn't asked for: a fixed 30 min slot, or no end at all when untimed / too close to midnight.
+    const releaseEnd = draft.releaseTime ? endTimeFor(draft.releaseTime, draft.releaseDuration) : null;
+    const dueEnd = draft.dueTime ? endTimeFor(draft.dueTime, draft.dueDuration) : null;
     const url = draft.sheetUrl.trim() || null;
     const createdAt = new Date().toISOString();
     const releaseEvent = makeTimetableEvent({
@@ -93,12 +91,13 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
   }
 
   function saveEditEvent() {
-    if (!editingEventId || !isValidIsoDate(eventDraft.date) || !eventDraft.time) {
-      setMessage("Pick a date and time first.");
+    if (!editingEventId || !isValidIsoDate(eventDraft.date)) {
+      setMessage("Pick a date first.");
       return;
     }
-    const end = endTimeFor(eventDraft.time, eventDraft.duration);
-    if (!end) {
+    // A blank time keeps (or makes) the item untimed.
+    const end = eventDraft.time ? endTimeFor(eventDraft.time, eventDraft.duration) : null;
+    if (eventDraft.time && !end) {
       setMessage("That duration runs past midnight - shorten it or start earlier.");
       return;
     }
@@ -127,7 +126,7 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
             <div className="manage-semesters-sheet-schedule-section">
               <span className="section-note">Release</span>
               <input type="date" value={draft.releaseDate} onChange={(event) => setDraft((current) => ({ ...current, releaseDate: event.target.value }))} />
-              <TimeSpanFields time={draft.releaseTime} duration={draft.releaseDuration} onTimeChange={(releaseTime) => setDraft((current) => ({ ...current, releaseTime }))} onDurationChange={(releaseDuration) => setDraft((current) => ({ ...current, releaseDuration }))} />
+              <TimeSpanFields time={draft.releaseTime} duration={draft.releaseDuration} hideDuration onTimeChange={(releaseTime) => setDraft((current) => ({ ...current, releaseTime }))} onDurationChange={(releaseDuration) => setDraft((current) => ({ ...current, releaseDuration }))} />
               <label className="timetable-modal-toggle compact">
                 <input type="checkbox" checked={draft.releaseWeekly} onChange={(event) => setDraft((current) => ({ ...current, releaseWeekly: event.target.checked }))} />
                 <span>Weekly</span>
@@ -136,7 +135,7 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
             <div className="manage-semesters-sheet-schedule-section">
               <span className="section-note">Due</span>
               <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} />
-              <TimeSpanFields time={draft.dueTime} duration={draft.dueDuration} onTimeChange={(dueTime) => setDraft((current) => ({ ...current, dueTime }))} onDurationChange={(dueDuration) => setDraft((current) => ({ ...current, dueDuration }))} />
+              <TimeSpanFields time={draft.dueTime} duration={draft.dueDuration} hideDuration onTimeChange={(dueTime) => setDraft((current) => ({ ...current, dueTime }))} onDurationChange={(dueDuration) => setDraft((current) => ({ ...current, dueDuration }))} />
               <label className="timetable-modal-toggle compact">
                 <input type="checkbox" checked={draft.dueWeekly} onChange={(event) => setDraft((current) => ({ ...current, dueWeekly: event.target.checked }))} />
                 <span>Weekly</span>
@@ -176,7 +175,7 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
             ) : (
               <div key={event.id} className="manage-semesters-scheduled-row">
                 <span className="section-note">
-                  {kindLabel[event.kind]} · {formatDate(event.date)} · {displayTime(event.time)}{event.endTime ? `–${displayTime(event.endTime)}` : ""}{event.repeatWeekly ? " · weekly" : ""}
+                  {kindLabel[event.kind]} · {formatDate(event.date)} · {event.time ? displayTime(event.time) : "any time"}{event.endTime ? `–${displayTime(event.endTime)}` : ""}{event.repeatWeekly ? " · weekly" : ""}
                 </span>
                 <button type="button" className="ghost-button small-button" onClick={() => startEditEvent(event)}>Edit</button>
                 {removeConfirm === event.id ? (
