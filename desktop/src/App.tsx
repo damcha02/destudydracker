@@ -3887,6 +3887,17 @@ function App() {
   const [wabiNotesMenuOpen, setWabiNotesMenuOpen] = useState(false);
   // Wabi-Sabi dashboard "Something else": pick what to work on from today or the coming days.
   const [wabiPickerOpen, setWabiPickerOpen] = useState(false);
+  // Rest room: click the tree to cycle through the watercolour trees (remembered on this device).
+// Widths keep every tree at the same scale (pine is the tallest); all of them stand on the pine's baseline.
+  const restTrees = [
+    { file: "japanese-pine.png", width: 111 },
+    { file: "japanese-sakura.png", width: 150 },
+    { file: "japanese-maple.png", width: 131 },
+    { file: "japanese-green-tree.png", width: 99 },
+  ];
+  const [restTreeIndex, setRestTreeIndex] = useState(() => {
+    try { return Math.max(0, Number(localStorage.getItem("study-tracker-rest-tree")) || 0) % restTrees.length; } catch { return 0; }
+  });
   const [wabiOneThingPick, setWabiOneThingPick] = useState<{ refId: string; date: string } | null>(null);
   const [wabiCircleMenuOpen, setWabiCircleMenuOpen] = useState(false);
   const [wabiRestMenuOpen, setWabiRestMenuOpen] = useState(false);
@@ -4200,6 +4211,11 @@ function App() {
 
     return () => window.clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (state.settings.hideProfilePictures) document.documentElement.dataset.hideAvatars = "true";
+    else delete document.documentElement.dataset.hideAvatars;
+  }, [state.settings.hideProfilePictures]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -5725,6 +5741,13 @@ function App() {
       },
     }));
     if (!state.settings.hideFeedImages) setExpandedFeedImageId(null);
+  }
+
+  function toggleProfilePictures() {
+    setState((current) => ({
+      ...current,
+      settings: { ...current.settings, hideProfilePictures: !current.settings.hideProfilePictures },
+    }));
   }
 
   function toggleFeedPolls() {
@@ -11295,6 +11318,19 @@ function App() {
               </div>
             </div>
           </div>
+          <button
+            type="button"
+            className="wabi-rest-tree"
+            aria-label="Next tree"
+            title="Next tree"
+            onClick={() => setRestTreeIndex((current) => {
+              const next = (current + 1) % restTrees.length;
+              try { localStorage.setItem("study-tracker-rest-tree", String(next)); } catch { /* storage unavailable */ }
+              return next;
+            })}
+          >
+            <img src={`/${restTrees[restTreeIndex].file}`} alt="" draggable={false} style={{ width: restTrees[restTreeIndex].width }} />
+          </button>
           <div className="wabi-pet-rock" data-tour="break-rock" onClick={patRock} role="button" tabIndex={0} onKeyDown={(event) => { if (!event.repeat && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); patRock(); } }}>
             <div className="rock-area"><span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>{rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}</div>
             <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
@@ -12347,6 +12383,18 @@ function App() {
                     type="checkbox"
                     checked={!state.settings.hideFeedImages}
                     onChange={toggleFeedImages}
+                  />
+                  <span className="ios-switch" aria-hidden="true" />
+                </label>
+                <label className="tab-toggle-row">
+                  <span>
+                    <strong>Profile pictures</strong>
+                    <small>{state.settings.hideProfilePictures ? "Hidden" : "Shown"} · pictures in the feed and standings on this device</small>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={!state.settings.hideProfilePictures}
+                    onChange={toggleProfilePictures}
                   />
                   <span className="ios-switch" aria-hidden="true" />
                 </label>

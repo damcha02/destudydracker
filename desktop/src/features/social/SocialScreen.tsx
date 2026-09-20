@@ -1,14 +1,36 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment, @typescript-eslint/no-explicit-any */
 // @ts-nocheck -- exact JSX bridge; social state ownership remains in App.
 // This is an exact UI extraction; state and actions remain owned by App.
+import { useState } from "react";
+import { createPortal } from "react-dom";
+
 type Props = Record<string, unknown>;
 
 export function SocialScreen(props: Props) {
+  // Wabi-Sabi: clicking a small profile picture in the feed or standings shows it larger.
+  const [expandedAvatarHtml, setExpandedAvatarHtml] = useState<string | null>(null);
   const { AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_VIEWPORT_PX, ArenaAvatar, ArenaBg, ArenaLeaderboardRow, ArenaRankBadge, MAX_FEED_POLL_OPTIONS, SQUAD_SEASON_NAME, SQUAD_SEASON_RANGE_LABEL, SQUAD_TRACKING_START_LABEL, SquadArenaRow, addFeedPollOption, alphabetLetters, answerFriendRequest, answerSquadRequest, appStyle, avatarCrop, avatarCropDragging, avatarCropOpen, avatarCropSource, avatarIcons, avatarStyles, badgesOpen, canKickSquadMember, canManageCurrentSquadRequests, canViewR2Usage, cancelAvatarCrop, cancelEditingFeedPost, cancelEditingSocialName, changeSquadMemberRole, clearFeedPollDraft, closeProfileAvatarEditor, confirmAvatarCrop, copyFriendCode, copyFriendInviteLink, currentSquad, currentSquadRole, deleteOwnFeedPost, deleteOwnSquadMessage, displayedSocialFeed, editingFeedPostId, editingFeedPostImage, editingFeedPostNote, editingFeedPostRemoveImage, emojiPickerPostId, expandedFeedComments, expandedFeedImage, expandedSquadMemberId, failedFeedImages, feedCommentDrafts, feedCommentSavingId, feedImageDraft, feedImagesVisible, feedLoading, feedNoteDraft, feedPollDraft, feedPollHasDraft, feedPollPanelOpen, feedPollsVisible, feedPostSaving, feedScope, formatBytes, formatCompactNumber, formatFeedPostedAt, formatMinutes, formatProfileSeenAt, friendCodeDraft, friendInviteLink, getAssignableSquadRoles, getFirstAvatarLetter, handleAvatarCropPointerDown, handleAvatarCropPointerEnd, handleAvatarCropPointerMove, handleAvatarCropWheel, handleAvatarCropZoomChange, handleEditingFeedPostImageChange, handleFeedImageDraftChange, handleProfileAvatarPhotoChange, incomingFriendRequestCount, isRecentlyActive, joinOrRequestSquad, joinOrRequestViewedSquad, kickFromSquad, lastSocialSyncLabel, latestFeedSession, latestFeedSessionPosted, leaveCurrentSquad, liveFriends, loadSquadSuggestions, localSocialDaily, localSocialMonthly, localSocialOverall, localSocialWeekly, myFriendRank, myGlobalRank, openFriendProfile, openProfileAvatarEditor, openSquadDetails, postLatestSessionToFeed, profileAvatarDraft, profileAvatarEditorOpen, profileAvatarFileInputRef, profileAvatarLetterPickerOpen, profileBadgeGroups, r2UsageStatus, removeFeedPollOption, renderProfileBadgeCard, runSocialSync, saveFeedPostEdit, saveProfileAvatar, saveSocialName, sendFriendRequestToCode, setBadgesOpen, setEditingFeedPostImage, setEditingFeedPostNote, setEditingFeedPostRemoveImage, setEmojiPickerPostId, setExpandedFeedImageId, setExpandedSquadMemberId, setFailedFeedImages, setFeedCommentDrafts, setFeedImageDraft, setFeedNoteDraft, setFeedPollDraft, setFeedPollPanelOpen, setFeedScope, setFriendCodeDraft, setProfileAvatarDraft, setProfileAvatarLetterPickerOpen, setSocialNameDraft, setSocialPeriod, setSocialScope, setSocialSubtab, setSquadChatDraft, setSquadNameDraft, setSquadPrivateDraft, setSquadScorePeriod, setSquadSearchDraft, setSquadSettingsEditing, setSquadSettingsNameDraft, setSquadSettingsPrivateDraft, setViewingFriend, setViewingSquadDetails, setViewingSquadEntry, setWabiCircleCompetitive, socialArenaSubtitle, socialArenaTitle, socialConfigured, socialLeaderboard, socialLeaderboardTopMinutes, socialNameDraft, socialNameEditing, socialPeriod, socialScope, socialSubtab, socialSubtabs, socialSyncing, squadChatDraft, squadMemberLeaderboard, squadNameDraft, squadPrivateDraft, squadRoleLabels, squadScoreLeaderboard, squadScorePeriod, squadSearchDraft, squadSearchResults, squadSearching, squadSettingsEditing, squadSettingsNameDraft, squadSettingsPrivateDraft, squadSuggestionPool, squadSuggestions, squadSuggestionsLoading, startEditingFeedPost, startEditingSocialName, startSquadSettingsEdit, state, submitFeedComment, submitFriendRequest, submitSquadChat, submitSquadCreate, submitSquadSearch, submitSquadSettings, toggleAutoPostSessions, toggleFeedComments, toggleLocalFeedReaction, toggleProfilePrivacy, toggleShowHoursToFriends, updateFeedPollOption, viewingFriend, viewingFriendLoading, viewingFriendStats, viewingIsFriend, viewingIsSelf, viewingRequestPending, viewingSquadAction, viewingSquadDetails, viewingSquadEntry, viewingSquadLoading, voteFeedPoll, wabiAttendanceFriends, wabiCircleCompetitive, weekCompareEntries } = props as any;
   return (
     <>
       {state.activeTab === "friends" ? (
-        <section className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : appStyle === "wabi-sabi" ? "wabi-circle-root" : ""}`}>
+        <section
+          className={`arena-root fade-up ${appStyle === "field-notebook" ? "study-circle-root" : appStyle === "wabi-sabi" ? "wabi-circle-root" : ""}`}
+          onClickCapture={appStyle === "wabi-sabi" ? (event) => {
+            const avatar = (event.target as HTMLElement).closest(".wabi-feed-card .arena-avatar, .wabi-standings .arena-avatar");
+            if (!avatar) return;
+            event.stopPropagation();
+            event.preventDefault();
+            setExpandedAvatarHtml(avatar.outerHTML);
+          } : undefined}
+        >
+          {appStyle === "wabi-sabi" && expandedAvatarHtml ? createPortal(
+            // Portaled to <body>: inside the page, an animated ancestor made "fixed" relative to the whole
+            // (tall) page, so the picture opened somewhere you had to scroll to.
+            <div className="wabi-avatar-lightbox" role="dialog" aria-label="Profile picture" onClick={() => setExpandedAvatarHtml(null)}>
+              <div className="wabi-avatar-lightbox-card" dangerouslySetInnerHTML={{ __html: expandedAvatarHtml }} />
+            </div>,
+            document.body,
+          ) : null}
           {appStyle === "modern" ? <ArenaBg /> : null}
           {appStyle === "wabi-sabi" && socialSubtab !== "feed" ? null : (
           <div className="arena-hero-header">

@@ -23923,4 +23923,138 @@ input[type="color"] {
 
 /* Rest room: use the full window height (the earlier reservation left ~80px of dead space) and sit the rock lower */
 .wabi-break-grid:has(> .wabi-rest-card) { height: calc(100vh - 52px); }
-.wabi-break-grid > .wabi-pet-rock { transform: translateY(64px); }
+.wabi-break-grid > .wabi-pet-rock { transform: translateY(80px); }
+
+/* Edit Semester: a task name is plain text now (edit it from the ⋯ menu), so no input-style hover box */
+.wabi-msm-scope .manage-semesters-unit-label:hover,
+.wabi-msm-scope .manage-semesters-unit-label:focus {
+  border-color: transparent;
+  background: transparent;
+}
+
+.wabi-msm-scope .manage-semesters-unit-label { cursor: default; }
+
+/* ---------- Wabi-Sabi Circle: profile pictures in the feed and standings ---------- */
+:root[data-app-style="wabi-sabi"] .wabi-circle-root .arena-avatar {
+  border-radius: 50%;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  box-shadow: none;
+  cursor: zoom-in;
+}
+
+/* feed: the picture sits just below the name and date */
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head > div { order: 1; }
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head > .arena-avatar {
+  display: grid;
+  order: 2;
+  width: 40px;
+  height: 40px;
+  font-size: 0.9rem;
+}
+:root[data-app-style="wabi-sabi"] .wabi-feed-card .feed-card__head > .feed-edit-button { order: 3; }
+
+/* standings rows: a small picture right after the name */
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+  grid-template-columns: 34px auto 1fr auto;
+  gap: 10px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-rank,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-rank-badge { grid-column: 1; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-person { grid-column: 2; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-avatar {
+  display: grid;
+  grid-column: 3;
+  justify-self: start;
+  width: 26px;
+  height: 26px;
+  font-size: 0.7rem;
+}
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-score { grid-column: 4; }
+
+/* podium: a small picture under the hours */
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-podium-col > .arena-avatar {
+  display: grid;
+  order: 4;
+  width: 30px;
+  height: 30px;
+  font-size: 0.75rem;
+}
+
+.wabi-avatar-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 5400;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.5);
+  cursor: zoom-out;
+}
+
+.wabi-avatar-lightbox-card .arena-avatar {
+  width: min(280px, 70vw);
+  height: min(280px, 70vw);
+  border-radius: 50%;
+  font-size: 6rem;
+  cursor: zoom-out;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.4);
+}
+
+/* Options -> Profile pictures off: no pictures in the feed or the standings */
+:root[data-hide-avatars="true"] .feed-card__head > .arena-avatar,
+:root[data-hide-avatars="true"] .arena-podium-col > .arena-avatar,
+:root[data-hide-avatars="true"] .arena-lb-row .arena-avatar {
+  display: none !important;
+}
+
+/* Rest room: a watercolour Japanese tree in the top-left, just below the top edge of the header card; click for the next one */
+.wabi-break-grid > .wabi-rest-tree {
+  all: unset;
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  justify-self: center;
+  /* a box as tall as the pine (the tallest tree): every tree sits on its bottom edge, not its top */
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 150px;
+  height: 131px; /* pine height (115px) + 16px: the whole baseline sits 16px lower */
+  margin-top: 12px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wabi-rest-tree img {
+  display: block;
+  height: auto;
+  transform-origin: bottom center;
+  transition: transform 0.25s ease;
+  pointer-events: none;
+}
+
+.wabi-rest-tree:hover img { transform: scale(1.03); }
+.wabi-rest-tree:focus-visible { outline: 1px dashed var(--wabi-faint); outline-offset: 4px; }
+
+/* Standings rows: rank | name | picture on one line, hours pushed to the right
+   (the earlier column placement wrapped the name under the picture) */
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row {
+  grid-template-columns: 40px auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto;
+  align-items: center;
+  column-gap: 12px;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row > * { grid-row: 1; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-rank,
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-rank-badge { grid-column: 1; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-person { grid-column: 2; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-avatar { grid-column: 3; justify-self: start; }
+:root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-score { grid-column: 5; }

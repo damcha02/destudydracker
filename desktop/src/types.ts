@@ -174,6 +174,7 @@ export interface Settings {
   themeFamily: "normal";
   backgroundEffect: boolean;
   hideFeedImages: boolean;
+  hideProfilePictures: boolean;
   hideFeedPolls: boolean;
   showHelpButton: boolean;
   telemetryEnabled: boolean;
