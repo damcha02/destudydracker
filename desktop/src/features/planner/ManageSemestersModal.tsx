@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { formatDate, getCourseTasks, getSemesterCourses } from "../../lib/metrics";
-import { durationBetween, endTimeFor, getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
+import { durationBetween, endTimeFor, isValidIsoDate, getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
 import { TimeSpanFields } from "./TimeSpanFields";
+import { displayTime } from "../../lib/timeInput";
 import { makeId } from "../../lib/storage";
 import type { AppState, Course, Holiday, Semester, Task, TimetableEvent } from "../../types";
 
@@ -81,7 +82,7 @@ export function ManageSemestersModal({
   }
 
   function saveEditEvent() {
-    if (!editingEventId || !eventEditDraft.date || !eventEditDraft.time) {
+    if (!editingEventId || !isValidIsoDate(eventEditDraft.date) || !eventEditDraft.time) {
       setMessage("Pick a date and time first.");
       return;
     }
@@ -240,7 +241,7 @@ export function ManageSemestersModal({
 
   /** Used for every non-Sheet subtype (Lecture/Session/Other); Sheet units go through scheduleSheet below instead. */
   function scheduleTask(course: Course, task: Task) {
-    if (!semester || !scheduleDraft.date || !scheduleDraft.time) {
+    if (!semester || !isValidIsoDate(scheduleDraft.date) || !scheduleDraft.time) {
       setMessage("Pick a date and time first.");
       return;
     }
@@ -274,7 +275,7 @@ export function ManageSemestersModal({
    * completedOccurrences logic - no special-casing needed there since both are ordinary events.
    */
   function scheduleSheet(course: Course, task: Task) {
-    if (!semester || !scheduleDraft.releaseDate || !scheduleDraft.releaseTime || !scheduleDraft.dueDate || !scheduleDraft.dueTime) {
+    if (!semester || !isValidIsoDate(scheduleDraft.releaseDate) || !scheduleDraft.releaseTime || !isValidIsoDate(scheduleDraft.dueDate) || !scheduleDraft.dueTime) {
       setMessage("Pick a release and due date/time first.");
       return;
     }
@@ -604,7 +605,7 @@ export function ManageSemestersModal({
                                         ) : (
                                           <div key={event.id} className="manage-semesters-scheduled-row">
                                             <span className="section-note">
-                                              {timetableEventKindLabel[event.kind]} · {formatDate(event.date)} · {event.time}{event.endTime ? `–${event.endTime}` : ""}{event.repeatWeekly ? " · weekly" : ""}
+                                              {timetableEventKindLabel[event.kind]} · {formatDate(event.date)} · {displayTime(event.time)}{event.endTime ? `–${displayTime(event.endTime)}` : ""}{event.repeatWeekly ? " · weekly" : ""}
                                             </span>
                                             <button type="button" className="ghost-button small-button" onClick={() => startEditEvent(event)}>Edit</button>
                                             {eventRemoveConfirm === event.id ? (

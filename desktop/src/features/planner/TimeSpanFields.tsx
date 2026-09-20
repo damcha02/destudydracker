@@ -1,4 +1,6 @@
 import { endTimeFor } from "../../lib/plannerSchedule";
+import { TimeField } from "./TimeField";
+import { displayTime } from "../../lib/timeInput";
 
 const durationPresets = [15, 30, 45, 60, 75, 90, 105, 120, 150, 180, 240];
 
@@ -24,7 +26,7 @@ export function TimeSpanFields({ label, time, duration, onTimeChange, onDuration
       {label ? <span className="section-note">{label}</span> : null}
       <label className="manage-semesters-timespan-field">
         <span>Start</span>
-        <input type="time" value={time} onChange={(event) => onTimeChange(event.target.value)} />
+        <TimeField value={time} onChange={onTimeChange} ariaLabel="Start time" />
       </label>
       <label className="manage-semesters-timespan-field">
         <span>Duration</span>
@@ -32,7 +34,7 @@ export function TimeSpanFields({ label, time, duration, onTimeChange, onDuration
           {options.map((minutes) => <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>)}
         </select>
       </label>
-      <span className="section-note manage-semesters-timespan-end">{time && end ? `ends ${end}` : time ? "runs past midnight" : ""}</span>
+      <span className="section-note manage-semesters-timespan-end">{time && end ? `ends ${displayTime(end)}` : time ? "runs past midnight" : ""}</span>
     </span>
   );
 }

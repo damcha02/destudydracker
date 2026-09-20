@@ -2,8 +2,9 @@ import { useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { getCourseTasks, getSemesterCourses } from "../../lib/metrics";
 import { convertTodoRepeat, countCompletedUnitOccurrences, unitDecrementFor } from "../../lib/plannerActions";
-import { parseIsoDate } from "../../lib/plannerSchedule";
+import { isValidIsoDate, parseIsoDate } from "../../lib/plannerSchedule";
 import { makeId } from "../../lib/storage";
+import { TimeField } from "./TimeField";
 import type { AppState, DailyTodo, TimetableEvent, TimetableEventKind } from "../../types";
 
 export type TimetableModalPrefill = { date: string; time: string; semesterId: string | null };
@@ -72,12 +73,12 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
   }
 
   function validateTimes(startValue: string, endValue: string, requireStart: boolean) {
-    if (!date) {
-      setMessage("Pick a date first.");
+    if (!isValidIsoDate(date)) {
+      setMessage("Pick a valid date first.");
       return false;
     }
     if (requireStart && !startValue) {
-      setMessage("Pick a start time first.");
+      setMessage("Enter a valid start time first.");
       return false;
     }
     if (endValue && !startValue) {
@@ -290,11 +291,11 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
               </label>
               <label className="field compact-field">
                 <span>Time</span>
-                <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+                <TimeField value={time} onChange={setTime} />
               </label>
               <label className="field compact-field">
                 <span>End time</span>
-                <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                <TimeField value={endTime} onChange={setEndTime} />
               </label>
             </div>
           ) : (
@@ -308,11 +309,11 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
                 <div className="timetable-modal-dates">
                   <label className="field compact-field">
                     <span>Start time</span>
-                    <input type="time" value={time} onChange={(event) => setTime(event.target.value)} autoFocus />
+                    <TimeField value={time} onChange={setTime} autoFocus />
                   </label>
                   <label className="field compact-field">
                     <span>End time</span>
-                    <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                    <TimeField value={endTime} onChange={setEndTime} />
                   </label>
                   <button
                     type="button"

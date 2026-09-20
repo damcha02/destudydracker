@@ -63,6 +63,12 @@ export function durationBetween(start: string, end: string | null | undefined, f
   return minutes > 0 ? minutes : fallback;
 }
 
+/** True for a real calendar date written YYYY-MM-DD (some webviews fall back to a plain text box for date inputs). */
+export function isValidIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return toIsoDate(parseIsoDate(value)) === value;
+}
+
 export function parseIsoDate(iso: string): Date {
   const [year, month, day] = iso.split("-").map(Number);
   return new Date(year, (month || 1) - 1, day || 1);

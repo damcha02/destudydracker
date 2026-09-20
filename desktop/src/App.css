@@ -22321,3 +22321,14 @@ input[type="color"] {
   align-self: center;
   white-space: nowrap;
 }
+
+.time-field {
+  min-width: 0;
+  width: 7.5em;
+  font-variant-numeric: tabular-nums;
+}
+
+.time-field.invalid {
+  outline: 2px solid var(--danger, #d64545);
+  outline-offset: -1px;
+}

@@ -68,7 +68,9 @@ import { isTauriApp } from "./lib/obsidian";
 import { applyUndoPatch, countCompletedUnitOccurrences, diffForUndo, isEmptyUndoPatch, getOverdueTodos, setTodoOccurrenceTime, splitRecurringTodoAt, unitDecrementFor } from "./lib/plannerActions";
 import type { UndoPatch } from "./lib/plannerActions";
 import { TimeSpanFields } from "./features/planner/TimeSpanFields";
-import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
+import { TimeField } from "./features/planner/TimeField";
+import { displayTime } from "./lib/timeInput";
+import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
@@ -7600,8 +7602,8 @@ function App() {
       }
     } else if (taskDraft.scheduleDate || taskDraft.scheduleTime) {
       const end = endTimeFor(taskDraft.scheduleTime, taskDraft.scheduleDuration);
-      if (!taskDraft.scheduleDate || !taskDraft.scheduleTime) {
-        setMessage("Fill in both a date and a start time to schedule it, or clear them.");
+      if (!isValidIsoDate(taskDraft.scheduleDate) || !taskDraft.scheduleTime) {
+        setMessage("Fill in both a valid date and a start time to schedule it, or clear them.");
         return;
       }
       if (!end) {
@@ -8501,7 +8503,7 @@ function App() {
 
   function saveCalendarEntryEdit(entryId: string) {
     if (!isValidCalendarTime(calendarEditDraft.startTime) || !isValidCalendarTime(calendarEditDraft.endTime)) {
-      setMessage("Use 24-hour time like 09:00 or 17:30.");
+      setMessage("Enter a valid time, like 9:30 AM or 17:30.");
       return;
     }
     const startMinutes = timeToMinutes(calendarEditDraft.startTime);
@@ -9014,25 +9016,11 @@ function App() {
           <div className="calendar-edit-inline">
             <label>
               <span>Start</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-2][0-9]:[0-5][0-9]"
-                placeholder="09:00"
-                value={calendarEditDraft.startTime}
-                onChange={(event) => setCalendarEditDraft((current) => ({ ...current, startTime: event.target.value }))}
-              />
+              <TimeField value={calendarEditDraft.startTime} onChange={(startTime) => setCalendarEditDraft((current) => ({ ...current, startTime }))} ariaLabel="Start time" />
             </label>
             <label>
               <span>End</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-2][0-9]:[0-5][0-9]"
-                placeholder="10:00"
-                value={calendarEditDraft.endTime}
-                onChange={(event) => setCalendarEditDraft((current) => ({ ...current, endTime: event.target.value }))}
-              />
+              <TimeField value={calendarEditDraft.endTime} onChange={(endTime) => setCalendarEditDraft((current) => ({ ...current, endTime }))} ariaLabel="End time" />
             </label>
             <button type="button" className="calendar-primary-button" onClick={() => saveCalendarEntryEdit(entry.id)}>
               Save
@@ -9237,7 +9225,7 @@ function App() {
         <div className="calendar-timeline-entry-copy">
           <strong>{isStandaloneTodo ? <span className="timetable-todo-icon" aria-hidden="true">&#9679;</span> : null}{row.title}</strong>
           <span>{isStandaloneTodo ? "To-do" : (course?.name ?? "General")}{isSolvedSheet ? <em className="timetable-solved-badge">Solved</em> : null}</span>
-          {row.time ? <small>{row.time}{row.endTime ? `–${row.endTime}` : ""}</small> : null}
+          {row.time ? <small>{displayTime(row.time)}{row.endTime ? `–${displayTime(row.endTime)}` : ""}</small> : null}
         </div>
         <input
           className="calendar-timeline-checkbox"
