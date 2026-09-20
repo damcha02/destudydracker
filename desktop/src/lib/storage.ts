@@ -1198,8 +1198,22 @@ function normalizeDailyTodos(todos: unknown): DailyTodo[] {
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
       repeatWeekly: Boolean(record.repeatWeekly),
       completedOccurrences: Array.isArray(record.completedOccurrences) ? record.completedOccurrences.filter((date): date is string => typeof date === "string") : [],
+      recurrenceEndDate: typeof record.recurrenceEndDate === "string" ? record.recurrenceEndDate : null,
+      skippedOccurrences: Array.isArray(record.skippedOccurrences) ? record.skippedOccurrences.filter((date): date is string => typeof date === "string") : [],
+      occurrenceTimes: normalizeOccurrenceTimes(record.occurrenceTimes),
     }];
   });
+}
+
+function normalizeOccurrenceTimes(value: unknown): DailyTodo["occurrenceTimes"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: DailyTodo["occurrenceTimes"] = {};
+  for (const [date, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { time?: unknown; endTime?: unknown };
+    result[date] = { time: typeof record.time === "string" ? record.time : null, endTime: typeof record.endTime === "string" ? record.endTime : null };
+  }
+  return result;
 }
 
 function normalizeVisibleTabs(visibleTabs: unknown): Record<TabKey, boolean> {

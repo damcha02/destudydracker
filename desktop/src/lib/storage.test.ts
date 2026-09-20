@@ -368,7 +368,7 @@ describe("loadAppState - migration and corruption", () => {
       dailyTodos: [{ id: "todo1", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
     }));
     const result = loadAppState();
-    expect(result.dailyTodos[0]).toMatchObject({ time: null, endTime: null, notes: "", repeatWeekly: false, completedOccurrences: [] });
+    expect(result.dailyTodos[0]).toMatchObject({ time: null, endTime: null, notes: "", repeatWeekly: false, completedOccurrences: [], recurrenceEndDate: null, skippedOccurrences: [], occurrenceTimes: {} });
   });
 
   it("defaults the new planner arrays to [] when the stored blob predates them", () => {
@@ -392,7 +392,7 @@ describe("loadAppState - migration and corruption", () => {
         completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z",
       }],
       holidays: [{ id: "holiday1", semesterId: "sem1", startDate: "2026-12-20", endDate: "2027-01-05", label: "Winter break", createdAt: "2026-01-01T00:00:00.000Z" }],
-      dailyTodos: [{ id: "todo1", date: "2026-09-07", time: null, endTime: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z", repeatWeekly: false, completedOccurrences: [] }],
+      dailyTodos: [{ id: "todo1", date: "2026-09-07", time: null, endTime: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z", repeatWeekly: false, completedOccurrences: [], recurrenceEndDate: null, skippedOccurrences: [], occurrenceTimes: {} }],
     };
     saveAppState(state, createInitialPersistenceBaselines(defaultState));
     const loaded = loadAppState();

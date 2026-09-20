@@ -192,7 +192,8 @@ export function ManageSemestersModal({
   }
 
   function removeHoliday(holidayId: string) {
-    setState((current) => ({ ...current, holidays: current.holidays.filter((holiday) => holiday.id !== holidayId) }));
+    const holiday = state.holidays.find((item) => item.id === holidayId);
+    onDeleteWithUndo(`"${holiday?.label ?? "Holiday"}" removed`, (current) => ({ ...current, holidays: current.holidays.filter((item) => item.id !== holidayId) }));
   }
 
   function addCourse() {

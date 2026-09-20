@@ -62,6 +62,9 @@ function dailyTodo(overrides: Partial<DailyTodo>): DailyTodo {
     createdAt: "2026-01-01T00:00:00.000Z",
     repeatWeekly: false,
     completedOccurrences: [],
+    recurrenceEndDate: null,
+    skippedOccurrences: [],
+    occurrenceTimes: {},
     ...overrides,
   };
 }
@@ -199,6 +202,20 @@ describe("countEventOccurrenceDates", () => {
 });
 
 describe("expandDailyTodoDates", () => {
+  it("honors a recurrence end date, skipped dates and no date at all", () => {
+    const todo = dailyTodo({ date: "2026-09-07", repeatWeekly: true, recurrenceEndDate: "2026-09-21", skippedOccurrences: ["2026-09-14"] });
+    expect(expandDailyTodoDates(todo, "2026-09-01", "2026-10-31")).toEqual(["2026-09-07", "2026-09-21"]);
+    expect(expandDailyTodoDates(dailyTodo({ date: "" }), "2026-01-01", "2026-12-31")).toEqual([]);
+  });
+
+  it("applies per-occurrence time overrides in the daily timeline", () => {
+    const todo = dailyTodo({ repeatWeekly: true, time: "09:00", endTime: "09:30", occurrenceTimes: { "2026-09-14": { time: "15:00", endTime: "15:30" } } });
+    const rows = buildDailyTimeline("2026-09-14", { eventOccurrences: [], exams: [], calendarEntries: [], dailyTodos: [todo] });
+    expect(rows[0]).toMatchObject({ time: "15:00", endTime: "15:30" });
+    const normal = buildDailyTimeline("2026-09-21", { eventOccurrences: [], exams: [], calendarEntries: [], dailyTodos: [todo] });
+    expect(normal[0]).toMatchObject({ time: "09:00" });
+  });
+
   it("returns just its own date for a non-repeating to-do, when in range", () => {
     const todo = dailyTodo({ date: "2026-09-10" });
     expect(expandDailyTodoDates(todo, "2026-09-07", "2026-09-28")).toEqual(["2026-09-10"]);

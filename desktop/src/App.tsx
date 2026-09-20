@@ -65,6 +65,8 @@ import { TRAVLE_MAP_COUNTRIES } from "./lib/travleMapData";
 import { filterTravleCountries, findTravleCountry, getTravleDisplayPath, getTravleGuessStates, getTravlePuzzleForDate, getTravlePuzzleId, getTravleShortestPath, getTravleSolvedPath, isTravleRouteSolved, makeTravleSeedSalt, TRAVLE_COUNTRY_COUNT, TRAVLE_MAX_GUESSES } from "./lib/travle";
 import { getWordleAnswerForDate, getWordleHardModeViolation, getWordleKeyboardState, getWordlePuzzleId, isAcceptedWordleGuess, makeWordleSeedSalt, normalizeWordleGuess, scoreWordleGuess, WORDLE_ACCEPTED_GUESS_COUNT, WORDLE_ANSWER_COUNT, WORDLE_MAX_GUESSES, WORDLE_WORD_LENGTH } from "./lib/wordle";
 import { isTauriApp } from "./lib/obsidian";
+import { applyUndoPatch, countCompletedUnitOccurrences, diffForUndo, isEmptyUndoPatch, getOverdueTodos, setTodoOccurrenceTime, splitRecurringTodoAt, unitDecrementFor } from "./lib/plannerActions";
+import type { UndoPatch } from "./lib/plannerActions";
 import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
@@ -1036,6 +1038,18 @@ const calendarTimelineHourHeight = 72;
 const calendarTimelineStartMinutes = calendarTimelineStartHour * 60;
 const calendarTimelineEndMinutes = 24 * 60;
 const calendarTimelineTotalMinutes = calendarTimelineEndMinutes - calendarTimelineStartMinutes;
+
+/** A block always spans exactly its scheduled duration on the timeline (height proportional to
+ * minutes, never padded or floored); `density` only tells the CSS how much content fits inside. */
+function getTimelineBlockGeometry(startMinutes: number, endMinutes: number) {
+  const clippedStart = Math.max(startMinutes, calendarTimelineStartMinutes);
+  const clippedEnd = Math.min(Math.max(endMinutes, clippedStart + 1), calendarTimelineEndMinutes);
+  const pxPerMinute = calendarTimelineHourHeight / 60;
+  const top = (clippedStart - calendarTimelineStartMinutes) * pxPerMinute;
+  const height = (clippedEnd - clippedStart) * pxPerMinute;
+  const density: "roomy" | "compact" | "tiny" = height >= 56 ? "roomy" : height >= 30 ? "compact" : "tiny";
+  return { top, height, density };
+}
 
 function gardenHash(value: string) {
   let hash = 2166136261;
@@ -3760,7 +3774,7 @@ function App() {
   const [focusTip, setFocusTip] = useState<FocusTip | null>(null);
   const [activeFocusMilestone, setActiveFocusMilestone] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [undoState, setUndoState] = useState<{ label: string; snapshot: AppState } | null>(null);
+  const [undoState, setUndoState] = useState<{ label: string; patch: UndoPatch } | null>(null);
   const [endlessInactivityPrompt, setEndlessInactivityPrompt] = useState<EndlessInactivityPrompt | null>(null);
   const [timerInactivityNoticeVisible, setTimerInactivityNoticeVisible] = useState(false);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
@@ -3876,8 +3890,8 @@ function App() {
   // Dragging a to-do that has no time yet, from the Unscheduled panel onto the timeline canvas to
   // give it its first time slot - distinct from timetableMoveDragRef, which repositions a pill
   // already on the canvas, because the drag doesn't start from inside the canvas at all.
-  const unscheduledTodoDragRef = useRef<{ todoId: string } | null>(null);
-  const [timetableRecurrenceConfirm, setTimetableRecurrenceConfirm] = useState<{ eventId: string; originalDate: string; newDate: string; newTime: string; newEndTime: string | null } | null>(null);
+  const unscheduledTodoDragRef = useRef<{ todoId: string; occurrenceDate: string } | null>(null);
+  const [timetableRecurrenceConfirm, setTimetableRecurrenceConfirm] = useState<{ eventId: string | null; todoId: string | null; originalDate: string; newDate: string; newTime: string; newEndTime: string | null } | null>(null);
   const [calendarToday, setCalendarToday] = useState(localIsoDate);
   const [personalNameDraft, setPersonalNameDraft] = useState(() => state.settings.userName);
   const [personalDailyGoalHoursDraft, setPersonalDailyGoalHoursDraft] = useState(() => String((state.settings.dailyGoalMinutes ?? 120) / 60));
@@ -4601,12 +4615,24 @@ function App() {
       setTimetableDragPreview(null);
       if (!drag || !timeline || !isOverTimeline(event.clientX, event.clientY)) return;
       const target = getTimelineTimeFromClientY(timeline, event.clientY);
-      setState((current) => ({
-        ...current,
-        dailyTodos: current.dailyTodos.map((todo) =>
-          todo.id === drag.todoId ? { ...todo, time: target.time, endTime: addMinutesToTime(target.time, 30) } : todo,
-        ),
-      }));
+      const todo = latestStateRef.current.dailyTodos.find((item) => item.id === drag.todoId);
+      if (!todo) return;
+      commitTimetableOccurrenceChange({ kind: "todo", todo }, drag.occurrenceDate, target.time, addMinutesToTime(target.time, 30));
+    }
+
+    function cancelDrags(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      calendarMoveDragRef.current = null;
+      calendarResizeRef.current = null;
+      timetableMoveDragRef.current = null;
+      timetableResizeRef.current = null;
+      unscheduledTodoDragRef.current = null;
+      setCalendarDragEntryId(null);
+      setCalendarResizeEntryId(null);
+      setCalendarMovePreview(null);
+      setTimetableDragRowId(null);
+      setTimetableResizeRowId(null);
+      setTimetableDragPreview(null);
     }
 
     window.addEventListener("mousemove", handleResizeMove);
@@ -4619,7 +4645,9 @@ function App() {
     window.addEventListener("mouseup", handleTimetableResizeEnd);
     window.addEventListener("mousemove", handleUnscheduledTodoDrag);
     window.addEventListener("mouseup", handleUnscheduledTodoDragEnd);
+    window.addEventListener("keydown", cancelDrags);
     return () => {
+      window.removeEventListener("keydown", cancelDrags);
       window.removeEventListener("mousemove", handleResizeMove);
       window.removeEventListener("mouseup", handleResizeEnd);
       window.removeEventListener("mousemove", handleMoveDrag);
@@ -7739,19 +7767,21 @@ function App() {
     }));
   }
 
-  /** Wraps a destructive setState update with an "Undo" toast: snapshots state just before the
-   * update, applies it, and lets undoLastDelete jump straight back to that snapshot. Only for
+  /** Wraps a destructive setState update with an "Undo" toast: records what the update
+   * changes, applies it, and lets undoLastDelete put exactly that back. Only for
    * deletes - edits and toggles don't need this since they're cheap to redo by hand. */
   function performDelete(label: string, updater: (current: AppState) => AppState) {
-    setState((current) => {
-      setUndoState({ label, snapshot: current });
-      return updater(current);
-    });
+    // The undo patch only covers what this delete touched, so undoing can never roll back unrelated
+    // state (a study session finished, a timer tick) that happened in the meantime.
+    const patch = diffForUndo(latestStateRef.current, updater(latestStateRef.current));
+    setState(updater);
+    if (!isEmptyUndoPatch(patch)) setUndoState({ label, patch });
   }
 
   function undoLastDelete() {
     if (!undoState) return;
-    setState(undoState.snapshot);
+    const { patch } = undoState;
+    setState((current) => applyUndoPatch(current, patch));
     setUndoState(null);
   }
 
@@ -7830,7 +7860,8 @@ function App() {
   }
 
   function removeExam(examId: string) {
-    setState((current) => ({ ...current, exams: current.exams.filter((exam) => exam.id !== examId) }));
+    const exam = state.exams.find((item) => item.id === examId);
+    performDelete(`"${exam?.title ?? "Exam"}" removed`, (current) => ({ ...current, exams: current.exams.filter((item) => item.id !== examId) }));
   }
 
   function startEditingExam(exam: Exam) {
@@ -8410,7 +8441,7 @@ function App() {
   }
 
   function removeCalendarEntry(entryId: string) {
-    setState((current) => ({
+    performDelete("Scheduled task removed", (current) => ({
       ...current,
       calendarEntries: current.calendarEntries.filter((entry) => entry.id !== entryId || entry.completed),
     }));
@@ -8533,12 +8564,16 @@ function App() {
     const eventTarget = event.target as HTMLElement;
     if (eventTarget.closest("button,input")) return;
     event.preventDefault();
-    unscheduledTodoDragRef.current = { todoId: row.refId };
+    unscheduledTodoDragRef.current = { todoId: row.refId, occurrenceDate: row.occurrenceDate };
     setTimetableDragRowId(row.id);
   }
 
   function commitTimetableOccurrenceChange(target: TimetableRowTarget, originalDate: string, newTime: string, newEndTime: string | null) {
     if (target.kind === "todo") {
+      if (target.todo.repeatWeekly) {
+        setTimetableRecurrenceConfirm({ eventId: null, todoId: target.todo.id, originalDate, newDate: originalDate, newTime, newEndTime });
+        return;
+      }
       setState((current) => ({
         ...current,
         dailyTodos: current.dailyTodos.map((todo) => (todo.id === target.todo.id ? { ...todo, time: newTime, endTime: newEndTime } : todo)),
@@ -8553,12 +8588,25 @@ function App() {
       }));
       return;
     }
-    setTimetableRecurrenceConfirm({ eventId: eventSnapshot.id, originalDate, newDate: originalDate, newTime, newEndTime });
+    setTimetableRecurrenceConfirm({ eventId: eventSnapshot.id, todoId: null, originalDate, newDate: originalDate, newTime, newEndTime });
   }
 
   function resolveTimetableRecurrenceConfirm(scope: "occurrence" | "future") {
     const pending = timetableRecurrenceConfirm;
     if (!pending) return;
+    if (pending.todoId) {
+      const todoId = pending.todoId;
+      setState((current) => {
+        const todo = current.dailyTodos.find((item) => item.id === todoId);
+        if (!todo) return current;
+        const replacement = scope === "occurrence"
+          ? [setTodoOccurrenceTime(todo, pending.originalDate, pending.newTime, pending.newEndTime)]
+          : splitRecurringTodoAt(todo, pending.originalDate, pending.newTime, pending.newEndTime, makeId);
+        return { ...current, dailyTodos: current.dailyTodos.flatMap((item) => (item.id === todoId ? replacement : [item])) };
+      });
+      setTimetableRecurrenceConfirm(null);
+      return;
+    }
     setState((current) => {
       const event = current.timetableEvents.find((item) => item.id === pending.eventId);
       if (!event) return current;
@@ -8948,18 +8996,17 @@ function App() {
     const isResizing = calendarResizeEntryId === entry.id;
     const entryStartMinutes = entry.startTime ? timeToMinutes(entry.startTime) : calendarTimelineStartMinutes;
     const entryEndMinutes = entry.endTime ? timeToMinutes(entry.endTime) : entryStartMinutes + 60;
-    const entryTop = ((entryStartMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
-    const entryHeight = Math.max(58, ((entryEndMinutes - entryStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+    const entryGeometry = getTimelineBlockGeometry(entryStartMinutes, entryEndMinutes);
     const isSplit = Boolean(layout && layout.columnCount > 1);
     const entryStyle = {
       "--entry-color": course?.color ?? "var(--accent)",
-      ...(entry.startTime ? { top: `${Math.max(4, entryTop + 4)}px`, height: `${entryHeight}px` } : {}),
+      ...(entry.startTime ? { top: `${entryGeometry.top}px`, height: `${isEditing ? Math.max(58, entryGeometry.height) : entryGeometry.height}px` } : {}),
       ...(entry.startTime ? getOverlapSplitStyle(layout) : {}),
     } as CSSProperties;
     return (
       <div
         key={entry.id}
-        className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""}`}
+        className={`calendar-timeline-entry ${entry.startTime ? "scheduled" : "unscheduled"} density-${entry.startTime && !isEditing ? entryGeometry.density : "roomy"} ${entry.completed ? "done" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""}`}
         onMouseDown={(event) => !isEditing && startCalendarEntryMove(event, entry)}
         style={entryStyle}
       >
@@ -9064,13 +9111,16 @@ function App() {
         return { ...current, timetableEvents };
       }
 
-      // Checking off any other occurrence updates its course task's completed-units count; unchecking backs it out.
+      // Checking off any other occurrence updates its course task's completed-units count;
+      // unchecking backs it out - except for occurrences past the task's total, which were never
+      // counted in the first place (see unitDecrementFor).
+      const completedBefore = countCompletedUnitOccurrences(current.timetableEvents, event.taskId);
       return {
         ...current,
         timetableEvents,
         tasks: current.tasks.map((task) =>
           task.id === event.taskId
-            ? { ...task, completedUnits: clamp(task.completedUnits + (wasCompleted ? -1 : 1), 0, task.totalUnits) }
+            ? { ...task, completedUnits: clamp(task.completedUnits + (wasCompleted ? -unitDecrementFor(completedBefore, task.totalUnits, 1) : 1), 0, task.totalUnits) }
             : task,
         ),
       };
@@ -9079,10 +9129,24 @@ function App() {
 
   function removeGeneratedRow(row: DailyTimelineRow) {
     if (row.kind === "todo") {
-      // Unlike a recurring TimetableEvent, a to-do has no per-occurrence skip override - removing
-      // any occurrence of a repeating to-do deletes the whole series. To drop just one occurrence,
-      // uncheck it instead; to stop the series, edit the to-do and turn off "Repeat weekly".
+      // Like a recurring TimetableEvent, removing one occurrence of a repeating to-do only skips
+      // that date; the whole series is deleted from the to-do's Edit dialog.
       const todo = state.dailyTodos.find((item) => item.id === row.refId);
+      if (todo?.repeatWeekly) {
+        performDelete(`"${todo.title}" removed for this date`, (current) => ({
+          ...current,
+          dailyTodos: current.dailyTodos.map((item) =>
+            item.id === row.refId
+              ? {
+                  ...item,
+                  skippedOccurrences: [...item.skippedOccurrences, row.occurrenceDate],
+                  completedOccurrences: item.completedOccurrences.filter((date) => date !== row.occurrenceDate),
+                }
+              : item,
+          ),
+        }));
+        return;
+      }
       performDelete(`"${todo?.title ?? "To-do"}" removed`, (current) => ({ ...current, dailyTodos: current.dailyTodos.filter((item) => item.id !== row.refId) }));
       return;
     }
@@ -9108,11 +9172,12 @@ function App() {
             : item,
         );
         if (!wasCompleted || event.kind === "sheet-release") return { ...current, timetableEvents };
+        const completedBefore = countCompletedUnitOccurrences(current.timetableEvents, event.taskId);
         return {
           ...current,
           timetableEvents,
           tasks: current.tasks.map((task) =>
-            task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - 1, 0, task.totalUnits) } : task,
+            task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - unitDecrementFor(completedBefore, task.totalUnits, 1), 0, task.totalUnits) } : task,
           ),
         };
       }
@@ -9122,11 +9187,12 @@ function App() {
         return { ...current, timetableEvents };
       }
       const completedCount = event.completedOccurrences.length;
+      const completedBefore = countCompletedUnitOccurrences(current.timetableEvents, event.taskId);
       return {
         ...current,
         timetableEvents,
         tasks: current.tasks.map((task) =>
-          task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - completedCount, 0, task.totalUnits) } : task,
+          task.id === event.taskId ? { ...task, completedUnits: clamp(task.completedUnits - unitDecrementFor(completedBefore, task.totalUnits, completedCount), 0, task.totalUnits) } : task,
         ),
       };
     });
@@ -9147,12 +9213,11 @@ function App() {
     const isUnscheduled = row.kind === "todo" && !row.time;
     const startMinutes = row.time ? timeToMinutes(row.time) : calendarTimelineStartMinutes;
     const endMinutes = row.endTime ? timeToMinutes(row.endTime) : startMinutes + 60;
-    const top = ((startMinutes - calendarTimelineStartMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight;
-    const height = Math.max(58, ((endMinutes - startMinutes) / calendarTimelineTotalMinutes) * calendarTimelineHeight - 8);
+    const geometry = getTimelineBlockGeometry(startMinutes, endMinutes);
     const style = isUnscheduled ? ({ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties) : ({
       "--entry-color": course?.color ?? "var(--accent)",
-      top: `${Math.max(4, top + 4)}px`,
-      height: `${height}px`,
+      top: `${geometry.top}px`,
+      height: `${geometry.height}px`,
       ...getOverlapSplitStyle(layout),
     } as CSSProperties);
     const isSolvedSheet = row.kind === "sheet-deadline" && row.completed;
@@ -9164,7 +9229,7 @@ function App() {
     return (
       <div
         key={row.id}
-        className={`calendar-timeline-entry ${isUnscheduled ? "unscheduled" : "scheduled"} generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""} ${isStandaloneTodo ? "standalone-todo" : "subject-bound"}`}
+        className={`calendar-timeline-entry ${isUnscheduled ? "unscheduled" : "scheduled"} density-${isUnscheduled ? "roomy" : geometry.density} generated ${row.completed ? "done" : ""} ${draggable ? "editable-draggable" : ""} ${isDragging ? "dragging" : ""} ${isResizing ? "resizing" : ""} ${isSplit ? "overlap-split" : ""} ${isStandaloneTodo ? "standalone-todo" : "subject-bound"}`}
         style={style}
         onMouseDown={isUnscheduled ? (event) => startUnscheduledTodoDrag(event, row) : (event) => startTimetableRowMove(event, row)}
         title={isUnscheduled && timetableEditMode ? "Drag onto the timeline to schedule" : undefined}
@@ -9396,7 +9461,7 @@ function App() {
             ) : null}
             {timetableRecurrenceConfirm ? (
               <div className="calendar-drag-preview timetable-recurrence-confirm">
-                <span>This item repeats weekly. Move:</span>
+                <span>Repeats weekly. Apply to:</span>
                 <div className="timetable-recurrence-confirm-actions">
                   <button type="button" className="ghost-button small-button" onClick={() => resolveTimetableRecurrenceConfirm("occurrence")}>This occurrence only</button>
                   <button type="button" className="ghost-button small-button" onClick={() => resolveTimetableRecurrenceConfirm("future")}>All future occurrences</button>
@@ -9454,6 +9519,29 @@ function App() {
           ))}
         </div>
 
+        {(() => {
+          const overdueTodos = getOverdueTodos(state.dailyTodos, localIsoDate(new Date()));
+          if (!overdueTodos.length) return null;
+          return (
+            <div className="planner-overdue-banner" role="status">
+              <span>{overdueTodos.length} overdue to-do{overdueTodos.length === 1 ? "" : "s"}: {overdueTodos.slice(0, 2).map((todo) => todo.title).join(", ")}{overdueTodos.length > 2 ? ` +${overdueTodos.length - 2} more` : ""}</span>
+              <button
+                type="button"
+                className="ghost-button small-button"
+                onClick={() => {
+                  const todayIso = localIsoDate(new Date());
+                  const overdueIds = new Set(overdueTodos.map((todo) => todo.id));
+                  setState((current) => ({
+                    ...current,
+                    dailyTodos: current.dailyTodos.map((todo) => (overdueIds.has(todo.id) ? { ...todo, date: todayIso } : todo)),
+                  }));
+                }}
+              >
+                Move to today
+              </button>
+            </div>
+          );
+        })()}
         <div className={`calendar-grid ${calendarView === "week" ? "week-view" : "month-view"}`}>
           {calendarDays.map((day) => {
             const entries = calendarEntriesByDate.get(day.iso) ?? [];
@@ -9469,12 +9557,14 @@ function App() {
             const visibleExamLimit = wabiWeek ? exams.length : fieldNotebookWeek ? 4 : 2;
             const visibleDeadlineLimit = wabiWeek ? deadlines.length : fieldNotebookWeek ? 4 : 2;
             const visibleTimetableLimit = wabiWeek ? timetableOccurrences.length : fieldNotebookWeek ? 6 : 3;
+            const visibleTodoLimit = wabiWeek ? todos.length : fieldNotebookWeek ? 6 : 3;
             const visibleItemCount =
+              Math.min(todos.length, visibleTodoLimit) +
               Math.min(entries.length, visibleEntryLimit) +
               Math.min(exams.length, visibleExamLimit) +
               Math.min(deadlines.length, visibleDeadlineLimit) +
               Math.min(timetableOccurrences.length, visibleTimetableLimit);
-            const hiddenItemCount = entries.length + exams.length + deadlines.length + timetableOccurrences.length - visibleItemCount;
+            const hiddenItemCount = todos.length + entries.length + exams.length + deadlines.length + timetableOccurrences.length - visibleItemCount;
 
             return (
               <section
@@ -9496,7 +9586,7 @@ function App() {
 
                 {todos.length ? (
                   <div className="calendar-day-todos" aria-label="To-dos">
-                    {todos.map(({ todo, occurrenceDate }) => {
+                    {todos.slice(0, visibleTodoLimit).map(({ todo, occurrenceDate }) => {
                       const isDone = todo.repeatWeekly ? todo.completedOccurrences.includes(occurrenceDate) : todo.completed;
                       return (
                         <div key={`${todo.id}:${occurrenceDate}`} className={`calendar-pill todo-pill ${isDone ? "completed" : ""}`}>
@@ -9603,6 +9693,17 @@ function App() {
             <span>Momentum</span>
             <strong>{focusMomentum}</strong>
           </div>
+          {(() => {
+            const todayIso = localIsoDate(new Date());
+            const todayTodos = state.dailyTodos.filter((todo) => expandDailyTodoDates(todo, todayIso, todayIso).length > 0);
+            const doneTodos = todayTodos.filter((todo) => (todo.repeatWeekly ? todo.completedOccurrences.includes(todayIso) : todo.completed)).length;
+            return todayTodos.length ? (
+              <div>
+                <span>To-dos</span>
+                <strong>{doneTodos}/{todayTodos.length}</strong>
+              </div>
+            ) : null;
+          })()}
         </div>
 
         <div className="design-goal-meter">
@@ -12107,6 +12208,7 @@ function App() {
           target={timetableModalState}
           onClose={() => setTimetableModalState(null)}
           onOpenManageSemesters={() => { setTimetableModalState(null); setManageSemestersOpen(true); }}
+          onDeleteWithUndo={performDelete}
         />
       ) : null}
 

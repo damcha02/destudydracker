@@ -8833,11 +8833,77 @@ input[type="color"] {
   align-items: center;
   min-width: 0;
   overflow: hidden;
+  box-sizing: border-box;
   padding: 4px 11px 8px;
   border-radius: var(--r-md);
   background: color-mix(in oklch, var(--entry-color) 12%, var(--surface-raised));
   border: 1px solid color-mix(in oklch, var(--entry-color) 36%, transparent);
   cursor: grab;
+}
+
+/* Blocks are sized to their exact scheduled duration (see getTimelineBlockGeometry), so short
+   ones drop secondary text instead of growing past their slot. */
+.calendar-timeline-entry.density-compact {
+  padding: 2px 9px;
+  gap: 8px;
+}
+
+.calendar-timeline-entry.density-compact .calendar-timeline-entry-copy {
+  grid-auto-flow: column;
+  grid-auto-columns: auto;
+  justify-content: start;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.calendar-timeline-entry.density-compact .calendar-timeline-entry-copy > span {
+  display: none;
+}
+
+.calendar-timeline-entry.density-tiny {
+  padding: 0 8px;
+  gap: 6px;
+  font-size: 0.72rem;
+  line-height: 1.1;
+}
+
+.calendar-timeline-entry.density-tiny .calendar-timeline-entry-copy {
+  grid-auto-flow: column;
+  grid-auto-columns: auto;
+  justify-content: start;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.calendar-timeline-entry.density-tiny .calendar-timeline-entry-copy > span,
+.calendar-timeline-entry.density-tiny .calendar-timeline-entry-copy > small {
+  display: none;
+}
+
+.calendar-timeline-entry.density-tiny.generated .calendar-timeline-entry-actions .small-button {
+  padding: 0 6px;
+  height: 15px;
+  font-size: 0.6rem;
+  line-height: 15px;
+}
+
+.calendar-timeline-entry.density-compact.generated .calendar-timeline-entry-actions .small-button {
+  padding: 1px 7px;
+  font-size: 0.66rem;
+}
+
+.calendar-timeline-entry.density-compact .calendar-timeline-checkbox,
+.calendar-timeline-entry.density-tiny .calendar-timeline-checkbox {
+  width: 14px;
+  height: 14px;
+}
+
+.calendar-timeline-entry.density-compact .calendar-resize-handle,
+.calendar-timeline-entry.density-tiny .calendar-resize-handle {
+  bottom: 0;
+  height: 5px;
 }
 
 .calendar-timeline-entry.scheduled {
@@ -22222,4 +22288,17 @@ input[type="color"] {
   padding: 0;
   gap: 6px;
   font-size: 0.82rem;
+}
+
+.planner-overdue-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in oklch, var(--warn, var(--accent)) 45%, transparent);
+  background: color-mix(in oklch, var(--warn, var(--accent)) 10%, var(--surface-raised));
+  font-size: 0.85rem;
 }

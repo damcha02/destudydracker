@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { getCourseTasks, getSemesterCourses } from "../../lib/metrics";
+import { convertTodoRepeat, countCompletedUnitOccurrences, unitDecrementFor } from "../../lib/plannerActions";
+import { parseIsoDate } from "../../lib/plannerSchedule";
 import { makeId } from "../../lib/storage";
 import type { AppState, DailyTodo, TimetableEvent, TimetableEventKind } from "../../types";
 
@@ -20,6 +22,7 @@ type Props = {
   target: TimetableModalTarget;
   onClose: () => void;
   onOpenManageSemesters: () => void;
+  onDeleteWithUndo: (label: string, updater: (current: AppState) => AppState) => void;
 };
 
 /**
@@ -29,7 +32,7 @@ type Props = {
  * truth for the stored TimetableEvent schema (see makeTimetableEvent). This modal still supports
  * editing an existing subject-bound occurrence in place, since that isn't a creation path.
  */
-export function TimetableEventModal({ state, setState, setMessage, target, onClose, onOpenManageSemesters }: Props) {
+export function TimetableEventModal({ state, setState, setMessage, target, onClose, onOpenManageSemesters, onDeleteWithUndo }: Props) {
   const isEdit = target.mode === "edit";
   const editingEvent = target.mode === "edit" && target.entityKind === "event" ? target.event : null;
   const editingTodo = target.mode === "edit" && target.entityKind === "todo" ? target.todo : null;
@@ -56,6 +59,7 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
   const [url, setUrl] = useState(editingEvent?.url ?? "");
   const [repeatWeekly, setRepeatWeekly] = useState(editingEvent?.repeatWeekly ?? editingTodo?.repeatWeekly ?? false);
   const [notes, setNotes] = useState(editingTodo?.notes ?? "");
+  const [recurrenceEnd, setRecurrenceEnd] = useState(editingTodo?.recurrenceEndDate ?? "");
   // To-dos default to unscheduled - the time picker only appears once the user explicitly opts
   // in via "+ Add Time", instead of implying every to-do needs a slot on the calendar.
   const [timeExpanded, setTimeExpanded] = useState(Boolean(editingTodo?.time));
@@ -67,6 +71,26 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
     setTaskId(nextCourseId ? getCourseTasks(state, nextCourseId)[0]?.id ?? "" : "");
   }
 
+  function validateTimes(startValue: string, endValue: string, requireStart: boolean) {
+    if (!date) {
+      setMessage("Pick a date first.");
+      return false;
+    }
+    if (requireStart && !startValue) {
+      setMessage("Pick a start time first.");
+      return false;
+    }
+    if (endValue && !startValue) {
+      setMessage("Set a start time before an end time.");
+      return false;
+    }
+    if (startValue && endValue && endValue <= startValue) {
+      setMessage("End time must be after the start time.");
+      return false;
+    }
+    return true;
+  }
+
   function submit() {
     if (editingTodo) {
       const title = label.trim();
@@ -74,13 +98,34 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
         setMessage("Give this task a title first.");
         return;
       }
+      const nextTime = timeExpanded ? time : "";
+      const nextEndTime = timeExpanded ? endTime : "";
+      if (!validateTimes(nextTime, nextEndTime, false)) return;
+      if (repeatWeekly && recurrenceEnd && recurrenceEnd < date) {
+        setMessage("The repeat end date can't be before the start date.");
+        return;
+      }
       setState((current) => ({
         ...current,
-        dailyTodos: current.dailyTodos.map((todo) =>
-          todo.id === editingTodo.id
-            ? { ...todo, title, date, time: timeExpanded ? (time || null) : null, endTime: timeExpanded ? (endTime || null) : null, notes, repeatWeekly }
-            : todo,
-        ),
+        dailyTodos: current.dailyTodos.map((todo) => {
+          if (todo.id !== editingTodo.id) return todo;
+          const converted = convertTodoRepeat(todo, repeatWeekly);
+          const weekdayChanged = converted.repeatWeekly && parseIsoDate(date).getDay() !== parseIsoDate(converted.date).getDay();
+          const sameWeekday = (iso: string) => parseIsoDate(iso).getDay() === parseIsoDate(date).getDay();
+          return {
+            ...converted,
+            title,
+            date,
+            time: nextTime || null,
+            endTime: nextEndTime || null,
+            notes,
+            recurrenceEndDate: converted.repeatWeekly ? (recurrenceEnd || null) : null,
+            skippedOccurrences: weekdayChanged ? converted.skippedOccurrences.filter(sameWeekday) : converted.skippedOccurrences,
+            occurrenceTimes: weekdayChanged
+              ? Object.fromEntries(Object.entries(converted.occurrenceTimes).filter(([occurrence]) => sameWeekday(occurrence)))
+              : converted.occurrenceTimes,
+          };
+        }),
       }));
       onClose();
       return;
@@ -91,9 +136,16 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
         setMessage("Pick a course and a course task first.");
         return;
       }
-      setState((current) => ({
-        ...current,
-        timetableEvents: current.timetableEvents.map((event) =>
+      const nextEndTime = occurrenceKind === "occurrence" ? endTime : "";
+      if (!validateTimes(time, nextEndTime, true)) return;
+      setState((current) => {
+        const previous = current.timetableEvents.find((event) => event.id === editingEvent.id);
+        if (!previous) return current;
+        const wasCounted = previous.kind !== "sheet-release";
+        const isCounted = occurrenceKind !== "sheet-release";
+        const completedHere = previous.completedOccurrences.length;
+        const weekdayChanged = parseIsoDate(date).getDay() !== parseIsoDate(previous.date).getDay();
+        const timetableEvents = current.timetableEvents.map((event) =>
           event.id === editingEvent.id
             ? {
                 ...event,
@@ -103,13 +155,28 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
                 label: label.trim() || task?.title || "Item",
                 date,
                 time,
-                endTime: occurrenceKind === "occurrence" ? (endTime || null) : null,
+                endTime: nextEndTime || null,
                 repeatWeekly,
                 url: isSheetKind ? (url.trim() || null) : null,
+                occurrenceOverrides: weekdayChanged ? {} : event.occurrenceOverrides,
               }
             : event,
-        ),
-      }));
+        );
+        // Completed occurrences count toward their task's completed units - re-home that count if
+        // the item moved to another task or crossed the sheet-release (never counted) boundary.
+        let tasks = current.tasks;
+        if ((previous.taskId !== taskId || wasCounted !== isCounted) && completedHere > 0) {
+          const oldTask = current.tasks.find((item) => item.id === previous.taskId);
+          const decrement = wasCounted && oldTask ? unitDecrementFor(countCompletedUnitOccurrences(current.timetableEvents, previous.taskId), oldTask.totalUnits, completedHere) : 0;
+          tasks = current.tasks.map((item) => {
+            let completedUnits = item.completedUnits;
+            if (item.id === previous.taskId) completedUnits -= decrement;
+            if (item.id === taskId && isCounted) completedUnits += completedHere;
+            return completedUnits === item.completedUnits ? item : { ...item, completedUnits: Math.min(Math.max(completedUnits, 0), item.totalUnits) };
+          });
+        }
+        return { ...current, timetableEvents, tasks };
+      });
       onClose();
       return;
     }
@@ -120,11 +187,18 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
       setMessage("Give this to-do a title first.");
       return;
     }
+    const nextTime = timeExpanded ? time : "";
+    const nextEndTime = timeExpanded ? endTime : "";
+    if (!validateTimes(nextTime, nextEndTime, false)) return;
+    if (repeatWeekly && recurrenceEnd && recurrenceEnd < date) {
+      setMessage("The repeat end date can't be before the start date.");
+      return;
+    }
     const todo: DailyTodo = {
       id: makeId(),
       date,
-      time: timeExpanded ? (time || null) : null,
-      endTime: timeExpanded ? (endTime || null) : null,
+      time: nextTime || null,
+      endTime: nextEndTime || null,
       title,
       notes,
       completed: false,
@@ -132,8 +206,17 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
       createdAt: new Date().toISOString(),
       repeatWeekly,
       completedOccurrences: [],
+      recurrenceEndDate: repeatWeekly ? (recurrenceEnd || null) : null,
+      skippedOccurrences: [],
+      occurrenceTimes: {},
     };
     setState((current) => ({ ...current, dailyTodos: [...current.dailyTodos, todo] }));
+    onClose();
+  }
+
+  function deleteSeries() {
+    if (!editingTodo) return;
+    onDeleteWithUndo(`"${editingTodo.title}" series removed`, (current) => ({ ...current, dailyTodos: current.dailyTodos.filter((todo) => todo.id !== editingTodo.id) }));
     onClose();
   }
 
@@ -278,7 +361,18 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
             </label>
           )}
 
+          {!isSubjectItem && repeatWeekly ? (
+            <label className="field compact-field">
+              <span>Repeat until (optional)</span>
+              <input type="date" value={recurrenceEnd} min={date || undefined} onChange={(event) => setRecurrenceEnd(event.target.value)} />
+            </label>
+          ) : null}
+
           <button type="button" onClick={submit} disabled={isSubjectItem && !taskId}>{isEdit ? "Save changes" : "Create"}</button>
+
+          {editingTodo?.repeatWeekly ? (
+            <button type="button" className="ghost-button" onClick={deleteSeries}>Delete whole series</button>
+          ) : null}
 
           {!isEdit ? (
             <button type="button" className="ghost-button timetable-modal-manage-link" onClick={onOpenManageSemesters}>

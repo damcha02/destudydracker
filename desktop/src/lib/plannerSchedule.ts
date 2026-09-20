@@ -122,9 +122,9 @@ export function expandTimetableEvents(
         for (const date of expandWeekdayFrom(event.date, effectiveStart, seriesEnd)) {
           const override = event.occurrenceOverrides[date];
           if (override?.skipped) continue;
-          if (override?.date && override.time) {
+          if (override?.date) {
             if (override.date >= effectiveStart && override.date <= effectiveEndBound && !isHoliday(holidays, semester.id, override.date)) {
-              occurrences.push({ event: { ...event, date: override.date, time: override.time, endTime: override.endTime ?? event.endTime }, date: override.date });
+              occurrences.push({ event: { ...event, date: override.date, time: override.time ?? event.time, endTime: override.endTime ?? event.endTime }, date: override.date });
             }
             continue;
           }
@@ -145,10 +145,18 @@ export function expandTimetableEvents(
  * countEventOccurrenceDates's role for TimetableEvent, at to-do scale (no holidays to exclude).
  */
 export function expandDailyTodoDates(todo: DailyTodo, rangeStartIso: string, rangeEndIso: string): string[] {
+  if (!todo.date) return [];
   if (!todo.repeatWeekly) {
     return todo.date >= rangeStartIso && todo.date <= rangeEndIso ? [todo.date] : [];
   }
-  return expandWeekdayFrom(todo.date, rangeStartIso, rangeEndIso);
+  const seriesEnd = minIso(todo.recurrenceEndDate, rangeEndIso);
+  return expandWeekdayFrom(todo.date, rangeStartIso, seriesEnd).filter((date) => !todo.skippedOccurrences.includes(date));
+}
+
+/** The time a to-do shows at on one occurrence date, honoring a "this occurrence only" override. */
+export function getTodoOccurrenceTime(todo: DailyTodo, occurrenceDate: string): { time: string | null; endTime: string | null } {
+  const override = todo.repeatWeekly ? todo.occurrenceTimes[occurrenceDate] : undefined;
+  return override ?? { time: todo.time, endTime: todo.endTime };
 }
 
 /**
@@ -320,14 +328,14 @@ export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs)
   }
 
   for (const todo of inputs.dailyTodos) {
-    const isAnchorDate = todo.date === dateIso;
-    if (!isAnchorDate && !(todo.repeatWeekly && expandWeekdayFrom(todo.date, dateIso, dateIso).length > 0)) continue;
+    if (expandDailyTodoDates(todo, dateIso, dateIso).length === 0) continue;
+    const { time, endTime } = getTodoOccurrenceTime(todo, dateIso);
     rows.push({
       id: `todo:${todo.id}`,
       kind: "todo",
-      time: todo.time,
-      endTime: todo.endTime,
-      sortMinutes: timeToSortMinutes(todo.time),
+      time,
+      endTime,
+      sortMinutes: timeToSortMinutes(time),
       title: todo.title,
       courseId: null,
       completed: todo.repeatWeekly ? todo.completedOccurrences.includes(dateIso) : todo.completed,

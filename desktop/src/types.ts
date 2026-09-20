@@ -120,6 +120,11 @@ export interface DailyTodo {
   // completedOccurrences pattern TimetableEvent already uses for recurring items.
   repeatWeekly: boolean;
   completedOccurrences: string[];
+  // Series controls for a repeating to-do, mirroring TimetableEvent: an inclusive last date, dates
+  // dropped from the series, and per-date time overrides ("this occurrence only" moves).
+  recurrenceEndDate: string | null;
+  skippedOccurrences: string[];
+  occurrenceTimes: Record<string, { time: string | null; endTime: string | null }>;
 }
 
 export interface CalendarEntry {
