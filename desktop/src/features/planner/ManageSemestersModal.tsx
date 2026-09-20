@@ -4,7 +4,13 @@ import { createPortal } from "react-dom";
 import { formatDate, getCourseTasks, getSemesterCourses } from "../../lib/metrics";
 import { getSemesterWeekNumber, makeTimetableEvent } from "../../lib/plannerSchedule";
 import { makeId } from "../../lib/storage";
-import type { AppState, Course, Holiday, Semester, Task } from "../../types";
+import type { AppState, Course, Holiday, Semester, Task, TimetableEvent } from "../../types";
+
+const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
+  occurrence: "Occurrence",
+  "sheet-release": "Released",
+  "sheet-deadline": "Due",
+};
 
 type View = "main" | "wizard" | "archive";
 
@@ -13,6 +19,7 @@ type Props = {
   setState: Dispatch<SetStateAction<AppState>>;
   setMessage: (message: string) => void;
   onClose: () => void;
+  onDeleteWithUndo: (label: string, updater: (current: AppState) => AppState) => void;
   onRemoveSemester: (semesterId: string) => void;
   onRemoveCourse: (courseId: string) => void;
   onRemoveTask: (taskId: string) => void;
@@ -23,7 +30,7 @@ type Props = {
 };
 
 export function ManageSemestersModal({
-  state, setState, setMessage, onClose,
+  state, setState, setMessage, onClose, onDeleteWithUndo,
   onRemoveSemester, onRemoveCourse, onRemoveTask, onAddTask, onEditTask,
   initialSemesterId, initialCourseId,
 }: Props) {
@@ -57,6 +64,44 @@ export function ManageSemestersModal({
     dueDate: today, dueTime: "23:59", dueWeekly: true,
     sheetUrl: "",
   });
+
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventEditDraft, setEventEditDraft] = useState({ date: "", time: "", endTime: "", repeatWeekly: true });
+  const [eventRemoveConfirm, setEventRemoveConfirm] = useState<string | null>(null);
+
+  function startEditEvent(event: TimetableEvent) {
+    setSchedulingTaskId(null);
+    setEditingEventId(event.id);
+    setEventEditDraft({ date: event.date, time: event.time, endTime: event.endTime ?? "", repeatWeekly: event.repeatWeekly });
+  }
+
+  function cancelEditEvent() {
+    setEditingEventId(null);
+  }
+
+  function saveEditEvent() {
+    if (!editingEventId || !eventEditDraft.date || !eventEditDraft.time) {
+      setMessage("Pick a date and time first.");
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      timetableEvents: current.timetableEvents.map((event) =>
+        event.id === editingEventId
+          ? { ...event, date: eventEditDraft.date, time: eventEditDraft.time, endTime: eventEditDraft.endTime || null, repeatWeekly: eventEditDraft.repeatWeekly }
+          : event,
+      ),
+    }));
+    setEditingEventId(null);
+    setMessage("Schedule updated.");
+  }
+
+  function removeScheduledEvent(eventId: string) {
+    const event = state.timetableEvents.find((item) => item.id === eventId);
+    onDeleteWithUndo(`"${event?.label ?? "Item"}" removed`, (current) => ({ ...current, timetableEvents: current.timetableEvents.filter((item) => item.id !== eventId) }));
+    setEventRemoveConfirm(null);
+    if (editingEventId === eventId) setEditingEventId(null);
+  }
 
   const courses = semester ? getSemesterCourses(state, semester.id) : [];
   const weekNumber = semester ? getSemesterWeekNumber(semester, today) : null;
@@ -519,6 +564,44 @@ export function ManageSemestersModal({
                                       <span>Weekly</span>
                                     </label>
                                     <button type="button" onClick={() => scheduleTask(course, task)}>Add to timetable</button>
+                                  </div>
+                                ) : null}
+
+                                {state.timetableEvents.filter((event) => event.taskId === task.id).length ? (
+                                  <div className="manage-semesters-scheduled-list">
+                                    {state.timetableEvents
+                                      .filter((event) => event.taskId === task.id)
+                                      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+                                      .map((event) => (
+                                        editingEventId === event.id ? (
+                                          <div key={event.id} className="manage-semesters-schedule-row manage-semesters-scheduled-edit-row">
+                                            <input type="date" value={eventEditDraft.date} onChange={(edit) => setEventEditDraft((current) => ({ ...current, date: edit.target.value }))} />
+                                            <input type="time" value={eventEditDraft.time} onChange={(edit) => setEventEditDraft((current) => ({ ...current, time: edit.target.value }))} />
+                                            <input type="time" value={eventEditDraft.endTime} onChange={(edit) => setEventEditDraft((current) => ({ ...current, endTime: edit.target.value }))} placeholder="End" />
+                                            <label className="timetable-modal-toggle compact">
+                                              <input type="checkbox" checked={eventEditDraft.repeatWeekly} onChange={(edit) => setEventEditDraft((current) => ({ ...current, repeatWeekly: edit.target.checked }))} />
+                                              <span>Weekly</span>
+                                            </label>
+                                            <button type="button" onClick={saveEditEvent}>Save</button>
+                                            <button type="button" className="ghost-button small-button" onClick={cancelEditEvent}>Cancel</button>
+                                          </div>
+                                        ) : (
+                                          <div key={event.id} className="manage-semesters-scheduled-row">
+                                            <span className="section-note">
+                                              {timetableEventKindLabel[event.kind]} · {formatDate(event.date)} · {event.time}{event.endTime ? `–${event.endTime}` : ""}{event.repeatWeekly ? " · weekly" : ""}
+                                            </span>
+                                            <button type="button" className="ghost-button small-button" onClick={() => startEditEvent(event)}>Edit</button>
+                                            {eventRemoveConfirm === event.id ? (
+                                              <>
+                                                <button type="button" className="mini-danger" onClick={() => removeScheduledEvent(event.id)}>Confirm</button>
+                                                <button type="button" className="ghost-button small-button" onClick={() => setEventRemoveConfirm(null)}>Cancel</button>
+                                              </>
+                                            ) : (
+                                              <button type="button" className="ghost-button small-button danger" onClick={() => setEventRemoveConfirm(event.id)}>Remove</button>
+                                            )}
+                                          </div>
+                                        )
+                                      ))}
                                   </div>
                                 ) : null}
                               </div>

@@ -363,12 +363,12 @@ describe("loadAppState - migration and corruption", () => {
     expect(result.courses[0]).toMatchObject({ externalUrl: null });
   });
 
-  it("defaults a legacy daily todo's missing time/notes fields", () => {
+  it("defaults a legacy daily todo's missing time/endTime/notes fields", () => {
     storage.setItem(CORE_KEY, JSON.stringify({
       dailyTodos: [{ id: "todo1", date: "2026-09-07", title: "Buy pens", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
     }));
     const result = loadAppState();
-    expect(result.dailyTodos[0]).toMatchObject({ time: null, notes: "" });
+    expect(result.dailyTodos[0]).toMatchObject({ time: null, endTime: null, notes: "", repeatWeekly: false, completedOccurrences: [] });
   });
 
   it("defaults the new planner arrays to [] when the stored blob predates them", () => {
@@ -377,10 +377,9 @@ describe("loadAppState - migration and corruption", () => {
     expect(result.timetableEvents).toEqual([]);
     expect(result.holidays).toEqual([]);
     expect(result.dailyTodos).toEqual([]);
-    expect(result.studyUnits).toEqual([]);
   });
 
-  it("round-trips populated timetable events, holidays, todos, and study units", () => {
+  it("round-trips populated timetable events, holidays, and todos", () => {
     const state: AppState = {
       ...defaultState,
       tasks: [{
@@ -393,15 +392,13 @@ describe("loadAppState - migration and corruption", () => {
         completedOccurrences: [], createdAt: "2026-01-01T00:00:00.000Z",
       }],
       holidays: [{ id: "holiday1", semesterId: "sem1", startDate: "2026-12-20", endDate: "2027-01-05", label: "Winter break", createdAt: "2026-01-01T00:00:00.000Z" }],
-      dailyTodos: [{ id: "todo1", date: "2026-09-07", time: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z" }],
-      studyUnits: [{ id: "unit1", semesterId: "sem1", courseId: "course1", date: "2026-10-01", title: "Revise chapter 3", startTime: "09:00", endTime: "10:00", notes: "", completed: false, createdAt: "2026-01-01T00:00:00.000Z" }],
+      dailyTodos: [{ id: "todo1", date: "2026-09-07", time: null, endTime: null, title: "Buy pens", notes: "", completed: false, completedAt: null, createdAt: "2026-01-01T00:00:00.000Z", repeatWeekly: false, completedOccurrences: [] }],
     };
     saveAppState(state, createInitialPersistenceBaselines(defaultState));
     const loaded = loadAppState();
     expect(loaded.timetableEvents).toEqual(state.timetableEvents);
     expect(loaded.holidays).toEqual(state.holidays);
     expect(loaded.dailyTodos).toEqual(state.dailyTodos);
-    expect(loaded.studyUnits).toEqual(state.studyUnits);
   });
 
   it("migrates a legacy recurring-class-event and exercise-sheet-series blob into unified timetable events, creating fallback tasks for them", () => {

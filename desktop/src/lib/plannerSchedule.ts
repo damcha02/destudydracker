@@ -1,4 +1,4 @@
-import type { CalendarEntry, DailyTodo, Exam, Holiday, Semester, StudyUnit, TimetableEvent, TimetableEventKind } from "../types";
+import type { CalendarEntry, DailyTodo, Exam, Holiday, Semester, TimetableEvent, TimetableEventKind } from "../types";
 
 /**
  * The single canonical constructor for a TimetableEvent. Every creation path (the main calendar's
@@ -82,7 +82,7 @@ export function isHoliday(holidays: Holiday[], semesterId: string, dateIso: stri
   return holidays.some((holiday) => holiday.semesterId === semesterId && dateIso >= holiday.startDate && dateIso <= holiday.endDate);
 }
 
-function expandWeekdayFrom(anchorDateIso: string, rangeStartIso: string, rangeEndIso: string): string[] {
+export function expandWeekdayFrom(anchorDateIso: string, rangeStartIso: string, rangeEndIso: string): string[] {
   if (rangeStartIso > rangeEndIso) return [];
   const weekday = parseIsoDate(anchorDateIso).getDay();
   const rangeStart = parseIsoDate(maxIso(anchorDateIso, rangeStartIso));
@@ -139,6 +139,48 @@ export function expandTimetableEvents(
   return occurrences;
 }
 
+/**
+ * Projects a to-do's occurrence dates within an inclusive date range: just its own date if it
+ * doesn't repeat, or every matching weekday from its anchor date onward if it does. Mirrors
+ * countEventOccurrenceDates's role for TimetableEvent, at to-do scale (no holidays to exclude).
+ */
+export function expandDailyTodoDates(todo: DailyTodo, rangeStartIso: string, rangeEndIso: string): string[] {
+  if (!todo.repeatWeekly) {
+    return todo.date >= rangeStartIso && todo.date <= rangeEndIso ? [todo.date] : [];
+  }
+  return expandWeekdayFrom(todo.date, rangeStartIso, rangeEndIso);
+}
+
+/**
+ * Projects one event's occurrence dates within an inclusive date range, honoring skip/move
+ * overrides and holiday exclusions - the same per-event logic expandTimetableEvents uses, but
+ * without that function's semester-phase/archived gate. Used to compute a true occurrence count
+ * (e.g. a Lecture task's total from its weekly schedule) that shouldn't reset to zero just
+ * because the semester has since moved into exam prep.
+ */
+export function countEventOccurrenceDates(event: TimetableEvent, holidays: Holiday[], semesterId: string, rangeStartIso: string, rangeEndIso: string): string[] {
+  if (rangeStartIso > rangeEndIso) return [];
+  const dates: string[] = [];
+  if (event.repeatWeekly) {
+    const seriesEnd = minIso(event.recurrenceEndDate, rangeEndIso);
+    if (rangeStartIso <= seriesEnd) {
+      for (const date of expandWeekdayFrom(event.date, rangeStartIso, seriesEnd)) {
+        const override = event.occurrenceOverrides[date];
+        if (override?.skipped) continue;
+        if (override?.date) {
+          if (override.date >= rangeStartIso && override.date <= rangeEndIso && !isHoliday(holidays, semesterId, override.date)) dates.push(override.date);
+          continue;
+        }
+        if (isHoliday(holidays, semesterId, date)) continue;
+        dates.push(date);
+      }
+    }
+  } else if (event.date >= rangeStartIso && event.date <= rangeEndIso) {
+    dates.push(event.date);
+  }
+  return dates;
+}
+
 /** Moves a single occurrence of a recurring event to a new date/time without affecting the rest of the series. */
 export function moveSingleOccurrence(event: TimetableEvent, originalDateIso: string, newDate: string, newTime: string, newEndTime: string | null): TimetableEvent {
   return {
@@ -193,7 +235,7 @@ export function getSemesterWeekNumber(semester: Semester, dateIso: string): numb
   return Math.floor(daysBetween(semester.startDate, dateIso) / 7) + 1;
 }
 
-export type DailyTimelineKind = "occurrence" | "sheet-release" | "sheet-deadline" | "exam" | "calendar-entry" | "todo" | "study-unit";
+export type DailyTimelineKind = "occurrence" | "sheet-release" | "sheet-deadline" | "exam" | "calendar-entry" | "todo";
 
 export interface DailyTimelineRow {
   id: string;
@@ -221,7 +263,6 @@ export interface DailyTimelineInputs {
   exams: Exam[];
   calendarEntries: CalendarEntry[];
   dailyTodos: DailyTodo[];
-  studyUnits: StudyUnit[];
 }
 
 export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs): DailyTimelineRow[] {
@@ -279,33 +320,18 @@ export function buildDailyTimeline(dateIso: string, inputs: DailyTimelineInputs)
   }
 
   for (const todo of inputs.dailyTodos) {
-    if (todo.date !== dateIso) continue;
+    const isAnchorDate = todo.date === dateIso;
+    if (!isAnchorDate && !(todo.repeatWeekly && expandWeekdayFrom(todo.date, dateIso, dateIso).length > 0)) continue;
     rows.push({
       id: `todo:${todo.id}`,
       kind: "todo",
       time: todo.time,
-      endTime: null,
+      endTime: todo.endTime,
       sortMinutes: timeToSortMinutes(todo.time),
       title: todo.title,
       courseId: null,
-      completed: todo.completed,
+      completed: todo.repeatWeekly ? todo.completedOccurrences.includes(dateIso) : todo.completed,
       refId: todo.id,
-      occurrenceDate: dateIso,
-    });
-  }
-
-  for (const unit of inputs.studyUnits) {
-    if (unit.date !== dateIso) continue;
-    rows.push({
-      id: `study-unit:${unit.id}`,
-      kind: "study-unit",
-      time: unit.startTime,
-      endTime: unit.endTime,
-      sortMinutes: timeToSortMinutes(unit.startTime),
-      title: unit.title,
-      courseId: unit.courseId,
-      completed: unit.completed,
-      refId: unit.id,
       occurrenceDate: dateIso,
     });
   }

@@ -52,10 +52,13 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
   const [label, setLabel] = useState(editingEvent?.label ?? editingTodo?.title ?? "");
   const [date, setDate] = useState(editingEvent?.date ?? editingTodo?.date ?? (target.mode === "create" ? target.prefill.date : ""));
   const [time, setTime] = useState(editingEvent?.time ?? editingTodo?.time ?? (target.mode === "create" ? target.prefill.time : ""));
-  const [endTime, setEndTime] = useState(editingEvent?.endTime ?? "");
+  const [endTime, setEndTime] = useState(editingEvent?.endTime ?? editingTodo?.endTime ?? "");
   const [url, setUrl] = useState(editingEvent?.url ?? "");
-  const [repeatWeekly, setRepeatWeekly] = useState(editingEvent?.repeatWeekly ?? true);
+  const [repeatWeekly, setRepeatWeekly] = useState(editingEvent?.repeatWeekly ?? editingTodo?.repeatWeekly ?? false);
   const [notes, setNotes] = useState(editingTodo?.notes ?? "");
+  // To-dos default to unscheduled - the time picker only appears once the user explicitly opts
+  // in via "+ Add Time", instead of implying every to-do needs a slot on the calendar.
+  const [timeExpanded, setTimeExpanded] = useState(Boolean(editingTodo?.time));
 
   const isSheetKind = occurrenceKind === "sheet-release" || occurrenceKind === "sheet-deadline";
 
@@ -73,7 +76,11 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
       }
       setState((current) => ({
         ...current,
-        dailyTodos: current.dailyTodos.map((todo) => (todo.id === editingTodo.id ? { ...todo, title, date, time: time || null, notes } : todo)),
+        dailyTodos: current.dailyTodos.map((todo) =>
+          todo.id === editingTodo.id
+            ? { ...todo, title, date, time: timeExpanded ? (time || null) : null, endTime: timeExpanded ? (endTime || null) : null, notes, repeatWeekly }
+            : todo,
+        ),
       }));
       onClose();
       return;
@@ -116,12 +123,15 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
     const todo: DailyTodo = {
       id: makeId(),
       date,
-      time: time || null,
+      time: timeExpanded ? (time || null) : null,
+      endTime: timeExpanded ? (endTime || null) : null,
       title,
       notes,
       completed: false,
       completedAt: null,
       createdAt: new Date().toISOString(),
+      repeatWeekly,
+      completedOccurrences: [],
     };
     setState((current) => ({ ...current, dailyTodos: [...current.dailyTodos, todo] }));
     onClose();
@@ -189,22 +199,58 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
             />
           </label>
 
-          <div className="timetable-modal-dates">
-            <label className="field compact-field">
-              <span>Date</span>
-              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-            </label>
-            <label className="field compact-field">
-              <span>{isSubjectItem ? "Time" : "Time (optional)"}</span>
-              <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
-            </label>
-            {isSubjectItem && occurrenceKind === "occurrence" ? (
+          {isSubjectItem ? (
+            <div className="timetable-modal-dates">
               <label className="field compact-field">
-                <span>End time</span>
-                <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                <span>Date</span>
+                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               </label>
-            ) : null}
-          </div>
+              <label className="field compact-field">
+                <span>Time</span>
+                <input type="time" value={time} onChange={(event) => setTime(event.target.value)} />
+              </label>
+              {occurrenceKind === "occurrence" ? (
+                <label className="field compact-field">
+                  <span>End time</span>
+                  <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                </label>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <label className="field compact-field">
+                <span>Date</span>
+                <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+              </label>
+
+              {timeExpanded ? (
+                <div className="timetable-modal-dates">
+                  <label className="field compact-field">
+                    <span>Start time</span>
+                    <input type="time" value={time} onChange={(event) => setTime(event.target.value)} autoFocus />
+                  </label>
+                  <label className="field compact-field">
+                    <span>End time</span>
+                    <input type="time" value={endTime} onChange={(event) => setEndTime(event.target.value)} />
+                  </label>
+                  <button
+                    type="button"
+                    className="ghost-button small-button timetable-modal-remove-time"
+                    onClick={() => { setTime(""); setEndTime(""); setTimeExpanded(false); }}
+                  >
+                    Remove time
+                  </button>
+                </div>
+              ) : (
+                <div className="timetable-modal-unscheduled-notice">
+                  <span>This To-Do will be unscheduled.</span>
+                  <button type="button" className="ghost-button small-button" onClick={() => setTimeExpanded(true)}>
+                    + Add Time
+                  </button>
+                </div>
+              )}
+            </>
+          )}
 
           {isSubjectItem && isSheetKind ? (
             <label className="field">
@@ -225,7 +271,12 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
               <input type="checkbox" checked={repeatWeekly} onChange={(event) => setRepeatWeekly(event.target.checked)} />
               <span>Repeat weekly until the semester ends</span>
             </label>
-          ) : null}
+          ) : (
+            <label className="timetable-modal-toggle">
+              <input type="checkbox" checked={repeatWeekly} onChange={(event) => setRepeatWeekly(event.target.checked)} />
+              <span>Repeat weekly</span>
+            </label>
+          )}
 
           <button type="button" onClick={submit} disabled={isSubjectItem && !taskId}>{isEdit ? "Save changes" : "Create"}</button>
 

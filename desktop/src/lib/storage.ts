@@ -1,4 +1,4 @@
-import type { AppState, CalendarEntry, Course, DailyTodo, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Holiday, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialLeaderboardEntry, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, StudyUnit, TabKey, Task, TaskSubtype, TimerState, TimetableEvent, TimetableEventKind, TimetableOccurrenceOverride, TravlePuzzleState, WordlePuzzleState } from "../types";
+import type { AppState, CalendarEntry, Course, DailyTodo, Exam, FlaggleGuess, FlagglePuzzleState, GeodlePuzzleState, Holiday, Semester, SocialAvatar, SocialAvatarStyle, SocialFeedPost, SocialLeaderboardEntry, SocialSquadRole, SocialSquadScoreEntry, SocialState, StudySession, TabKey, Task, TaskSubtype, TimerState, TimetableEvent, TimetableEventKind, TimetableOccurrenceOverride, TravlePuzzleState, WordlePuzzleState } from "../types";
 import { getFlaggleAnswerForDate, getFlagglePuzzleId, makeFlaggleSeedSalt } from "./flaggle";
 import { getGeodleAnswerForDate, getGeodlePuzzleId, makeGeodleSeedSalt } from "./geodle";
 import { getTravlePuzzleForDate, getTravlePuzzleId, makeTravleSeedSalt } from "./travle";
@@ -345,7 +345,6 @@ export const defaultState: AppState = {
   timetableEvents: [],
   holidays: [],
   dailyTodos: [],
-  studyUnits: [],
   sessions: [],
   lifetimeStudyMinutes: 0,
   lifetimeStudySessions: 0,
@@ -1191,32 +1190,14 @@ function normalizeDailyTodos(todos: unknown): DailyTodo[] {
       id: record.id,
       date: record.date,
       time: typeof record.time === "string" ? record.time : null,
+      endTime: typeof record.endTime === "string" ? record.endTime : null,
       title: record.title,
       notes: typeof record.notes === "string" ? record.notes : "",
       completed: Boolean(record.completed),
       completedAt: typeof record.completedAt === "string" ? record.completedAt : null,
       createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
-    }];
-  });
-}
-
-function normalizeStudyUnits(units: unknown): StudyUnit[] {
-  if (!Array.isArray(units)) return [];
-  return units.flatMap((unit) => {
-    if (!unit || typeof unit !== "object") return [];
-    const record = unit as Partial<StudyUnit> & Record<string, unknown>;
-    if (typeof record.id !== "string" || typeof record.semesterId !== "string" || typeof record.date !== "string" || typeof record.title !== "string") return [];
-    return [{
-      id: record.id,
-      semesterId: record.semesterId,
-      courseId: typeof record.courseId === "string" ? record.courseId : null,
-      date: record.date,
-      title: record.title,
-      startTime: typeof record.startTime === "string" ? record.startTime : null,
-      endTime: typeof record.endTime === "string" ? record.endTime : null,
-      notes: typeof record.notes === "string" ? record.notes : "",
-      completed: Boolean(record.completed),
-      createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+      repeatWeekly: Boolean(record.repeatWeekly),
+      completedOccurrences: Array.isArray(record.completedOccurrences) ? record.completedOccurrences.filter((date): date is string => typeof date === "string") : [],
     }];
   });
 }
@@ -1494,7 +1475,6 @@ export function loadAppState(): AppState {
       timetableEvents,
       holidays: normalizeHolidays(parsed.holidays),
       dailyTodos: normalizeDailyTodos(parsed.dailyTodos),
-      studyUnits: normalizeStudyUnits(parsed.studyUnits),
       settings: {
         ...defaultState.settings,
         ...parsed.settings,

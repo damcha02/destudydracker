@@ -6578,6 +6578,45 @@ button:hover:not(:disabled) {
   font-weight: 700;
 }
 
+.undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  /* Higher than .timetable-modal-backdrop (5000) and .fn-task-modal-backdrop (5100), so Undo
+     stays clickable even while a modal (e.g. Manage Semesters) is open on top of it. */
+  z-index: 5200;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 12px 14px 12px 18px;
+  transform: translateX(-50%);
+  border-radius: var(--r-pill);
+  background: var(--ink);
+  color: var(--bg);
+  border: 0;
+  box-shadow: var(--shadow-lg);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.undo-toast button {
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+  border: 1px solid color-mix(in oklch, var(--bg) 40%, transparent);
+  background: transparent;
+  color: var(--bg);
+  font-weight: 800;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.undo-toast button:hover {
+  background: color-mix(in oklch, var(--bg) 16%, transparent);
+}
+
 .notice-stack {
   position: fixed;
   top: 86px;
@@ -8525,6 +8564,23 @@ input[type="color"] {
 
 .calendar-pill.completed .calendar-task-title {
   text-decoration: line-through;
+}
+
+.calendar-day-todos {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--line-soft);
+}
+
+.todo-pill {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: start;
+  border-style: dashed;
+  background: color-mix(in oklch, var(--surface-raised) 92%, var(--ink-4) 8%);
 }
 
 .exam-pill {
@@ -16061,6 +16117,34 @@ input[type="color"] {
   padding: 18px 0;
 }
 
+.fn-task-form-subtype-picker {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 4px;
+  margin-top: 16px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line-soft);
+}
+
+.fn-task-form-subtype-picker button {
+  min-height: 40px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.fn-task-form-subtype-picker button.active {
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-sm);
+}
+
 .fn-task-form .field {
   gap: 7px;
 }
@@ -16102,6 +16186,14 @@ input[type="color"] {
 .fn-task-form-title,
 .fn-task-form-notes {
   grid-column: 1 / -1;
+}
+
+.fn-task-form-schedule {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
 }
 
 .fn-task-modal-footer {
@@ -16971,6 +17063,155 @@ input[type="color"] {
   :root[data-app-style="field-notebook"] .fn-break .break-card-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* ------------------------------------------------------------
+   Field Notebook: portaled modals & overlays (Manage Semesters,
+   the planner item / to-do modal, day-view drawer). These render
+   via createPortal onto document.body, outside the .fn-* wrapper
+   tree, so they're reskinned here off the root attribute instead
+   of a .fn-* ancestor class - matching the paper/ink/hard-edge
+   language already established by .fn-task-modal.
+   ------------------------------------------------------------ */
+
+:root[data-app-style="field-notebook"] .timetable-modal-backdrop,
+:root[data-app-style="field-notebook"] .calendar-drawer-backdrop,
+:root[data-app-style="field-notebook"] .fn-task-modal-backdrop {
+  background: rgb(20 17 12 / 0.55);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal {
+  border-radius: 0;
+  border: var(--fn-edge);
+  background: var(--surface);
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.28);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-head {
+  border-bottom: 2px solid var(--ink);
+  background: var(--surface);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-head strong {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-form .field > span,
+:root[data-app-style="field-notebook"] .manage-semesters-holidays summary,
+:root[data-app-style="field-notebook"] .manage-semesters-subjects-head > strong {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-form input,
+:root[data-app-style="field-notebook"] .timetable-modal-form select,
+:root[data-app-style="field-notebook"] .timetable-modal-form textarea,
+:root[data-app-style="field-notebook"] .manage-semesters-toolbar select {
+  border: var(--fn-edge);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  box-shadow: none;
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-toggle input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  border-radius: 0;
+  accent-color: var(--fn-stamp);
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal-form > button[type="button"]:not(.ghost-button),
+:root[data-app-style="field-notebook"] .timetable-modal-form > button:not(.ghost-button):not(.timetable-modal-manage-link) {
+  border-radius: 0;
+  border: var(--fn-rule-hard);
+  background: var(--ink);
+  color: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+:root[data-app-style="field-notebook"] .timetable-modal .ghost-button {
+  border-radius: 0;
+  border: var(--fn-edge);
+}
+
+/* Manage Semesters: section headers, the summary strip, and clustering
+   its scattered action buttons into cohesive, ruled button groups. */
+:root[data-app-style="field-notebook"] .manage-semesters-summary {
+  border-radius: 0;
+  border: var(--fn-edge);
+  background: var(--fn-paper-1);
+}
+
+:root[data-app-style="field-notebook"] .semester-phase-pill {
+  border-radius: 0;
+  border: var(--fn-rule-hard);
+  background: var(--fn-slip);
+  color: var(--ink);
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-holidays,
+:root[data-app-style="field-notebook"] .manage-semesters-scheduled-row,
+:root[data-app-style="field-notebook"] .manage-semesters-schedule-row {
+  border-radius: 0;
+  border: var(--fn-edge);
+  background: var(--fn-paper-1);
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-subjects-head {
+  padding-bottom: 8px;
+  border-bottom: var(--fn-rule-hard);
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-subject-row {
+  border-bottom: var(--fn-rule-soft);
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-subject-actions,
+:root[data-app-style="field-notebook"] .manage-semesters-unit-row {
+  border: var(--fn-edge);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-subject-actions button,
+:root[data-app-style="field-notebook"] .manage-semesters-unit-row > button {
+  border-radius: 0 !important;
+  border: 0 !important;
+  border-left: var(--fn-rule-soft) !important;
+}
+
+:root[data-app-style="field-notebook"] .manage-semesters-subject-actions button:first-child,
+:root[data-app-style="field-notebook"] .manage-semesters-unit-row > button:first-of-type {
+  border-left: 0 !important;
+}
+
+/* Calendar day-view drawer and drag/recurrence popovers share the same
+   flat paper-and-ink surface as every other Notebook overlay. */
+:root[data-app-style="field-notebook"] .calendar-day-view,
+:root[data-app-style="field-notebook"] .calendar-drawer {
+  border-radius: 0;
+  border: var(--fn-edge);
+  background: var(--surface);
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.28);
+}
+
+:root[data-app-style="field-notebook"] .calendar-drag-preview {
+  border-radius: 0;
+  border: var(--fn-edge);
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 0.24);
 }
 
 /* ============================================================
@@ -21629,6 +21870,24 @@ input[type="color"] {
   letter-spacing: 0.03em;
 }
 
+.timetable-modal-unscheduled-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklch, var(--surface-raised) 92%, var(--ink-4) 8%);
+  border: 1px dashed var(--line-soft);
+  color: var(--ink-3);
+  font-size: 0.84rem;
+}
+
+.timetable-modal-remove-time {
+  align-self: flex-end;
+  margin-bottom: 2px;
+}
+
 .timetable-modal-manage-link {
   justify-self: center;
   font-size: 0.78rem;
@@ -21882,6 +22141,28 @@ input[type="color"] {
 .fn-manage-semesters-button {
   width: 100%;
   margin-bottom: 10px;
+}
+
+.manage-semesters-scheduled-list {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.manage-semesters-scheduled-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+.manage-semesters-scheduled-row .section-note {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .manage-semesters-schedule-row {
