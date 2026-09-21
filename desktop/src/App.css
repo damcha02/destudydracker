@@ -17165,11 +17165,25 @@ input[type="color"] {
   color: var(--ink);
 }
 
-:root[data-app-style="field-notebook"] .timetable-modal-form .field > span,
+:root[data-app-style="field-notebook"] .timetable-modal-form .field > span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
 
 :root[data-app-style="field-notebook"] .timetable-modal-form input,
 :root[data-app-style="field-notebook"] .timetable-modal-form select,
-:root[data-app-style="field-notebook"] .timetable-modal-form textarea,
+:root[data-app-style="field-notebook"] .timetable-modal-form textarea {
+  border: var(--fn-edge);
+  border-radius: 0;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-family: var(--font-serif);
+  font-size: 15px;
+  box-shadow: none;
+}
 
 :root[data-app-style="field-notebook"] .timetable-modal-toggle input[type="checkbox"] {
   width: 18px;
