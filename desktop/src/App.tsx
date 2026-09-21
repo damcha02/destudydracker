@@ -77,6 +77,7 @@ import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { WabiManageSemestersModal } from "./features/planner/WabiManageSemestersModal";
 import { TaskScheduleEditor } from "./features/planner/TaskScheduleEditor";
 import { RowMenu } from "./components/RowMenu";
+import { AchievementBoard } from "./features/rest/AchievementBoard";
 import { getScheduleHealth, withScheduleHealth } from "./lib/scheduleHealth";
 import { calculateScheduledDailyWork, calculateScheduledWorkload, getScheduledUnits } from "./lib/scheduleWorkload";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
@@ -3765,7 +3766,7 @@ function App() {
   const [breakTimerRunning, setBreakTimerRunning] = useState(false);
   const [breakTimerEditing, setBreakTimerEditing] = useState(false);
   const [breakTimerDraft, setBreakTimerDraft] = useState("");
-  const [wabiRestRoom, setWabiRestRoom] = useState<"games" | "meditation">("games");
+  const [wabiRestRoom, setWabiRestRoom] = useState<"games" | "meditation" | "achievements">("games");
   const [breathOn, setBreathOn] = useState(false);
   const [breathElapsedSeconds, setBreathElapsedSeconds] = useState(0);
   const [fieldDashboardLayout, setFieldDashboardLayout] = useState<FieldDashboardLayout>(loadFieldDashboardLayout);
@@ -9043,6 +9044,18 @@ function App() {
     setMessage(`"${task.title}" sent to timer.`);
   }
 
+  /** A to-do has no course task behind it, so it goes to the timer as the session goal only. */
+  function focusTodoInTimer(title: string) {
+    setSelectedTaskId(null);
+    setState((current) => ({
+      ...current,
+      activeTab: "timer",
+      // No course or task either: leaving the previous ones would title the timer (and file the session) under them.
+      timer: { ...current.timer, semesterId: null, courseId: null, taskId: null, goal: title },
+    }));
+    setMessage(`"${title}" sent to timer.`);
+  }
+
   function selectTaskForNow(task: Task) {
     setSelectedTaskId(task.id);
     setState((current) => ({
@@ -11067,7 +11080,7 @@ function App() {
     // "Serie 2" rather than just "Serie": the sheet/lecture/session number is the next unit to do.
     const unitBased = timerTask && timerTask.totalUnits > 0 && timerTask.subtype !== "Other";
     const unitNumber = timerTask ? Math.min(timerTask.totalUnits, Math.max(1, Math.floor(timerTask.completedUnits) + 1)) : 0;
-    const timerHeading = timerTask ? (unitBased ? `${timerTask.title} ${unitNumber}` : timerTask.title) : (timerCourse?.name ?? "General focus");
+    const timerHeading = timerTask ? (unitBased ? `${timerTask.title} ${unitNumber}` : timerTask.title) : (state.timer.goal.trim() || timerCourse?.name || "General focus");
     const timerSubline = timerTask ? [timerCourse?.name, unitBased ? `${unitNumber} of ${timerTask.totalUnits}` : null].filter(Boolean).join(" \u00b7 ") : "";
 
     return (
@@ -11245,6 +11258,36 @@ function App() {
   }
 
   function renderWabiBreakRoom() {
+    // Every earned badge, once. "rock-current" is only a copy of the newest pet-rock milestone, so it is left out
+    // (it made the same picture appear twice). Harder achievements get a higher rarity and are sprayed bigger.
+    const breakRoomRarity: Record<string, number> = {
+      "first-break": 0.08, "early-bird": 0.22, "night-owl": 0.22, "on-fire": 0.35, explorer: 0.4,
+      speedrunner: 0.55, veteran: 0.62, "full-house": 0.82, perfectionist: 1,
+    };
+    // The Focus Fossil and Garden badges use tiny text symbols (◆ ❀ ...) on the profile; on the wall each gets a real picture.
+    const wallIcons: Record<string, string> = {
+      "fossil-10": "\u{1F330}", "fossil-25": "\u{1F9AA}", "fossil-50": "\u{1F41A}", "fossil-100": "\u{1F52E}",
+      "fossil-250": "\u{1F9B4}", "fossil-500": "\u{1F3FA}", "fossil-1000": "\u{1F4C0}",
+      "garden-first-sprout": "\u{1F33C}", "garden-streak-bloom": "\u{1F338}", "garden-mushroom-ring": "\u{1F344}",
+      "garden-cross-pollinator": "\u{1F41D}", "garden-full-bloom": "\u{1F33A}", "garden-harvest-season": "\u{1F33E}",
+      "garden-wise-tree": "\u{1F332}",
+    };
+    const earnedAchievements = (() => {
+      const seen = new Set<string>();
+      const list: { id: string; icon: string; name: string; how: string; rarity: number; daily?: boolean; copies?: number }[] = [];
+      const visit = (badges: ProfileBadge[], byPosition: boolean) => badges.forEach((badge, index) => {
+        if (!badge.earned || seen.has(badge.id) || badge.id === "rock-current") return;
+        seen.add(badge.id);
+        // Milestone lists are ordered easiest to hardest, so the position in the list is the difficulty.
+        const rarity = byPosition ? index / Math.max(1, badges.length - 1) : breakRoomRarity[badge.id] ?? 0.4;
+        list.push({ id: badge.id, icon: wallIcons[badge.id] ?? badge.icon, name: badge.name, how: badge.how, rarity, ...(badge.daily ? { daily: true, copies: Math.max(1, badge.count ?? 1) } : {}) });
+      });
+      profileBadgeGroups.forEach((group) => {
+        visit(group.badges, group.category !== "Break Room");
+        group.subgroups?.forEach((subgroup) => visit(subgroup.badges, true));
+      });
+      return list;
+    })();
     const breakMM = String(Math.floor(breakTimerRemaining / 60)).padStart(2, "0");
     const breakSS = String(breakTimerRemaining % 60).padStart(2, "0");
     const breakTotalSeconds = Math.max(1, breakTimerMinutes * 60);
@@ -11335,7 +11378,18 @@ function App() {
             <div className="rock-area"><span className={`rock ${rockBounce ? "bounce" : ""} ${rockCelebrating ? "celebrate" : ""}`} onAnimationEnd={() => setRockCelebrating(false)}>{'\u{1FAA8}'}</span>{rockStage.plant ? <span className="rock-plant">{rockStage.plant}</span> : null}</div>
             <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
           </div>
-        </> : (
+        </> : wabiRestRoom === "achievements" ? (
+          <AchievementBoard
+            achievements={earnedAchievements}
+            placements={state.achievementBoard}
+            onReset={() => setState((current) => ({ ...current, achievementBoard: [] }))}
+            onPlace={(placement) => setState((current) => (
+              current.achievementBoard.some((item) => (item.uid ?? item.id) === (placement.uid ?? placement.id))
+                ? current
+                : { ...current, achievementBoard: [...current.achievementBoard, placement] }
+            ))}
+          />
+        ) : (
           <div className="wabi-meditation-room">
             <div className="wabi-breath-orbit" aria-live="polite">
               <span className="wabi-breath-ring" style={{ width: `${breathOn ? breathSize : 60}px`, height: `${breathOn ? breathSize : 60}px` }} />
@@ -11371,8 +11425,10 @@ function App() {
     const quietEntry = quietTask ? todayCalendarEntries.find((entry) => entry.taskId === quietTask.id) ?? null : null;
     const useQuietTask = quietTask !== null && (quietTask.id === timerTask?.id || !quietEntry?.completed);
     const focusTask = useQuietTask ? quietTask : nextTask;
-    const focusTitle = focusTask ? getWabiUnitInfo(focusTask).heading : nextTitle;
-    const focusMeta = useQuietTask && quietTask
+    // A to-do started from the dashboard has no task behind it, only the session goal: show that.
+    const goalOnly = !timerTask && (state.timer.running || state.timer.phase !== "idle") && state.timer.goal.trim() !== "";
+    const focusTitle = goalOnly ? state.timer.goal.trim() : focusTask ? getWabiUnitInfo(focusTask).heading : nextTitle;
+    const focusMeta = goalOnly ? "To-do" : useQuietTask && quietTask
       ? [courseLookup.get(quietTask.courseId)?.name ?? "General focus", getWabiUnitInfo(quietTask).position, quietTask.dueDate ? `due ${formatDate(quietTask.dueDate)}` : null].filter(Boolean).join(" \u00b7 ")
       : nextMeta;
     const otherOpenTasks = todayCalendarEntries
@@ -11569,7 +11625,7 @@ function App() {
               </button>
               {key === "break" && wabiRestMenuOpen ? (
                 <div className="wabi-plan-menu wabi-notes-menu">
-                  {([["games", "Games"], ["meditation", "Meditation"]] as const).map(([room, label]) => (
+                  {([["games", "Games"], ["meditation", "Meditation"], ["achievements", "Achievements"]] as const).map(([room, label]) => (
                     <button
                       key={room}
                       type="button"
@@ -11714,6 +11770,12 @@ function App() {
             if (!wabiQuietMode) {
               setWabiQuietTaskId(state.timer.taskId);
               setWabiQuietTaskMenuOpen(false);
+              // Entering quiet mode: fold every open sidebar dropdown away.
+              setWabiPlanMenuOpen(false);
+              setWabiTimerMenuOpen(false);
+              setWabiNotesMenuOpen(false);
+              setWabiRestMenuOpen(false);
+              setWabiCircleMenuOpen(false);
             }
             setWabiQuietMode((current) => !current);
           }}>
@@ -11904,6 +11966,8 @@ function App() {
           <div className="wabi-one-thing-actions">
             {oneTask ? (
               <button type="button" className="wabi-btn-solid" onClick={() => focusTaskFromDashboard(oneTask)}>START</button>
+            ) : oneRow?.kind === "todo" ? (
+              <button type="button" className="wabi-btn-solid" onClick={() => focusTodoInTimer(oneRow.title)}>START</button>
             ) : null}
             {oneRow ? (
               <button type="button" className="wabi-btn-outline" onClick={() => toggleGeneratedRowDone(oneRow)}>MARK DONE</button>

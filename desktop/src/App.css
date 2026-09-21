@@ -24072,3 +24072,198 @@ input[type="color"] {
 :root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-person { grid-column: 2; }
 :root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-avatar { grid-column: 3; justify-self: start; }
 :root[data-app-style="wabi-sabi"] .wabi-standings .arena-lb-row .arena-lb-score { grid-column: 5; }
+
+/* ---------- Wabi-Sabi Rest: achievement board ---------- */
+.wabi-break-grid > .wabi-ach { grid-column: 1 / -1; }
+
+.wabi-ach {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  height: calc(100vh - 52px);
+  min-height: 0;
+}
+
+.wabi-ach-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 6px 2px;
+  border-bottom: var(--wabi-rule-soft);
+}
+
+.wabi-ach-hint,
+.wabi-ach-empty { margin: 0; font: italic 400 14px var(--font-serif); color: var(--wabi-faint); }
+
+.wabi-ach-board {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border: var(--wabi-rule-soft);
+  background: var(--wabi-paper-1);
+  overflow: hidden;
+}
+
+.wabi-ach-empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+
+.wabi-ach-icon {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: var(--wabi-paper);
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  font-size: 30px;
+  line-height: 1;
+  user-select: none;
+  touch-action: none;
+}
+
+.wabi-ach-tray-icon { all: unset; box-sizing: border-box; display: grid; place-items: center; border-radius: 50%; background: var(--wabi-paper); border: 1px solid var(--wabi-rule-soft, var(--line)); font-size: 30px; line-height: 1; cursor: grab; touch-action: none; user-select: none; }
+.wabi-ach-tray-icon:hover { border-color: var(--wabi-sage); }
+.wabi-ach-tray-icon.is-dragging { opacity: 0.35; }
+
+.wabi-ach-placed { position: absolute; transform: translate(-50%, -50%); cursor: default; box-shadow: 0 2px 8px rgb(0 0 0 / 0.12); }
+
+.wabi-ach-ghost {
+  position: fixed;
+  z-index: 5500;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  cursor: grabbing;
+  opacity: 0.9;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 0.25);
+}
+
+.wabi-ach-ghost.is-valid { border-color: var(--wabi-sage); }
+.wabi-ach-ghost.is-blocked { border-color: var(--wabi-vermilion); border-style: dashed; }
+
+.wabi-ach-tip {
+  position: fixed;
+  z-index: 5600;
+  display: grid;
+  gap: 2px;
+  max-width: 240px;
+  padding: 7px 10px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper);
+  color: var(--wabi-ink);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  pointer-events: none;
+}
+
+.wabi-ach-tip strong { font: 600 12px var(--font-sans); }
+.wabi-ach-tip span { font: 400 11px var(--font-sans); color: var(--wabi-muted); }
+
+/* ---------- Achievement board: a white brick wall, sprayed with graffiti ---------- */
+.wabi-ach-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.wabi-ach-board {
+  position: relative;
+  flex: none;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.wabi-ach-wall { position: absolute; inset: 0; display: block; }
+
+.wabi-ach-board .wabi-ach-empty { color: #a39d8e; }
+
+.wabi-ach-piece {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%) rotate(var(--tilt, 0deg));
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+/* the artwork itself: an image with its own outline, extruded shadow and drips */
+.wabi-ach-art { display: block; max-width: none; pointer-events: none; user-select: none; }
+/* paint sinks into the wall: brick tone and mortar lines show through it */
+.wabi-ach-piece .wabi-ach-art { mix-blend-mode: multiply; }
+
+/* spraying it on: the paint sweeps across and sharpens out of a blur */
+.wabi-ach-piece.is-spraying .wabi-ach-art {
+  animation: ach-spray-in 0.85s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+  -webkit-mask-image: linear-gradient(90deg, #000 0 34%, transparent 46%);
+  mask-image: linear-gradient(90deg, #000 0 34%, transparent 46%);
+  -webkit-mask-size: 300% 100%;
+  mask-size: 300% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: 100% 0;
+  mask-position: 100% 0;
+}
+
+@keyframes ach-spray-in {
+  from { opacity: 0.4; filter: blur(7px); -webkit-mask-position: 100% 0; mask-position: 100% 0; }
+  to { opacity: 1; filter: blur(0); -webkit-mask-position: 0 0; mask-position: 0 0; }
+}
+
+.wabi-ach-tray-icon { width: 60px; height: 60px; }
+
+/* while dragging: a can-of-paint preview in the colour it will spray */
+.wabi-ach-ghost {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--spray) 45%, transparent), transparent 70%);
+  box-shadow: none;
+  opacity: 1;
+  filter: none;
+}
+
+.wabi-ach-ghost { background: none; }
+.wabi-ach-ghost.is-valid .wabi-ach-art { filter: drop-shadow(0 0 4px var(--spray)); }
+.wabi-ach-ghost.is-blocked .wabi-ach-art { filter: grayscale(1) opacity(0.55); }
+
+/* Achievement wall: the reset switch is an ordinary-looking brick that happens to be clickable */
+.wabi-ach-secret {
+  all: unset;
+  position: absolute;
+  z-index: 1;
+  cursor: default;
+}
+
+.wabi-ach-secret:focus-visible { outline: 1px dashed var(--wabi-faint); outline-offset: -3px; }
+
+.wabi-ach-confirm {
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 32px));
+  padding: 22px 24px 20px;
+  border: 1px solid var(--wabi-rule-soft, var(--line));
+  background: var(--wabi-paper);
+  color: var(--wabi-ink);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.24);
+}
+
+.wabi-ach-confirm h3 { margin: 0 0 6px; font: 500 20px var(--font-serif); }
+.wabi-ach-confirm p { margin: 0 0 18px; font-size: 13.5px; color: var(--wabi-muted); }
+.wabi-ach-confirm-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+
+.wabi-ach-tray-icon { position: relative; }
+.wabi-ach-count {
+  position: absolute;
+  right: -4px;
+  bottom: -2px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--wabi-ink);
+  color: var(--wabi-paper);
+  font: 600 10px var(--font-sans);
+  line-height: 15px;
+}

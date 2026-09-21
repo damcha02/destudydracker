@@ -381,6 +381,7 @@ export const defaultState: AppState = {
   waterGlasses: 0,
   waterDate: "",
   petRockPats: 0,
+  achievementBoard: [],
   durakPuzzle: {
     seed: null,
     hint: "",
@@ -1512,6 +1513,22 @@ export function loadAppState(): AppState {
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],
       badgeCounts: parsed.badgeCounts && typeof parsed.badgeCounts === "object" ? parsed.badgeCounts as Record<string, number> : {},
       badgeCountDates: parsed.badgeCountDates && typeof parsed.badgeCountDates === "object" ? parsed.badgeCountDates as Record<string, string> : {},
+      achievementBoard: Array.isArray(parsed.achievementBoard)
+        ? parsed.achievementBoard
+            .filter((item) => Boolean(item) && typeof item.id === "string" && Number.isFinite(item.x) && Number.isFinite(item.y))
+            .map((item) => ({
+              id: item.id,
+              ...(typeof item.uid === "string" ? { uid: item.uid } : {}),
+              x: item.x,
+              y: item.y,
+              ...(Number.isFinite(item.size) ? { size: item.size } : {}),
+              ...(typeof item.color === "string" ? { color: item.color } : {}),
+              ...(Number.isFinite(item.rot) ? { rot: item.rot } : {}),
+              ...(typeof item.icon === "string" && item.icon ? { icon: item.icon } : {}),
+              ...(typeof item.name === "string" ? { name: item.name } : {}),
+              ...(typeof item.how === "string" ? { how: item.how } : {}),
+            }))
+        : [],
     };
   } catch {
     return defaultState;
