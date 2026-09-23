@@ -4033,6 +4033,7 @@ function App() {
   const [squadSettingsPrivateDraft, setSquadSettingsPrivateDraft] = useState(false);
   const [socialSyncing, setSocialSyncing] = useState(false);
   const [socialNameEditing, setSocialNameEditing] = useState(false);
+  const [socialNamePromptOpen, setSocialNamePromptOpen] = useState(false);
   const [socialNameDraft, setSocialNameDraft] = useState(() => state.social.displayName);
   const [profileAvatarEditorOpen, setProfileAvatarEditorOpen] = useState(false);
   const [profileAvatarDraft, setProfileAvatarDraft] = useState<SocialAvatar>(() => state.social.avatar);
@@ -5617,7 +5618,13 @@ function App() {
 
   async function setActiveTab(activeTab: TabKey) {
     if (state.activeTab === "vault" && activeTab !== "vault" && vaultScreenRef.current && !await vaultScreenRef.current.flush()) return;
-    if (activeTab === "friends") setHasUnreadSocial(false);
+    if (activeTab === "friends") {
+      setHasUnreadSocial(false);
+      if (/^Student [A-Z0-9]{0,4}$/.test(state.social.displayName.trim())) {
+        setSocialNameDraft("");
+        setSocialNamePromptOpen(true);
+      }
+    }
     setTourState(null);
     setState((current) => ({ ...current, activeTab }));
   }
@@ -6018,6 +6025,7 @@ function App() {
     };
     setState(nextState);
     setSocialNameEditing(false);
+    setSocialNamePromptOpen(false);
     setMessage("Player name saved.");
     if (socialConfigured) await runSocialSync({ silent: true, stateOverride: nextState });
   }
@@ -13076,6 +13084,28 @@ function App() {
               <button type="button" className="ghost-button" onClick={() => setHelpTab(null)}>Close</button>
               <button type="button" className="help-tutorial-button" onClick={() => startPageTour(helpTab!)}>Start tutorial <span aria-hidden="true">-&gt;</span></button>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {socialNamePromptOpen ? (
+        <div className="help-modal-backdrop" onMouseDown={() => setSocialNamePromptOpen(false)}>
+          <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Set your name">
+            <div className="help-modal-head">
+              <div>
+                <p className="eyebrow">Social</p>
+                <h2>Set your name</h2>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => setSocialNamePromptOpen(false)} aria-label="Close">X</button>
+            </div>
+            <p className="help-purpose">You are still using the default name. Pick a name so your friends know who you are.</p>
+            <form onSubmit={saveSocialName}>
+              <input value={socialNameDraft} onChange={(event) => setSocialNameDraft(event.target.value)} maxLength={48} placeholder="Your name" autoFocus />
+              <div className="help-modal-actions">
+                <button type="button" className="ghost-button" onClick={() => setSocialNamePromptOpen(false)}>Later</button>
+                <button type="submit" className="primary-button" disabled={!socialNameDraft.trim()}>Save name</button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}
