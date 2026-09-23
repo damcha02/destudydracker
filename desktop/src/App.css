@@ -8544,9 +8544,14 @@ input[type="color"] {
 
 .calendar-task-course {
   color: var(--ink-4);
-  font-family: var(--font-serif);
-  font-size: 0.7rem;
-  font-style: italic;
+  /* Self-hosted (see the @font-face in index.css) - the packaged app's CSP blocks the Google
+     Fonts request this used to depend on, which is why it never actually rendered cursive there
+     no matter what was tried here. Weight 500, not 600: bold strokes read as a fat sans at this
+     size, not a slender script. */
+  font-family: "Dancing Script", "Segoe Script", "Brush Script MT", cursive;
+  font-size: 0.42rem;
+  font-weight: 500;
+  line-height: 1.2;
   letter-spacing: 0.01em;
 }
 
@@ -8579,7 +8584,6 @@ input[type="color"] {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 7px;
   align-items: start;
-  border-style: dashed;
   background: color-mix(in oklch, var(--surface-raised) 92%, var(--ink-4) 8%);
 }
 
@@ -16168,18 +16172,21 @@ input[type="color"] {
 }
 
 .fn-task-form {
+  /* No nested scroller here: the form just flows inside .fn-task-modal, which is the only
+     scrolling ancestor (see its own overflow: auto). A second overflow region on this flex
+     column used to squeeze itself to whatever space was left below the subtype picker and
+     above the schedule row/footer, so only the field grid scrolled in a tiny cramped box while
+     everything below it stayed fully expanded and the footer looked stuck in place. */
   min-height: 0;
   display: flex;
-  flex: 1;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .fn-task-form-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
-  overflow: auto;
   padding: 18px 0;
 }
 
@@ -16263,11 +16270,13 @@ input[type="color"] {
 }
 
 .fn-task-modal-footer {
-  position: sticky;
-  bottom: 0;
+  /* Not sticky: pinning it to the scrollport's bottom edge made it an opaque bar sitting on top
+     of whatever content happened to have scrolled underneath it (the schedule row's bottom half,
+     in practice) - it now just flows after the form like Wabi-Sabi's own footer already does. */
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  margin-top: 14px;
   border-top: var(--fn-rule-soft);
   background: var(--surface);
   padding-top: 14px;
@@ -24266,4 +24275,527 @@ input[type="color"] {
   color: var(--wabi-paper);
   font: 600 10px var(--font-sans);
   line-height: 15px;
+}
+
+.wabi-todo-newtask { display: grid; gap: 10px; }
+
+/* ---------- Achievements: ema plaques, tokonoma shelf, ink scroll (and the earlier wall) ---------- */
+.wabi-ach-host {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  /* No gap: the album is the only child now that the display picker is gone, and a gap here just
+     left a strip of empty room above the book. */
+  height: calc(100vh - 52px);
+  min-height: 0;
+}
+
+.wabi-ach-host .wabi-ach { height: auto; flex: 1; min-height: 0; }
+
+/* Unused while the album is the only achievement display - kept for the other displays' sake. */
+.wabi-ach-views { display: flex; gap: 6px; align-items: center; }
+.wabi-ach-views button {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-bottom: 1px solid transparent;
+  font: 400 11px var(--font-sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--wabi-faint);
+}
+.wabi-ach-views button:hover { color: var(--wabi-ink); }
+.wabi-ach-views button.active { color: var(--wabi-ink); border-bottom-color: var(--wabi-sage); }
+
+.wabi-ink { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+
+.wabi-ink-hint, .wabi-ink-empty { margin: 0; font: italic 400 14px var(--font-serif); color: var(--wabi-faint); }
+.wabi-ink-board { position: relative; flex: 1; min-height: 0; overflow: auto; border: var(--wabi-rule-soft); }
+.wabi-ink-canvas { position: relative; min-width: 100%; min-height: 100%; }
+.wabi-ink-empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+
+.wabi-ink-piece { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; }
+.wabi-ink-piece img { flex: none; }
+.wabi-ink-piece img { display: block; max-width: none; mix-blend-mode: multiply; pointer-events: none; user-select: none; }
+/* Real supplied illustrations are full colour already - multiply would just muddy them, unlike
+   the generated ink art (which was drawn assuming it). */
+.wabi-ink-piece img.wabi-real-art { mix-blend-mode: normal; filter: drop-shadow(0 2px 3px rgb(60 40 20 / 0.22)); }
+
+/* --- ema: wooden plaques hung on a rack under a tiled eave --- */
+.wabi-ink--ema .wabi-ink-canvas { background: linear-gradient(#f0eadb, #e9e2d1); }
+.wabi-ema-eave {
+  position: absolute; left: 0; right: 0; top: 0; height: 62px;
+  background:
+    repeating-linear-gradient(90deg, rgb(255 255 255 / 0.07) 0 2px, transparent 2px 30px),
+    linear-gradient(#5a4c40, #3f352c);
+  border-bottom: 5px solid #2f2721;
+  box-shadow: 0 8px 14px rgb(0 0 0 / 0.16);
+}
+.wabi-ema-post { position: absolute; top: 62px; bottom: 0; width: 14px; background: linear-gradient(90deg, #7a5d3d, #a5814f 50%, #7a5d3d); opacity: 0.85; }
+.wabi-ema-post--left { left: 2.5%; }
+.wabi-ema-post--right { right: 2.5%; }
+.wabi-ink-piece--ema {
+  background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22 preserveAspectRatio=%22none%22%3E%3Cdefs%3E%3ClinearGradient id=%22w%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop offset=%220%22 stop-color=%22%23d8b98a%22/%3E%3Cstop offset=%220.5%22 stop-color=%22%23c9a672%22/%3E%3Cstop offset=%221%22 stop-color=%22%23b58e5e%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpolygon points=%2250%2C2 98%2C24 98%2C98 2%2C98 2%2C24%22 fill=%22url%28%23w%29%22 stroke=%22%236b4e2e%22 stroke-width=%222.4%22 stroke-linejoin=%22round%22/%3E%3Cpath d=%22M8 40H92M8 62H92M8 84H92%22 stroke=%22%238b6a42%22 stroke-width=%220.7%22 opacity=%220.35%22/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  transform-origin: 50% -14px;
+  animation: ema-sway 5.5s ease-in-out infinite alternate;
+  animation-delay: var(--delay, 0s);
+  filter: drop-shadow(0 4px 5px rgb(0 0 0 / 0.25));
+}
+.wabi-ink-piece--ema::before { content: ""; position: absolute; left: 50%; top: -16px; width: 1.5px; height: 16px; background: #5b4630; }
+.wabi-ink-piece--ema::after { content: ""; position: absolute; left: 50%; top: -19px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #3f352c; }
+.wabi-ink-piece--ema img { margin-top: 12%; }
+@keyframes ema-sway { from { transform: translate(-50%, -50%) rotate(-1.6deg); } to { transform: translate(-50%, -50%) rotate(1.6deg); } }
+
+/* --- shelf: an alcove with wooden boards; objects stand on them --- */
+.wabi-ink--shelf .wabi-ink-canvas { background: linear-gradient(#eee6d4, #e6dcc6); }
+.wabi-shelf-board {
+  position: absolute; left: 3%; right: 3%; height: 11px;
+  background: linear-gradient(#a98358, #7e5f3c);
+  box-shadow: 0 10px 14px rgb(60 40 20 / 0.22);
+  border-radius: 1px;
+}
+.wabi-ink-piece--shelf img { filter: drop-shadow(0 7px 4px rgb(60 40 20 / 0.22)); }
+
+/* --- scroll: ink on a long paper scroll with rollers --- */
+.wabi-ink--scroll .wabi-ink-canvas { background: linear-gradient(#f2ead6, #ebe2cb); }
+.wabi-ink--scroll .wabi-ink-board { border-color: #cfc3a8; }
+.wabi-ink--scroll .wabi-ink-canvas::before,
+.wabi-ink--scroll .wabi-ink-canvas::after {
+  content: ""; position: absolute; left: 0; right: 0; height: 34px; z-index: 0;
+  background: repeating-linear-gradient(90deg, #6c6a52 0 14px, #5e5c46 14px 16px);
+  opacity: 0.85;
+}
+.wabi-ink--scroll .wabi-ink-canvas::before { top: 0; }
+.wabi-ink--scroll .wabi-ink-canvas::after { bottom: 0; }
+.wabi-scroll-roller { position: absolute; top: 0; bottom: 0; width: 26px; z-index: 1; background: linear-gradient(90deg, #6d4f31, #a17d4d 50%, #6d4f31); box-shadow: 0 0 10px rgb(0 0 0 / 0.25); }
+.wabi-scroll-roller--left { left: 0; }
+.wabi-scroll-roller--right { right: 0; }
+.wabi-scroll-brush { position: absolute; left: 40px; right: 40px; top: 42%; width: calc(100% - 80px); height: 60px; opacity: 0.09; pointer-events: none; }
+.wabi-scroll-brush path { fill: none; stroke: #1c1a18; stroke-width: 4; stroke-linecap: round; }
+
+/* --- book: a closed hardcover album on the desk, opened with a real hinge-flip --- */
+:root {
+  --book-cloth: #38455d;
+  --book-cloth-lift: #43526d;
+  --book-cloth-deep: #27324a;
+  --book-cloth-edge: #1d2536;
+  --book-brass: #f3ecda;
+  --book-brass-deep: #b5a98c;
+  --book-seal: #a8412c;
+  --book-paper: #eee5cf;
+  --book-paper-edge: #e9dfc7;
+  --book-paper-edge-deep: #d6c9aa;
+}
+:root[data-theme="dark"] {
+  --book-cloth: #2c374b;
+  --book-cloth-lift: #35425a;
+  --book-cloth-deep: #212a3b;
+  --book-cloth-edge: #171d29;
+  --book-paper: #d8cdb3;
+  --book-paper-edge: #d2c6aa;
+  --book-paper-edge-deep: #b9ab8b;
+}
+
+.wabi-ink--book { min-height: 0; }
+
+.wabi-book-scene {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border: var(--wabi-rule-soft);
+  outline: none;
+  /* The desk below is ten stacked gradients, and .wabi-book-shoji over it is a blur + mask - all of
+     it completely static. Containing paint here keeps a repaint inside the book (a page turn) from
+     dragging the whole desk through the rasteriser with it. */
+  contain: paint;
+  /* A lamplit plank desk: grain streaks, a couple of knots, and light pooling from above. */
+  background:
+    radial-gradient(ellipse 70% 60% at 42% 38%, rgb(255 232 190 / 0.24), transparent 70%),
+    radial-gradient(ellipse 120% 95% at 50% 50%, transparent 50%, rgb(30 15 3 / 0.32)),
+    radial-gradient(ellipse 90px 20px at 17% 20%, rgb(55 28 8 / 0.55) 0 5%, transparent 13%, rgb(55 28 8 / 0.2) 19%, transparent 27%, rgb(55 28 8 / 0.15) 37%, transparent 47%, rgb(55 28 8 / 0.1) 60%, transparent 76%),
+    radial-gradient(ellipse 64px 13px at 62% 86%, rgb(55 28 8 / 0.45) 0 6%, transparent 15%, rgb(55 28 8 / 0.16) 23%, transparent 33%, rgb(55 28 8 / 0.1) 46%, transparent 64%),
+    linear-gradient(180deg, transparent calc(34% - 1px), rgb(30 14 3 / 0.45) calc(34% - 1px) 34%, rgb(255 230 190 / 0.08) 34% calc(34% + 1px), transparent calc(34% + 1px) calc(70% - 1px), rgb(30 14 3 / 0.45) calc(70% - 1px) 70%, rgb(255 230 190 / 0.08) 70% calc(70% + 1px), transparent calc(70% + 1px)),
+    repeating-linear-gradient(179.3deg, rgb(60 32 10 / 0.10) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(180.8deg, rgb(60 32 10 / 0.08) 0 2px, transparent 2px 11px),
+    repeating-linear-gradient(180.3deg, rgb(70 38 12 / 0.12) 0 7px, transparent 7px 41px, rgb(70 38 12 / 0.07) 41px 44px, transparent 44px 67px),
+    linear-gradient(90deg, rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.03) 40%, rgb(0 0 0 / 0.07)),
+    linear-gradient(180deg, #ad8056 0 34%, #a37750 34% 70%, #b0855a 70%);
+  box-shadow: inset 0 0 60px rgb(0 0 0 / 0.32);
+}
+:root[data-theme="dark"] .wabi-book-scene {
+  background:
+    radial-gradient(ellipse 70% 60% at 42% 38%, rgb(255 232 190 / 0.10), transparent 70%),
+    radial-gradient(ellipse 120% 95% at 50% 50%, transparent 50%, rgb(30 15 3 / 0.5)),
+    radial-gradient(ellipse 90px 20px at 17% 20%, rgb(55 28 8 / 0.55) 0 5%, transparent 13%, rgb(55 28 8 / 0.2) 19%, transparent 27%, rgb(55 28 8 / 0.15) 37%, transparent 47%, rgb(55 28 8 / 0.1) 60%, transparent 76%),
+    radial-gradient(ellipse 64px 13px at 62% 86%, rgb(55 28 8 / 0.45) 0 6%, transparent 15%, rgb(55 28 8 / 0.16) 23%, transparent 33%, rgb(55 28 8 / 0.1) 46%, transparent 64%),
+    linear-gradient(180deg, transparent calc(34% - 1px), rgb(30 14 3 / 0.45) calc(34% - 1px) 34%, rgb(255 230 190 / 0.06) 34% calc(34% + 1px), transparent calc(34% + 1px) calc(70% - 1px), rgb(30 14 3 / 0.45) calc(70% - 1px) 70%, rgb(255 230 190 / 0.06) 70% calc(70% + 1px), transparent calc(70% + 1px)),
+    repeating-linear-gradient(179.3deg, rgb(60 32 10 / 0.10) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(180.8deg, rgb(60 32 10 / 0.08) 0 2px, transparent 2px 11px),
+    repeating-linear-gradient(180.3deg, rgb(70 38 12 / 0.12) 0 7px, transparent 7px 41px, rgb(70 38 12 / 0.07) 41px 44px, transparent 44px 67px),
+    linear-gradient(90deg, rgb(0 0 0 / 0.06), rgb(255 255 255 / 0.03) 40%, rgb(0 0 0 / 0.07)),
+    linear-gradient(180deg, #3f2c1e 0 34%, #3a281b 34% 70%, #45301f 70%);
+}
+
+/* A soft diagonal streak of window light across the desk. */
+.wabi-book-shoji {
+  position: absolute;
+  left: -25%;
+  top: -35%;
+  width: 95%;
+  height: 120%;
+  pointer-events: none;
+  opacity: 0.9;
+  transform: rotate(-16deg) skewX(-18deg);
+  background:
+    repeating-linear-gradient(90deg, rgb(40 20 5 / 0.12) 0 5px, rgb(255 238 205 / 0.09) 5px 62px),
+    repeating-linear-gradient(0deg, rgb(40 20 5 / 0.12) 0 5px, transparent 5px 44px);
+  mask-image: radial-gradient(ellipse 55% 55% at 45% 50%, #000 15%, transparent 72%);
+  filter: blur(2.5px);
+}
+:root[data-theme="dark"] .wabi-book-shoji { opacity: 0.35; }
+
+/* A teacup and a resting pen/brush, for a lived-in desk rather than an empty stage. */
+/* An ink-dish: a lacquered rim in three receding bevels around a near-black pool. Ported
+   straight from the approved design's own layered radial/conic gradients. */
+.wabi-book-cup { position: absolute; border-radius: 50%; pointer-events: none; filter: drop-shadow(2px 3px 3px rgb(18 8 0 / 0.5)); }
+.wabi-book-cup-rim {
+  position: absolute; inset: 0; border-radius: 50%;
+  background:
+    radial-gradient(circle at 36% 30%, rgb(210 170 130 / 0.22), transparent 38%),
+    conic-gradient(from 20deg, rgb(0 0 0 / 0.25), rgb(150 105 70 / 0.18) 8%, rgb(0 0 0 / 0.1) 14%, rgb(0 0 0 / 0.3) 23%, rgb(120 85 55 / 0.14) 31%, rgb(0 0 0 / 0.05) 40%, rgb(0 0 0 / 0.32) 52%, rgb(140 95 60 / 0.16) 60%, rgb(0 0 0 / 0.18) 71%, rgb(0 0 0 / 0.35) 82%, rgb(150 105 70 / 0.12) 91%, rgb(0 0 0 / 0.25)),
+    repeating-radial-gradient(circle, transparent 0 3px, rgb(0 0 0 / 0.07) 3px 4px),
+    radial-gradient(circle, #4a2f20 0 55%, #3a2317 72%, #24150d 100%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.55), inset 3px 3px 5px rgb(215 175 135 / 0.22), inset -4px -5px 7px rgb(0 0 0 / 0.55);
+}
+.wabi-book-cup-inner {
+  position: absolute; inset: 17%; border-radius: 50%;
+  background: conic-gradient(from 200deg, rgb(0 0 0 / 0.3), rgb(160 115 78 / 0.2) 12%, rgb(0 0 0 / 0.2) 30%, rgb(0 0 0 / 0.4) 55%, rgb(150 108 72 / 0.16) 75%, rgb(0 0 0 / 0.3)), radial-gradient(circle, #4d3223 0 70%, #3b2518);
+  box-shadow: inset 1px 1px 1px rgb(225 190 150 / 0.3), 0 0 0 1px rgb(0 0 0 / 0.35), 2px 3px 5px rgb(0 0 0 / 0.45);
+}
+.wabi-book-cup-well {
+  position: absolute; inset: 22%; border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, rgb(190 160 130 / 0.35), transparent 45%), linear-gradient(135deg, #6a4b37, #3a2518 60%, #22140c);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+.wabi-book-cup-pool {
+  position: absolute; inset: 26%; border-radius: 50%;
+  background: radial-gradient(ellipse 30% 18% at 36% 30%, rgb(215 222 232 / 0.38), transparent 72%), radial-gradient(ellipse 12% 7% at 66% 70%, rgb(200 205 215 / 0.12), transparent 70%), radial-gradient(circle at 55% 55%, #0a090a, #030303 70%, #000);
+  box-shadow: inset 3px 4px 6px rgb(0 0 0 / 0.95), inset -1px -1px 1px rgb(120 90 65 / 0.35);
+}
+:root[data-theme="dark"] .wabi-book-cup { filter: drop-shadow(2px 3px 3px rgb(18 8 0 / 0.5)) brightness(0.72) saturate(0.9); }
+
+/* A calligraphy brush: an asymmetric ink-dark tip over a banded bamboo shaft, two joint marks
+   picked out with sharp colour stops rather than separate rings. Also a direct port. */
+.wabi-book-pen { position: absolute; pointer-events: none; filter: drop-shadow(2px 3px 3px rgb(18 8 0 / 0.45)); }
+.wabi-book-pen-tip {
+  position: absolute; left: 0; right: 0; top: 0; height: var(--pen-tip);
+  clip-path: polygon(50% 0, 62% 18%, 100% 100%, 0 100%, 40% 16%);
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.4), rgb(255 255 255 / 0.18) 35%, rgb(0 0 0 / 0.3)), linear-gradient(180deg, #050404 0, #0d0a08 30%, #1c140d 48%, rgb(60 40 22 / 0.9) 64%, #9c7a4c 82%, #c4a06a);
+}
+.wabi-book-pen-shaft {
+  position: absolute; left: 0; right: 0; top: calc(var(--pen-tip) - 1px); bottom: 0;
+  border-radius: 0 0 45% 45% / 0 0 6px 6px;
+  background:
+    linear-gradient(180deg, transparent 0 14%, rgb(70 42 18 / 0.8) 14% 14.6%, rgb(255 235 195 / 0.35) 14.6% 15.2%, rgb(120 80 40 / 0.25) 15.2% 16.5%, transparent 16.5% 58%, rgb(70 42 18 / 0.75) 58% 58.5%, rgb(255 235 195 / 0.3) 58.5% 59.1%, rgb(120 80 40 / 0.22) 59.1% 60.3%, transparent 60.3%),
+    radial-gradient(ellipse 60% 1.4% at 40% 34%, rgb(60 35 15 / 0.45), transparent),
+    radial-gradient(ellipse 50% 1% at 60% 76%, rgb(60 35 15 / 0.35), transparent),
+    linear-gradient(180deg, rgb(40 25 10 / 0.25), transparent 6%, transparent 94%, rgb(60 35 12 / 0.35)),
+    repeating-linear-gradient(90deg, rgb(90 60 25 / 0.12) 0 1px, transparent 1px 2px),
+    linear-gradient(90deg, #6e4d26 0, #b88e55 14%, #e6c48c 34%, #d6b077 50%, #b38850 72%, #7f5a2d 90%, #5a3d1c);
+}
+.wabi-book-pen-cap { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 0 0 50% 50%; background: linear-gradient(90deg, #4a3016, #8a6636 40%, #5a3c1c); }
+:root[data-theme="dark"] .wabi-book-pen { filter: drop-shadow(2px 3px 3px rgb(18 8 0 / 0.45)) brightness(0.72) saturate(0.9); }
+
+/* --- the book itself: a stage box containing a sliding "camera" that reveals either the centred
+   closed book or the full two-page spread. Flat 2D throughout - no perspective/3D transforms.
+   A real 3D rotateY turn was tried and reverted: under both headless Chromium and (going by the
+   original "shift" complaints) WebKitGTK's compositor, a backface-hidden face past 90deg doesn't
+   reliably vanish - it paints as an opaque blank rectangle over whatever's behind it instead. The
+   flip is a scaleX squish to a sliver at the spine, then (invisible at zero width) a hard jump of
+   `left`/transform-origin to the opposite side of the spine before scaling back out - so the leaf
+   still relocates across the spine like a real turned page, without any 3D compositing. --- */
+.wabi-book-stage {
+  position: absolute;
+  transform: rotate(-0.8deg) translateZ(0);
+}
+.wabi-book-slide {
+  position: absolute;
+  inset: 0;
+}
+
+.wabi-book-groundshadow { position: absolute; border-radius: 3px; background: rgb(25 12 2 / 0.35); transition: opacity 0.9s ease; }
+
+.wabi-book-board {
+  position: absolute;
+  top: 0;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25), inset 0 0 0.3em rgb(210 205 190 / 0.25);
+  background:
+    radial-gradient(circle at 70% 60%, rgb(8 16 34 / 0.2), transparent 70%),
+    radial-gradient(circle at 30% 78%, rgb(130 150 180 / 0.1), transparent 70%),
+    radial-gradient(circle at 82% 22%, rgb(130 150 180 / 0.08), transparent 70%),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse 90% 70% at 38% 30%, var(--book-cloth-lift), var(--book-cloth) 78%);
+}
+.wabi-book-board--left {
+  left: 0;
+  border-radius: 4px 1px 1px 4px;
+  background:
+    radial-gradient(circle at 0 0, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 0 100%, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 70% 60%, rgb(8 16 34 / 0.2), transparent 70%),
+    radial-gradient(circle at 30% 78%, rgb(130 150 180 / 0.1), transparent 70%),
+    radial-gradient(circle at 82% 22%, rgb(130 150 180 / 0.08), transparent 70%),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse 90% 70% at 38% 30%, var(--book-cloth-lift), var(--book-cloth) 78%);
+}
+.wabi-book-board--right {
+  border-radius: 1px 4px 4px 1px;
+  background:
+    radial-gradient(circle at 100% 0, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 100% 100%, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 70% 60%, rgb(8 16 34 / 0.2), transparent 70%),
+    radial-gradient(circle at 30% 78%, rgb(130 150 180 / 0.1), transparent 70%),
+    radial-gradient(circle at 82% 22%, rgb(130 150 180 / 0.08), transparent 70%),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse 90% 70% at 38% 30%, var(--book-cloth-lift), var(--book-cloth) 78%);
+}
+
+.wabi-book-pagebox { position: absolute; }
+
+/* A "cast shadow" overlay used only during a page turn, faded in/out by the animation. */
+
+/* --- the closed book, drawn as flat-cut polygon "faces" of one box: a cheap, convincing 3/4
+   view, ported straight from the approved design's own clip-path math --- */
+.wabi-book-closededge { position: absolute; top: 0; cursor: pointer; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.35)); }
+.wabi-book-closedface { position: absolute; inset: 0; }
+.wabi-book-closedface--board { background: var(--book-cloth-edge); }
+.wabi-book-closedface--spine { background: var(--book-cloth-deep); }
+.wabi-book-closedface--front { background: var(--book-cloth-deep); }
+.wabi-book-closedface--fore {
+  background: repeating-linear-gradient(90deg, rgb(90 68 38 / 0.22) 0 1px, transparent 1px 2.4px), linear-gradient(90deg, var(--book-paper-edge), var(--book-paper-edge-deep));
+}
+.wabi-book-closedface--tail {
+  background: repeating-linear-gradient(0deg, rgb(90 68 38 / 0.22) 0 1px, transparent 1px 2.4px), linear-gradient(180deg, var(--book-paper-edge), var(--book-paper-edge-deep));
+}
+
+/* --- the turning leaf: narrows to a sliver at the spine, jumps (invisible, at zero width) to the
+   opposite side, then widens back out - its two faces cross-fading exactly at that same instant.
+   `transform-origin` is set inline per turn direction (see BookGallery), not fixed here. --- */
+/* No permanent `will-change` here or on the cover: these elements are static except during the
+   few hundred ms of a turn, and pinning a compositor layer for each of them (leaf, two faces,
+   cover, two cover faces, slide) the whole time it just sits there cost more than it saved. The
+   WAAPI transform/opacity animations promote what they touch for their own duration anyway. */
+.wabi-book-leaf {
+  position: absolute;
+  transform-origin: 0% 50%;
+  /* The two faces are a sheet with a front and a back, so they need to keep their own places in
+     3D rather than being flattened into the leaf's plane. Nothing here sets backface-visibility:
+     the faces cross-fade on opacity instead (see BookGallery), which this compositor handles
+     reliably where backface culling did not. */
+  transform-style: preserve-3d;
+}
+.wabi-book-leaf-face {
+  position: absolute;
+  inset: 0;
+  /* A little lift, so the turning sheet reads as off the page rather than printed on it. Must be
+     box-shadow and not filter: a filter would flatten the leaf's 3D context. */
+  box-shadow: 0 0 1.1em rgb(40 25 8 / 0.26);
+}
+/* Pre-turned, so that when the leaf reaches its own half turn this face is back to square and its
+   page reads the right way round rather than mirrored. */
+.wabi-book-leaf-face--back { transform: rotateY(180deg); }
+
+/* --- the cover: cloth, a stab-bound thread with four knots down its hinge edge, a paper title
+   slip - flips on the same hinge as the leaf. The worn-corner glints and thread/knot placement
+   are the exact values from the approved design (percentages and `em`-relative sizes), not a
+   re-guess - only the wood/cloth colour tokens were swapped for this app's own theme vars. --- */
+.wabi-book-cover-flip { position: absolute; top: 0; transform-origin: 0% 50%; }
+.wabi-book-cover-face {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  border-radius: 2px 5px 5px 2px;
+  background:
+    radial-gradient(circle at 100% 0, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 100% 100%, rgb(215 208 190 / 0.3), transparent 11%),
+    radial-gradient(circle at 70% 60%, rgb(8 16 34 / 0.2), transparent 70%),
+    radial-gradient(circle at 30% 78%, rgb(130 150 180 / 0.1), transparent 70%),
+    radial-gradient(circle at 82% 22%, rgb(130 150 180 / 0.08), transparent 70%),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / 0.035) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse 90% 70% at 38% 30%, var(--book-cloth-lift), var(--book-cloth) 78%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.28), inset 0 0 0.25em rgb(215 210 195 / 0.3), inset 0 0 1.6em rgb(0 0 0 / 0.28);
+  transition: filter 0.2s ease;
+}
+.wabi-book-cover-face:hover { filter: brightness(1.07); }
+.wabi-book-cover-bevel {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 4%;
+  border-radius: 2px 0 0 2px;
+  background: linear-gradient(90deg, rgb(0 0 0 / 0.35), rgb(255 255 255 / 0.04) 60%, transparent);
+}
+.wabi-book-cover-crease { position: absolute; left: 13%; top: 0; bottom: 0; width: 2px; background: linear-gradient(90deg, rgb(0 0 0 / 0.32), rgb(210 215 225 / 0.12)); }
+/* The binding thread: a hairline running the full height, at the same x as the four knots. */
+.wabi-book-cover-thread { position: absolute; left: calc(7% - 0.11em); top: 0; bottom: 0; width: 0.22em; background: linear-gradient(90deg, #b5a98c, #f3ecda 50%, #c4b899); box-shadow: 1px 0 1px rgb(0 0 0 / 0.45); }
+.wabi-book-stud {
+  position: absolute; left: calc(7% - 0.26em); width: 0.52em; height: 0.52em; margin-top: -0.26em;
+  border-radius: 50%; background: #0d111b;
+}
+/* A short crossbar of the same thread at each knot, reaching to the cover's own left edge. */
+.wabi-book-tick {
+  position: absolute; left: 0; width: 7%; height: 0.22em; margin-top: -0.11em;
+  background: linear-gradient(180deg, #b5a98c, #f3ecda 50%, #c4b899);
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.45);
+}
+.wabi-book-slip {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7em 0 0.55em;
+  box-sizing: border-box;
+  background: radial-gradient(ellipse at 40% 70%, rgb(150 110 50 / 0.12), transparent 70%), var(--book-paper);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 0 0 1px rgb(80 58 28 / 0.25);
+}
+.wabi-book-slip-rule { position: absolute; inset: 0.22em; border: 1px solid rgb(80 58 28 / 0.35); }
+.wabi-book-slip-text { writing-mode: vertical-rl; font: 500 1.15em/1 var(--font-serif); letter-spacing: 0.25em; color: #2b261e; }
+.wabi-book-slip-seal {
+  width: 1.05em; height: 1.05em;
+  display: flex; align-items: center; justify-content: center;
+  font: 600 0.66em/1 var(--font-serif);
+  color: #f1e3cf;
+  background: radial-gradient(circle at 30% 70%, rgb(255 255 255 / 0.15), transparent 40%), var(--book-seal);
+  border-radius: 1px;
+  opacity: 0.9;
+}
+.wabi-book-cover-back { position: absolute; inset: 0; border-radius: 5px 2px 2px 5px; background: var(--book-cloth); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.25); }
+
+/* --- the album page itself: paper, a soft gutter shade, up to three rows, a page number --- */
+.wabi-album-page {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #2b261e;
+  background: var(--book-paper);
+}
+.wabi-album-page--left { background: radial-gradient(ellipse 55% 35% at 20% 82%, rgb(160 115 55 / 0.08), transparent 70%), var(--book-paper); }
+.wabi-album-page--right { background: radial-gradient(ellipse 55% 35% at 80% 16%, rgb(160 115 55 / 0.08), transparent 70%), var(--book-paper); }
+.wabi-album-page--left::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to left, rgb(70 45 18 / 0.34), rgb(70 45 18 / 0.13) 4%, transparent 13%, rgb(255 250 235 / 0.16) 30%, transparent 55%), linear-gradient(to right, rgb(70 45 18 / 0.09), transparent 3%);
+}
+.wabi-album-page--right::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(to right, rgb(70 45 18 / 0.34), rgb(70 45 18 / 0.13) 4%, transparent 13%, rgb(255 250 235 / 0.16) 30%, transparent 55%), linear-gradient(to left, rgb(70 45 18 / 0.09), transparent 3%);
+}
+
+.wabi-album-rows {
+  position: absolute;
+  left: 1.4em; right: 1.4em; top: 1.35em; bottom: 2.6em;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  row-gap: 0.45em;
+}
+.wabi-album-row { min-height: 0; display: flex; flex-direction: column; gap: 0.4em; }
+.wabi-album-day { font: 500 0.58em/1 var(--font-sans); letter-spacing: 0.18em; text-transform: uppercase; color: #6e6352; }
+.wabi-album-row-main { display: flex; gap: 0.85em; align-items: flex-start; min-height: 0; }
+
+/* A little photo-corner mount at each corner of the icon, like a page in a real photo album. */
+.wabi-album-icon { position: relative; flex: none; width: 2.9em; height: 2.9em; background: rgb(95 70 35 / 0.07); box-shadow: 0 0.06em 0.12em rgb(60 40 15 / 0.18); }
+.wabi-album-icon img { position: absolute; left: 0.28em; top: 0.28em; width: calc(100% - 0.56em); height: calc(100% - 0.56em); object-fit: contain; mix-blend-mode: multiply; }
+.wabi-album-icon img.wabi-real-art { mix-blend-mode: normal; filter: drop-shadow(0 1px 2px rgb(60 40 20 / 0.2)); }
+.wabi-album-icon i { position: absolute; width: 0.8em; height: 0.8em; }
+.wabi-album-icon i:nth-child(2) { left: -0.14em; top: -0.14em; background: linear-gradient(135deg, #3a332a 50%, transparent 50%); }
+.wabi-album-icon i:nth-child(3) { right: -0.14em; top: -0.14em; background: linear-gradient(225deg, #3a332a 50%, transparent 50%); }
+.wabi-album-icon i:nth-child(4) { left: -0.14em; bottom: -0.14em; background: linear-gradient(45deg, #3a332a 50%, transparent 50%); }
+.wabi-album-icon i:nth-child(5) { right: -0.14em; bottom: -0.14em; background: linear-gradient(315deg, #3a332a 50%, transparent 50%); }
+
+.wabi-album-copy { min-width: 0; display: flex; flex-direction: column; gap: 0.2em; padding-top: 0.05em; }
+.wabi-album-names { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 0.45em; row-gap: 0; }
+.wabi-album-jp { font: 600 1.08em/1.15 var(--font-serif); letter-spacing: 0.04em; color: #2b261e; }
+.wabi-album-en { font: italic 500 0.86em/1.15 var(--font-serif); color: #5a5041; }
+/* No known Japanese equivalent yet - the English name carries the row alone, so it takes the
+   same prominent styling the Japanese name would otherwise have. */
+.wabi-album-en--solo { font: 600 1.08em/1.15 var(--font-serif); font-style: normal; letter-spacing: 0.02em; color: #2b261e; }
+.wabi-album-copy span { font: 400 0.62em/1.4 var(--font-sans); color: #5a5041; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+.wabi-album-empty { position: absolute; left: 1.6em; right: 1.6em; top: 0; bottom: 2.6em; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 0.5em; text-align: center; }
+.wabi-album-empty strong { font: 500 1em/1.3 var(--font-serif); color: #2b261e; }
+.wabi-album-empty span { font: 400 0.72em/1.5 var(--font-sans); color: #5a5041; }
+
+.wabi-album-pageno { position: absolute; left: 0; right: 0; bottom: 1.05em; text-align: center; font: 400 0.64em/1 var(--font-serif); color: #6e6352; }
+
+/* --- click zones down the outer edges of the spread --- */
+/* Raised with z-index, not translateZ: the slide is a perspective container now, so a translateZ
+   here would be scaled by the perspective divide instead of just lifting the zones above the page. */
+.wabi-book-zones { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+.wabi-book-zone { all: unset; box-sizing: border-box; position: absolute; top: 0; bottom: 0; cursor: pointer; pointer-events: auto; }
+.wabi-book-zone--left { left: 0; }
+.wabi-book-zone--right { right: 0; }
+.wabi-book-zone:not(:disabled):hover.wabi-book-zone--left { background: linear-gradient(to right, rgb(40 25 10 / 0.1), transparent); }
+.wabi-book-zone:not(:disabled):hover.wabi-book-zone--right { background: linear-gradient(to left, rgb(40 25 10 / 0.1), transparent); }
+.wabi-book-zone:disabled { cursor: default; pointer-events: none; }
+
+/* Modern garden variants */
+.design-garden-card .garden-stage.mg-stage {
+  position: relative;
+  min-height: 220px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  background: linear-gradient(180deg, var(--garden-sky), color-mix(in oklab, var(--garden-sky), var(--surface-inset) 60%));
+}
+
+.design-garden-card .garden-stage.mg-stage::before,
+.design-garden-card .garden-stage.mg-stage::after {
+  display: none;
+}
+
+.design-garden-card .garden-stage.mg-stems {
+  background: var(--surface-inset);
+}
+
+.mg-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.mg-sway {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: mg-sway 6s ease-in-out infinite alternate;
+}
+
+@keyframes mg-sway {
+  from { transform: rotate(-1.4deg); }
+  to { transform: rotate(1.4deg); }
+}
+
+.mg-label {
+  fill: var(--ink-4);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mg-sway { animation: none; }
+}
+
+/* Cleaner old gardens: no blurry colour blobs behind the scene */
+.design-garden-card .garden-stage.gk-stage {
+  background: linear-gradient(180deg, var(--garden-sky), color-mix(in oklab, var(--garden-sky), var(--garden-soil) 22%));
+}
+
+.design-garden-card .garden-stage.jg-stage {
+  background: linear-gradient(180deg, var(--garden-sky), color-mix(in oklab, var(--garden-sky), var(--garden-soil) 24%));
+}
+
+.gk-sun {
+  opacity: 0.22;
 }

@@ -382,6 +382,7 @@ export const defaultState: AppState = {
   waterDate: "",
   petRockPats: 0,
   achievementBoard: [],
+  achievementEarnedOnDates: {},
   durakPuzzle: {
     seed: null,
     hint: "",
@@ -1513,6 +1514,9 @@ export function loadAppState(): AppState {
       exports: Array.isArray(parsed.exports) ? parsed.exports : [],
       badgeCounts: parsed.badgeCounts && typeof parsed.badgeCounts === "object" ? parsed.badgeCounts as Record<string, number> : {},
       badgeCountDates: parsed.badgeCountDates && typeof parsed.badgeCountDates === "object" ? parsed.badgeCountDates as Record<string, string> : {},
+      // Deliberately reads a fresh key, not the old (now-abandoned) one: the old field's values were
+      // all back-filled with the date they were first coded, not the date they were truly earned.
+      achievementEarnedOnDates: parsed.achievementEarnedOnDates && typeof parsed.achievementEarnedOnDates === "object" ? parsed.achievementEarnedOnDates as Record<string, string> : {},
       achievementBoard: Array.isArray(parsed.achievementBoard)
         ? parsed.achievementBoard
             .filter((item) => Boolean(item) && typeof item.id === "string" && Number.isFinite(item.x) && Number.isFinite(item.y))

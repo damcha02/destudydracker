@@ -1051,11 +1051,11 @@ export function SocialScreen(props: Props) {
                 <button type="button" className="profile-avatar-photo-upload" onClick={() => profileAvatarFileInputRef.current?.click()}>
                   {profileAvatarDraft.url ? "Change photo" : "Choose a photo"}
                 </button>
-                <input ref={profileAvatarFileInputRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => void handleProfileAvatarPhotoChange(event)} />
+                <input ref={profileAvatarFileInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleProfileAvatarPhotoChange(event)} />
                 {profileAvatarDraft.url ? (
                   <button type="button" className="ghost-button small-button profile-avatar-photo-remove" onClick={() => setProfileAvatarDraft({ kind: "photo", name: "", url: "", mimeType: "image/webp" })}>Remove photo</button>
                 ) : null}
-                <p className="profile-avatar-photo-hint">Square photos look best. Up to 512px, under 1 MB. PNG, JPEG, or WebP (no GIFs).</p>
+                <p className="profile-avatar-photo-hint">Square photos look best. Up to 512px, under 1 MB. Most photo formats work, including HEIC.</p>
               </div>
             )}
 

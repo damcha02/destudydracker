@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600&family=Cormorant+Garamond:ital,wght@1,500&family=Zen+Kaku+Gothic+New:wght@300;400;500;700&display=swap" rel="stylesheet"><style>
+body{margin:0;background:#e9e5d8;font-family:"Zen Kaku Gothic New","Helvetica Neue",Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:#4f6b4a}a:hover{color:#374d33}
+</style></helmet>
+<div style="min-height:100vh;box-sizing:border-box;padding:48px 32px 64px;display:flex;flex-direction:column;align-items:center;gap:36px">
+<div style="max-width:1120px;width:100%;display:flex;flex-direction:column;gap:6px">
+<div style="font:400 10.5px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.22em;color:#8d8b7d">REST · 休み · ACHIEVEMENTS</div>
+<div style="font:500 26px 'Shippori Mincho',serif;color:#1c1d19">The album</div>
+<div style="font:400 13px/1.6 'Zen Kaku Gothic New',sans-serif;color:#6f7268;max-width:620px;text-wrap:pretty">Click the cover to open. Click the outer edge of a page to turn it; the left edge of the first spread closes the book. Drag a card's lower-right corner to resize the widget.</div>
+</div>
+<div style="max-width:1120px;width:100%;display:flex;flex-wrap:wrap;gap:36px;justify-content:center;align-items:flex-start">
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<div style="font:400 10.5px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.22em;color:#8d8b7d">LIGHT</div>
+<div style="resize:both;overflow:hidden;width:520px;height:344px;min-width:380px;max-width:620px;min-height:264px;max-height:404px;display:flex;flex-direction:column;background:#f4f1e8;border:1px solid #ddd8c8">
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px">
+<div style="display:flex;align-items:baseline;gap:10px"><span style="font:500 15px 'Shippori Mincho',serif;color:#1c1d19">Achievements</span><span style="font:400 11px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.06em;color:#8d8b7d">{{ countLabel }}</span></div>
+<div style="display:flex;gap:0">
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#8d8b7d;padding:5px 10px;border:1px solid #ddd8c8">EMA</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#8d8b7d;padding:5px 10px;border:1px solid #ddd8c8;border-left:none">SHELF</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#8d8b7d;padding:5px 10px;border:1px solid #ddd8c8;border-left:none">SCROLL</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#f4f1e8;background:#1c1d19;padding:5px 10px;border:1px solid #1c1d19">BOOK</span>
+</div>
+</div>
+<div style="flex:1;min-height:0;position:relative;margin:0 10px 10px">
+<dc-import name="Achievement Album" theme="light" dataset="{{ dataset }}" reduced-motion="{{ reducedMotion }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:10px">
+<div style="font:400 10.5px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.22em;color:#8d8b7d">DARK</div>
+<div style="resize:both;overflow:hidden;width:520px;height:344px;min-width:380px;max-width:620px;min-height:264px;max-height:404px;display:flex;flex-direction:column;background:#1f201c;border:1px solid #34352f">
+<div style="flex:none;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px">
+<div style="display:flex;align-items:baseline;gap:10px"><span style="font:500 15px 'Shippori Mincho',serif;color:#e8e4d6">Achievements</span><span style="font:400 11px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.06em;color:#9a988a">{{ countLabel }}</span></div>
+<div style="display:flex;gap:0">
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#9a988a;padding:5px 10px;border:1px solid #3c3d36">EMA</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#9a988a;padding:5px 10px;border:1px solid #3c3d36;border-left:none">SHELF</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#9a988a;padding:5px 10px;border:1px solid #3c3d36;border-left:none">SCROLL</span>
+<span style="font:400 10px 'Zen Kaku Gothic New',sans-serif;letter-spacing:.14em;color:#1f201c;background:#e8e4d6;padding:5px 10px;border:1px solid #e8e4d6">BOOK</span>
+</div>
+</div>
+<div style="flex:1;min-height:0;position:relative;margin:0 10px 10px">
+<dc-import name="Achievement Album" theme="dark" dataset="{{ dataset }}" reduced-motion="{{ reducedMotion }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+</div>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;dataset&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;full&quot;,&quot;few&quot;,&quot;empty&quot;],&quot;default&quot;:&quot;full&quot;,&quot;tsType&quot;:&quot;'full'|'few'|'empty'&quot;},&quot;reducedMotion&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const dataset = this.props.dataset ?? "full";
+    const c = { full: 14, few: 3, empty: 0 }[dataset] ?? 14;
+    return { dataset, reducedMotion: !!this.props.reducedMotion, countLabel: c ? c + " earned" : "none yet" };
+  }
+}
+</script>
+</body>
+</html>

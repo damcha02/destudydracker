@@ -1,4 +1,17 @@
-@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Courier+Prime:wght@400;700&family=Shippori+Mincho:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@300;400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Courier+Prime:wght@400;700&family=Shippori+Mincho:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@300;400;500;700&family=Dancing+Script:wght@500;600&display=swap");
+
+/* Self-hosted, not just a fallback: the packaged app's CSP (see src-tauri/tauri.conf.json)
+   restricts style-src/font-src to 'self', so the @import above - and every Google Fonts request
+   it makes - is silently blocked in the actual built app (it only ever worked, if it ever
+   appeared to, in an unsandboxed browser preview). This is the one cursive face actually used
+   for real content (the calendar's subject line), so it gets a local copy that CSP allows. */
+@font-face {
+  font-family: "Dancing Script";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("/fonts/DancingScript-latin.woff2") format("woff2");
+}
 
 :root {
   --font-serif: "Newsreader", Georgia, "Times New Roman", serif;

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div ref="{{ rootRef }}" tabIndex="0" onKeyDown="{{ onKey }}" style="position:absolute;inset:0;overflow:hidden;outline:none;background:{{ table }};font-family:'Zen Kaku Gothic New',sans-serif">
+<sc-if value="{{ ready }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:-25%;top:-35%;width:95%;height:120%;pointer-events:none;opacity:{{ t.shoji }};transform:rotate(-16deg) skewX(-18deg);background:repeating-linear-gradient(90deg, rgba(40,20,5,.12) 0 5px, rgba(255,238,205,.09) 5px 62px), repeating-linear-gradient(0deg, rgba(40,20,5,.12) 0 5px, rgba(0,0,0,0) 5px 44px);-webkit-mask-image:radial-gradient(ellipse 55% 55% at 45% 50%, #000 15%, rgba(0,0,0,0) 72%);mask-image:radial-gradient(ellipse 55% 55% at 45% 50%, #000 15%, rgba(0,0,0,0) 72%);filter:blur(2.5px)"></div>
+<div style="position:absolute;left:{{ cup.L }};top:{{ cup.T }};width:{{ cup.D }};height:{{ cup.D }};filter:{{ cup.filter }};pointer-events:none">
+<div style="position:absolute;left:6%;top:12%;width:100%;height:100%;border-radius:50%;background:rgba(18,8,0,.62);filter:{{ cup.blur }}"></div>
+<div style="position:absolute;left:1%;top:3%;width:100%;height:100%;border-radius:50%;background:rgba(18,8,0,.5)"></div>
+<div style="position:absolute;inset:0;border-radius:50%;background:radial-gradient(circle at 36% 30%, rgba(210,170,130,.22), rgba(0,0,0,0) 38%), conic-gradient(from 20deg, rgba(0,0,0,.25), rgba(150,105,70,.18) 8%, rgba(0,0,0,.1) 14%, rgba(0,0,0,.3) 23%, rgba(120,85,55,.14) 31%, rgba(0,0,0,.05) 40%, rgba(0,0,0,.32) 52%, rgba(140,95,60,.16) 60%, rgba(0,0,0,.18) 71%, rgba(0,0,0,.35) 82%, rgba(150,105,70,.12) 91%, rgba(0,0,0,.25)), repeating-radial-gradient(circle, rgba(0,0,0,0) 0 3px, rgba(0,0,0,.07) 3px 4px), radial-gradient(circle, #4a2f20 0 55%, #3a2317 72%, #24150d 100%);box-shadow:inset 0 0 0 1px rgba(0,0,0,.55), inset 3px 3px 5px rgba(215,175,135,.22), inset -4px -5px 7px rgba(0,0,0,.55)"></div>
+<div style="position:absolute;inset:17%;border-radius:50%;background:conic-gradient(from 200deg, rgba(0,0,0,.3), rgba(160,115,78,.2) 12%, rgba(0,0,0,.2) 30%, rgba(0,0,0,.4) 55%, rgba(150,108,72,.16) 75%, rgba(0,0,0,.3)), radial-gradient(circle, #4d3223 0 70%, #3b2518);box-shadow:inset 1px 1px 1px rgba(225,190,150,.3), 0 0 0 1px rgba(0,0,0,.35), 2px 3px 5px rgba(0,0,0,.45)"></div>
+<div style="position:absolute;inset:22%;border-radius:50%;background:radial-gradient(circle at 38% 34%, rgba(190,160,130,.35), rgba(0,0,0,0) 45%), linear-gradient(135deg, #6a4b37, #3a2518 60%, #22140c);box-shadow:inset 0 0 0 1px rgba(0,0,0,.4)"></div>
+<div style="position:absolute;inset:26%;border-radius:50%;background:radial-gradient(ellipse 30% 18% at 36% 30%, rgba(215,222,232,.38), rgba(0,0,0,0) 72%), radial-gradient(ellipse 12% 7% at 66% 70%, rgba(200,205,215,.12), rgba(0,0,0,0) 70%), radial-gradient(circle at 55% 55%, #0a090a, #030303 70%, #000);box-shadow:inset 3px 4px 6px rgba(0,0,0,.95), inset -1px -1px 1px rgba(120,90,65,.35)"></div>
+</div>
+<div style="position:absolute;left:{{ pen.L }};top:{{ pen.T }};width:{{ pen.W }};height:{{ pen.H }};filter:{{ cup.filter }};pointer-events:none">
+<div style="position:absolute;left:{{ pen.sh }};top:{{ pen.sh }};right:-40%;bottom:-2%;border-radius:40% 40% 30% 30%/3% 3% 1% 1%;background:rgba(18,8,0,.55);filter:{{ cup.blur2 }}"></div>
+<div style="position:absolute;left:0;right:0;top:0;height:{{ pen.tip }};clip-path:polygon(50% 0, 62% 18%, 100% 100%, 0 100%, 40% 16%);background:linear-gradient(90deg, rgba(0,0,0,.4), rgba(255,255,255,.18) 35%, rgba(0,0,0,.3)), linear-gradient(180deg, #050404 0, #0d0a08 30%, #1c140d 48%, rgba(60,40,22,.9) 64%, #9c7a4c 82%, #c4a06a)"></div>
+<div style="position:absolute;left:0;right:0;top:calc({{ pen.tip }} - 1px);bottom:0;border-radius:0 0 45% 45%/0 0 6px 6px;background:linear-gradient(180deg, rgba(0,0,0,0) 0 14%, rgba(70,42,18,.8) 14% 14.6%, rgba(255,235,195,.35) 14.6% 15.2%, rgba(120,80,40,.25) 15.2% 16.5%, rgba(0,0,0,0) 16.5% 58%, rgba(70,42,18,.75) 58% 58.5%, rgba(255,235,195,.3) 58.5% 59.1%, rgba(120,80,40,.22) 59.1% 60.3%, rgba(0,0,0,0) 60.3%), radial-gradient(ellipse 60% 1.4% at 40% 34%, rgba(60,35,15,.45), rgba(0,0,0,0)), radial-gradient(ellipse 50% 1% at 60% 76%, rgba(60,35,15,.35), rgba(0,0,0,0)), linear-gradient(180deg, rgba(40,25,10,.25), rgba(0,0,0,0) 6%, rgba(0,0,0,0) 94%, rgba(60,35,12,.35)), repeating-linear-gradient(90deg, rgba(90,60,25,.12) 0 1px, rgba(0,0,0,0) 1px 2px), linear-gradient(90deg, #6e4d26 0, #b88e55 14%, #e6c48c 34%, #d6b077 50%, #b38850 72%, #7f5a2d 90%, #5a3d1c)"></div>
+<div style="position:absolute;left:0;right:0;bottom:0;height:3px;border-radius:0 0 50% 50%;background:linear-gradient(90deg, #4a3016, #8a6636 40%, #5a3c1c)"></div>
+</div>
+<div style="position:absolute;left:{{ g.stageL }};top:{{ g.stageT }};width:{{ g.spreadW }};height:{{ g.BH }};font-size:{{ g.fs }};perspective:{{ g.persp }};perspective-origin:50% 35%;transform:rotate(-0.8deg)">
+<div ref="{{ slideRef }}" style="position:absolute;inset:0;transform-style:preserve-3d;transform:{{ slideT }}">
+
+<div style="position:absolute;inset:0">
+<div style="position:absolute;left:{{ g.csL }};top:{{ g.csT }};width:{{ g.csW }};height:{{ g.BH }};border-radius:3px;background:rgba(25,12,2,.35);box-shadow:{{ g.groundShadow }};opacity:{{ closedShadowOp }};transition:opacity .9s ease"></div>
+<div style="position:absolute;left:-2px;top:1px;width:{{ g.openW }};height:{{ g.BH }};border-radius:4px;background:rgba(25,12,2,.35);box-shadow:{{ g.groundShadow }};opacity:{{ openShadowOp }};transition:opacity .9s ease"></div>
+
+<sc-if value="{{ showLeft }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:0;top:0;width:{{ g.BWpx }};height:{{ g.BH }};border-radius:4px 1px 1px 4px;background:{{ boardL }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.25), inset 0 0 .3em rgba(210,205,190,.25)"></div>
+<div style="position:absolute;left:{{ g.mpx }};top:{{ g.mpx }};width:{{ g.PWpx }};height:{{ g.PHpx }};box-shadow:{{ stackL }}">
+<dc-import name="Album Page" page="{{ leftPage }}" paper="{{ t.paper }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+<div ref="{{ shL }}" style="position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(to left, rgba(30,18,6,.6), rgba(30,18,6,.18) 45%, rgba(30,18,6,0) 90%)"></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showRight }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:{{ g.BWpx }};top:0;width:{{ g.BWpx }};height:{{ g.BH }};border-radius:1px 4px 4px 1px;background:{{ boardR }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.25), inset 0 0 .3em rgba(210,205,190,.25)"></div>
+<div style="position:absolute;left:{{ g.BWpx }};top:{{ g.mpx }};width:{{ g.PWpx }};height:{{ g.PHpx }};box-shadow:{{ stackR }}">
+<dc-import name="Album Page" page="{{ rightPage }}" paper="{{ t.paper }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+<div ref="{{ shR }}" style="position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(to right, rgba(30,18,6,.6), rgba(30,18,6,.18) 45%, rgba(30,18,6,0) 90%)"></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showClosed }}" hint-placeholder-val="{{ true }}">
+<div ref="{{ edgeRef }}" onClick="{{ openBook }}" style="position:absolute;left:{{ g.BWpx }};top:0;width:{{ g.cW }};height:{{ g.cH }};filter:drop-shadow(0 1px 1px rgba(0,0,0,.35));cursor:pointer">
+<div style="position:absolute;inset:0;clip-path:{{ g.pBoard }};background:{{ t.clothEdge }}"></div>
+<div style="position:absolute;inset:0;clip-path:{{ g.pSpine }};background:{{ t.clothDark }}"></div>
+<div style="position:absolute;inset:0;clip-path:{{ g.pFore }};background:repeating-linear-gradient(90deg, rgba(90,68,38,.22) 0 1px, rgba(0,0,0,0) 1px 2.4px), linear-gradient(90deg, {{ t.paperEdge }}, {{ t.paperEdgeDeep }})"></div>
+<div style="position:absolute;inset:0;clip-path:{{ g.pTail }};background:repeating-linear-gradient(0deg, rgba(90,68,38,.22) 0 1px, rgba(0,0,0,0) 1px 2.4px), linear-gradient(180deg, {{ t.paperEdge }}, {{ t.paperEdgeDeep }})"></div>
+<div style="position:absolute;inset:0;clip-path:{{ g.pFront }};background:{{ t.clothDark }}"></div>
+</div>
+</sc-if>
+</div>
+
+<sc-if value="{{ turning }}" hint-placeholder-val="{{ false }}">
+<div ref="{{ leafRef }}" style="position:absolute;left:{{ g.BWpx }};top:{{ g.mpx }};width:{{ g.PWpx }};height:{{ g.PHpx }};transform-origin:0 50%;transform-style:preserve-3d;transform:{{ leafT }}">
+<div ref="{{ leafFF }}" style="position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;opacity:{{ leafFOp }}">
+<dc-import name="Album Page" page="{{ leafFront }}" paper="{{ t.paper }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+<div ref="{{ leafFS }}" style="position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(to right, rgba(35,22,8,.55), rgba(35,22,8,.12))"></div>
+</div>
+<div ref="{{ leafBF }}" style="position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;transform:rotateY(180deg);opacity:{{ leafBOp }}">
+<dc-import name="Album Page" page="{{ leafBack }}" paper="{{ t.paper }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+<div ref="{{ leafBS }}" style="position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(to left, rgba(35,22,8,.55), rgba(35,22,8,.12))"></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showCover }}" hint-placeholder-val="{{ true }}">
+<div ref="{{ coverRef }}" style="position:absolute;left:{{ g.BWpx }};top:0;width:{{ g.BWpx }};height:{{ g.BH }};transform-origin:0 50%;transform-style:preserve-3d;transform:{{ coverT }}">
+<div ref="{{ coverFF }}" onClick="{{ openBook }}" aria-label="Open the album" role="button" style="position:absolute;inset:0;opacity:{{ coverFOp }};backface-visibility:hidden;-webkit-backface-visibility:hidden;cursor:pointer;border-radius:2px 5px 5px 2px;background:{{ coverBg }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.28), inset 0 0 .25em rgba(215,210,195,.3), inset 0 0 1.6em rgba(0,0,0,.28)" style-hover="filter:brightness(1.07)">
+<div style="position:absolute;left:0;top:0;bottom:0;width:4%;border-radius:2px 0 0 2px;background:linear-gradient(90deg, rgba(0,0,0,.35), rgba(255,255,255,.04) 60%, rgba(0,0,0,0))"></div>
+<div style="position:absolute;left:13%;top:0;bottom:0;width:2px;background:linear-gradient(90deg, rgba(0,0,0,.32), rgba(210,215,225,.12))"></div>
+<span style="position:absolute;left:calc(7% - .26em);top:calc(9% - .26em);width:.52em;height:.52em;border-radius:50%;background:#0d111b"></span>
+<span style="position:absolute;left:calc(7% - .26em);top:calc(36.3% - .26em);width:.52em;height:.52em;border-radius:50%;background:#0d111b"></span>
+<span style="position:absolute;left:calc(7% - .26em);top:calc(63.7% - .26em);width:.52em;height:.52em;border-radius:50%;background:#0d111b"></span>
+<span style="position:absolute;left:calc(7% - .26em);top:calc(91% - .26em);width:.52em;height:.52em;border-radius:50%;background:#0d111b"></span>
+<span style="position:absolute;left:calc(7% - .11em);top:0;bottom:0;width:.22em;background:linear-gradient(90deg, #b5a98c, #f3ecda 50%, #c4b899);box-shadow:1px 0 1px rgba(0,0,0,.45)"></span>
+<span style="position:absolute;left:0;width:7%;top:calc(9% - .11em);height:.22em;background:linear-gradient(180deg, #b5a98c, #f3ecda 50%, #c4b899);box-shadow:0 1px 1px rgba(0,0,0,.45)"></span>
+<span style="position:absolute;left:0;width:7%;top:calc(36.3% - .11em);height:.22em;background:linear-gradient(180deg, #b5a98c, #f3ecda 50%, #c4b899);box-shadow:0 1px 1px rgba(0,0,0,.45)"></span>
+<span style="position:absolute;left:0;width:7%;top:calc(63.7% - .11em);height:.22em;background:linear-gradient(180deg, #b5a98c, #f3ecda 50%, #c4b899);box-shadow:0 1px 1px rgba(0,0,0,.45)"></span>
+<span style="position:absolute;left:0;width:7%;top:calc(91% - .11em);height:.22em;background:linear-gradient(180deg, #b5a98c, #f3ecda 50%, #c4b899);box-shadow:0 1px 1px rgba(0,0,0,.45)"></span>
+<div style="position:absolute;left:{{ g.slipL }};top:{{ g.slipT }};width:{{ g.slipW }};height:{{ g.slipH }};background:radial-gradient(ellipse at 40% 70%, rgba(150,110,50,.12), rgba(0,0,0,0) 70%), {{ t.slip }};box-shadow:0 1px 1px rgba(0,0,0,.35), inset 0 0 0 1px rgba(80,58,28,.25);display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:.7em 0 .55em;box-sizing:border-box">
+<div style="position:absolute;inset:.22em;border:1px solid rgba(80,58,28,.35)"></div>
+<span style="writing-mode:vertical-rl;font:500 1.15em/1 'Shippori Mincho',serif;letter-spacing:.25em;color:#2b261e">記念帖</span>
+<span style="width:1.05em;height:1.05em;background:radial-gradient(circle at 30% 70%, rgba(255,255,255,.15), rgba(0,0,0,0) 40%), #a8412c;display:flex;align-items:center;justify-content:center;font:600 .66em/1 'Shippori Mincho',serif;color:#f1e3cf;opacity:.9;border-radius:1px">記</span>
+</div>
+</div>
+<div ref="{{ coverBF }}" style="position:absolute;inset:0;opacity:{{ coverBOp }};backface-visibility:hidden;-webkit-backface-visibility:hidden;transform:rotateY(180deg);border-radius:5px 2px 2px 5px;background:{{ boardL }};box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)">
+<div style="position:absolute;left:{{ g.mpx }};top:{{ g.mpx }};width:{{ g.PWpx }};height:{{ g.PHpx }}">
+<dc-import name="Album Page" page="{{ firstPage }}" paper="{{ t.paper }}" hint-size="100%,100%" style="position:absolute;inset:0"></dc-import>
+<div ref="{{ coverBS }}" style="position:absolute;inset:0;opacity:0;pointer-events:none;background:linear-gradient(to left, rgba(35,22,8,.55), rgba(35,22,8,.12))"></div>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ showZones }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;inset:0;transform:translateZ(3px);pointer-events:none">
+<div onClick="{{ goPrev }}" aria-label="{{ prevLabel }}" role="button" style="position:absolute;left:0;top:0;bottom:0;width:{{ g.zw }};cursor:w-resize;pointer-events:{{ prevPE }}" style-hover="background:linear-gradient(to right, rgba(40,25,10,.10), rgba(40,25,10,0))"></div>
+<div onClick="{{ goNext }}" aria-label="Next pages" role="button" style="position:absolute;right:0;top:0;bottom:0;width:{{ g.zw }};cursor:e-resize;pointer-events:{{ nextPE }}" style-hover="background:linear-gradient(to left, rgba(40,25,10,.10), rgba(40,25,10,0))"></div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:520,&quot;height&quot;:300},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;light&quot;,&quot;dark&quot;],&quot;default&quot;:&quot;light&quot;,&quot;tsType&quot;:&quot;'light'|'dark'&quot;},&quot;dataset&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;full&quot;,&quot;few&quot;,&quot;empty&quot;],&quot;default&quot;:&quot;full&quot;,&quot;tsType&quot;:&quot;'full'|'few'|'empty'&quot;},&quot;reducedMotion&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+const A = "assets/";
+const DATA = [
+  { name: "Deep water", jp: "深水", desc: "One unbroken session of 90 minutes.", date: "2026-06-21", icon: A + "g-pond.png" },
+  { name: "Old pine", jp: "老松", desc: "Among the first to keep a study log here.", icon: A + "g-pine.png" },
+  { name: "First session", jp: "初心", desc: "Logged your first focused session.", date: "2026-06-02", icon: A + "plant-moss.png" },
+  { name: "Early light", jp: "曙光", desc: "Started three sessions before 7 am.", date: "2026-06-14", icon: A + "g-lantern-small.png" },
+  { name: "Steady hand", jp: "継続", desc: "Five days in a row with at least one session.", date: "2026-06-05", icon: A + "plant-bamboo.png" },
+  { name: "Clean slate", jp: "白紙", desc: "Closed every task on a week's plan.", date: "2026-06-30", icon: A + "g-stone-slab.png" },
+  { name: "Cherry year", jp: "桜の年", desc: "Used the app through one full semester.", icon: A + "plant-cherry.png" },
+  { name: "Hundred hours", jp: "百時間", desc: "100 hours of study logged in total.", date: "2026-07-08", icon: A + "plant-pine.png" },
+  { name: "Quiet week", jp: "静かな週", desc: "Seven days without skipping a break.", date: "2026-07-19", icon: A + "g-hut.png" },
+  { name: "Exam ready", jp: "備え", desc: "Finished a full summary before its exam.", date: "2026-07-27", icon: A + "plant-iris.png" },
+  { name: "Bridge", jp: "橋", desc: "Linked notes across two subjects.", date: "2026-08-04", icon: A + "g-bridge.png" },
+  { name: "Moss garden", jp: "苔庭", desc: "Planted twelve subjects in the garden.", icon: A + "g-rock-mossy.png" },
+  { name: "Mid-season", jp: "盛夏", desc: "Kept a streak through a public holiday.", date: "2026-08-15", icon: A + "plant-maple.png" },
+  { name: "Long rain", jp: "長雨", desc: "Studied through ten grey days in a row.", date: "2026-09-02", icon: A + "plant-hosta.png" }
+];
+const SETS = {
+  full: DATA,
+  few: DATA.filter(d => ["First session", "Steady hand", "Old pine"].includes(d.name)),
+  empty: []
+};
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const fmt = d => { const [y, m, dd] = d.split("-").map(Number); return dd + " " + MON[m - 1] + " " + y; };
+function buildPages(items) {
+  const dated = items.filter(i => i.date).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const undated = items.filter(i => !i.date).sort((a, b) => a.name.localeCompare(b.name));
+  const rows = dated.concat(undated).map(i => ({ hasDate: !!i.date, date: i.date ? fmt(i.date) : "", name: i.name, jp: i.jp || i.name, desc: i.desc, icon: i.icon }));
+  const pages = [];
+  for (let i = 0; i < rows.length; i += 3) pages.push({ rows: rows.slice(i, i + 3) });
+  if (!pages.length) pages.push({ rows: [], empty: true });
+  if (pages.length % 2) pages.push({ rows: [] });
+  return pages.map((p, i) => Object.assign(p, { num: i + 1, left: i % 2 === 0 }));
+}
+const wood = (c, lamp, vig) => [
+  "radial-gradient(ellipse 70% 60% at 42% 38%, rgba(255,232,190," + lamp + "), rgba(255,232,190,0) 70%)",
+  "radial-gradient(ellipse 120% 95% at 50% 50%, rgba(0,0,0,0) 50%, rgba(30,15,3," + vig + "))",
+  "radial-gradient(ellipse 90px 20px at 17% 20%, rgba(55,28,8,.55) 0 5%, rgba(0,0,0,0) 13%, rgba(55,28,8,.2) 19%, rgba(0,0,0,0) 27%, rgba(55,28,8,.15) 37%, rgba(0,0,0,0) 47%, rgba(55,28,8,.1) 60%, rgba(0,0,0,0) 76%)",
+  "radial-gradient(ellipse 64px 13px at 62% 86%, rgba(55,28,8,.45) 0 6%, rgba(0,0,0,0) 15%, rgba(55,28,8,.16) 23%, rgba(0,0,0,0) 33%, rgba(55,28,8,.1) 46%, rgba(0,0,0,0) 64%)",
+  "linear-gradient(180deg, rgba(0,0,0,0) calc(34% - 1px), rgba(30,14,3,.45) calc(34% - 1px) 34%, rgba(255,230,190,.08) 34% calc(34% + 1px), rgba(0,0,0,0) calc(34% + 1px) calc(70% - 1px), rgba(30,14,3,.45) calc(70% - 1px) 70%, rgba(255,230,190,.08) 70% calc(70% + 1px), rgba(0,0,0,0) calc(70% + 1px))",
+  "repeating-linear-gradient(179.3deg, rgba(60,32,10,.10) 0 1px, rgba(0,0,0,0) 1px 5px)",
+  "repeating-linear-gradient(180.8deg, rgba(60,32,10,.08) 0 2px, rgba(0,0,0,0) 2px 11px)",
+  "repeating-linear-gradient(179.7deg, rgba(255,235,200,.05) 0 3px, rgba(0,0,0,0) 3px 23px)",
+  "repeating-linear-gradient(180.3deg, rgba(70,38,12,.12) 0 7px, rgba(0,0,0,0) 7px 41px, rgba(70,38,12,.07) 41px 44px, rgba(0,0,0,0) 44px 67px)",
+  "linear-gradient(90deg, rgba(0,0,0,.06), rgba(255,255,255,.03) 40%, rgba(0,0,0,.07))",
+  "linear-gradient(180deg, " + c[0] + " 0 34%, " + c[1] + " 34% 70%, " + c[2] + " 70%)"
+].join(", ");
+const cloth = (base, lift) =>
+  "radial-gradient(ellipse 40% 30% at 70% 60%, rgba(8,16,34,.2), rgba(0,0,0,0) 70%), radial-gradient(ellipse 35% 25% at 30% 78%, rgba(130,150,180,.10), rgba(0,0,0,0) 70%), radial-gradient(ellipse 30% 40% at 82% 22%, rgba(130,150,180,.08), rgba(0,0,0,0) 70%), repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, rgba(0,0,0,0) 1px 3px), repeating-linear-gradient(90deg, rgba(0,0,0,.07) 0 1px, rgba(0,0,0,0) 1px 3px), radial-gradient(ellipse 90% 70% at 38% 30%, " + lift + ", " + base + " 78%)";
+const wear = at => at.map(p => "radial-gradient(circle at " + p + ", rgba(215,208,190,.30), rgba(215,208,190,0) 11%)").join(", ") + ", ";
+const PAL = {
+  light: { table: wood(["#ad8056", "#a37750", "#b0855a"], .24, .32), shoji: .9, cupFilter: "none", cloth: "#34425a", lift: "#3f4e68", clothDark: "#27324a", clothEdge: "#1d2536", paper: "#eee5cf", paperEdge: "#e9dfc7", paperEdgeDeep: "#d6c9aa", slip: "#e8ddc4" },
+  dark: { table: wood(["#3f2c1e", "#3a281b", "#45301f"], .10, .5), shoji: .35, cupFilter: "brightness(.72) saturate(.9)", cloth: "#2c374b", lift: "#35425a", clothDark: "#212a3b", clothEdge: "#171d29", paper: "#d8cdb3", paperEdge: "#d2c6aa", paperEdgeDeep: "#b9ab8b", slip: "#d5c9ae" }
+};
+
+class Component extends DCLogic {
+  state = { w: 0, h: 0, open: false, spread: 0, anim: null };
+  rootRef = React.createRef(); slideRef = React.createRef(); coverRef = React.createRef(); coverBS = React.createRef();
+  leafRef = React.createRef(); leafFS = React.createRef(); leafBS = React.createRef();
+  shL = React.createRef(); shR = React.createRef(); edgeRef = React.createRef();
+  coverFF = React.createRef(); coverBF = React.createRef(); leafFF = React.createRef(); leafBF = React.createRef();
+
+  componentDidMount() {
+    this.ro = new ResizeObserver(([e]) => {
+      const w = Math.round(e.contentRect.width), h = Math.round(e.contentRect.height);
+      if (w !== this.state.w || h !== this.state.h) this.setState({ w, h });
+    });
+    const attach = () => { const el = this.rootRef.current; if (el) { this.ro.observe(el); const r = el.getBoundingClientRect(); this.setState({ w: Math.round(r.width), h: Math.round(r.height) }); } else setTimeout(attach, 50); };
+    attach();
+    this.mq = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  }
+  componentWillUnmount() { this.ro && this.ro.disconnect(); }
+  componentDidUpdate(pp, ps) {
+    if (pp.dataset !== this.props.dataset) { this.setState({ open: false, spread: 0, anim: null }); return; }
+  }
+  reduced() { return !!this.props.reducedMotion || !!(this.mq && this.mq.matches); }
+  pages() {
+    const k = this.props.dataset || "full";
+    if (this._k !== k) { this._k = k; this._p = buildPages(SETS[k] || DATA); }
+    return this._p;
+  }
+  openBook = () => {
+    if (this.state.open || this.state.anim) return;
+    if (this.reduced()) this.setState({ open: true, spread: 0 });
+    else this.setState({ anim: "open", spread: 0 }, () => setTimeout(() => this.run("open"), 20));
+  };
+  turn = dir => {
+    const s = this.state, n = this.pages().length / 2, t = s.spread + dir;
+    if (!s.open || s.anim || t < 0 || t >= n) return;
+    if (this.reduced()) this.setState({ spread: t });
+    else { const k = dir > 0 ? "next" : "prev"; this.setState({ anim: k }, () => setTimeout(() => this.run(k), 20)); }
+  };
+  closeBook = () => {
+    const s = this.state;
+    if (!s.open || s.anim) return;
+    if (this.reduced()) { this.setState({ open: false, spread: 0 }); return; }
+    this.setState({ spread: 0, anim: "close" }, () => setTimeout(() => this.run("close"), 20));
+  };
+  onKey = e => {
+    if (e.key === "ArrowRight") { this.state.open ? this.turn(1) : this.openBook(); e.preventDefault(); }
+    else if (e.key === "ArrowLeft") { this.turn(-1); e.preventDefault(); }
+    else if ((e.key === "Enter" || e.key === " ") && !this.state.open) { this.openBook(); e.preventDefault(); }
+    else if (e.key === "Escape") this.closeBook();
+  };
+  run(kind) {
+    if (this._running === kind) return; this._running = kind;
+    const D = kind === "open" || kind === "close" ? 1150 : 860;
+    const ease = "cubic-bezier(.42,.02,.3,1)";
+    const leaf = kind === "open" || kind === "close" ? this.coverRef.current : this.leafRef.current;
+    const anims = [];
+    let done = false;
+    const finish = () => { if (done) return; done = true; this._running = null; clearTimeout(this._t); this.setState(
+      s => kind === "open" ? { open: true, anim: null } : kind === "close" ? { open: false, anim: null } : { spread: s.spread + (kind === "next" ? 1 : -1), anim: null },
+      () => anims.forEach(a => { try { a.cancel(); } catch (_) {} })
+    ); };
+    if (!leaf || !leaf.animate) { finish(); return; }
+    const z = "translateZ(1px) ";
+    const fwd = [[0, 0], [.16, -13], [.86, -171], [1, -180]];
+    const kf = (kind === "prev" || kind === "close" ? fwd.map(([o, r]) => [1 - o, r]).reverse() : fwd).map(([o, r]) => ({ offset: o, transform: z + "rotateY(" + r + "deg)" }));
+    const main = leaf.animate(kf, { duration: D, easing: ease, fill: "forwards" });
+    const fade = (ref, frames) => { if (ref.current) anims.push(ref.current.animate(frames.map(([o, v]) => ({ offset: o, opacity: v })), { duration: D, easing: ease, fill: "forwards" })); };
+    const outShade = [[0, 0], [.5, .38], [1, .38]], inShade = [[0, .38], [.5, .38], [1, 0]];
+    const swap = (outR, inR) => {
+      const o = { duration: D, easing: ease, fill: "forwards" };
+      if (outR.current) anims.push(outR.current.animate([{ offset: 0, opacity: 1 }, { offset: .5, opacity: 1 }, { offset: .501, opacity: 0 }, { offset: 1, opacity: 0 }], o));
+      if (inR.current) anims.push(inR.current.animate([{ offset: 0, opacity: 0 }, { offset: .5, opacity: 0 }, { offset: .501, opacity: 1 }, { offset: 1, opacity: 1 }], o));
+    };
+    if (kind === "open") swap(this.coverFF, this.coverBF);
+    else if (kind === "close") swap(this.coverBF, this.coverFF);
+    else if (kind === "next") swap(this.leafFF, this.leafBF);
+    else swap(this.leafBF, this.leafFF);
+    const castNear = [[0, 0], [.3, .34], [.56, 0], [1, 0]], castFar = [[0, 0], [.5, 0], [.84, .28], [1, 0]];
+    if (kind === "open") {
+      fade(this.coverBS, inShade);
+      fade(this.shR, castNear);
+      if (this.edgeRef.current) anims.push(this.edgeRef.current.animate([{ opacity: 1 }, { opacity: 0, offset: .3 }, { opacity: 0 }], { duration: D, fill: "forwards" }));
+      if (this.slideRef.current) {
+        const g = this._g;
+        anims.push(this.slideRef.current.animate([{ transform: "translateX(" + g.closedX + "px)" }, { transform: "translateX(0px)" }], { duration: D, easing: "cubic-bezier(.5,0,.25,1)", fill: "forwards" }));
+      }
+    } else if (kind === "close") {
+      fade(this.coverBS, outShade);
+      fade(this.shR, [[0, 0], [.6, 0], [.86, .3], [1, .3]]);
+      if (this.edgeRef.current) anims.push(this.edgeRef.current.animate([{ opacity: 0 }, { opacity: 0, offset: .72 }, { opacity: 1 }], { duration: D, fill: "forwards" }));
+      if (this.slideRef.current) anims.push(this.slideRef.current.animate([{ transform: "translateX(0px)" }, { transform: "translateX(" + this._g.closedX + "px)" }], { duration: D, easing: "cubic-bezier(.5,0,.25,1)", fill: "forwards" }));
+    } else if (kind === "next") {
+      fade(this.leafFS, outShade); fade(this.leafBS, inShade); fade(this.shR, castNear); fade(this.shL, castFar);
+    } else {
+      fade(this.leafBS, outShade); fade(this.leafFS, inShade); fade(this.shL, castNear); fade(this.shR, castFar);
+    }
+    anims.push(main);
+    main.onfinish = finish;
+    this._t = setTimeout(finish, D + 250);
+  }
+  renderVals() {
+    const s = this.state, t = PAL[this.props.theme === "dark" ? "dark" : "light"], pages = this.pages();
+    const base = { rootRef: this.rootRef, onKey: this.onKey, table: t.table, ready: false };
+    if (!s.w || !s.h) return base;
+    const padX = Math.max(14, s.w * .05), padY = Math.max(12, s.h * .08), ratio = .78;
+    const D = Math.min(s.h * .3, s.w * .15), stripW = D + padX * .7, availW = s.w - stripW;
+    const BH = Math.max(110, Math.min(s.h - 2 * padY, (availW - 2 * padX) / (2 * ratio)));
+    const sL = padX + Math.max(0, (availW - 2 * padX - 2 * BH * ratio) / 2), sT = (s.h - BH) / 2 - BH * ratio * .023;
+    const potX = s.w - padX * .7 - D / 2, potY = padY + D * .55, pw = Math.max(7, D * .11);
+    const penT = potY + D * .62, penB = s.h - padY * .7;
+    const BW = BH * ratio;
+    const m = BW * .04, PW = BW - m, PH = BH - 2 * m, fs = PH / 19;
+    const e = BW * .065, b = BW * .016, a = BW * .022, p0 = BW * .03, sp = BW * .085;
+    const px = v => v.toFixed(2) + "px";
+    const poly = pts => "polygon(" + pts.map(p => px(p[0]) + " " + px(p[1])).join(",") + ")";
+    const closedX = -(BW + e + b) / 2;
+    this._g = { closedX };
+    const an = s.anim, L = 2 * s.spread, R = L + 1, pg = i => pages[i] || null;
+    let leftPage = pg(L), rightPage = pg(R), leafFront = null, leafBack = null;
+    if (an === "next") { rightPage = pg(R + 2); leafFront = pg(R); leafBack = pg(R + 1); }
+    if (an === "prev") { leftPage = pg(L - 2); leafFront = pg(L - 1); leafBack = pg(L); }
+    if (an === "open") rightPage = pg(1);
+    const k = fs / 10;
+    const layers = c => Math.max(1, Math.min(6, Math.round((c / Math.max(2, pages.length)) * 6)));
+    const stack = (c, dir) => {
+      const n = layers(c), out = [];
+      for (let i = 1; i <= n; i++) out.push(px(dir * i * .7 * k) + " " + px(i * .8 * k) + " 0 " + (i % 2 ? t.paperEdgeDeep : t.paperEdge));
+      out.push(px(dir * (n + 1) * .7 * k) + " " + px((n + 1.5) * .8 * k) + " " + px(1.5 * k) + " rgba(35,20,5,.35)");
+      return out.join(", ");
+    };
+    const n = pages.length / 2;
+    const open = s.open, opening = an === "open";
+    return Object.assign(base, {
+      ready: true, t,
+      cup: { L: px(potX - D / 2), T: px(potY - D / 2), D: px(D), filter: t.cupFilter, blur: "blur(" + px(D * .05) + ")", blur2: "blur(" + px(pw * .5) + ")" },
+      pen: { L: px(potX - pw / 2), T: px(penT), W: px(pw), H: px(penB - penT), tip: px(pw * 6), sh: px(pw * .35) },
+      g: {
+        stageL: px(sL), stageT: px(sT), spreadW: px(2 * BW), BH: px(BH), BWpx: px(BW),
+        fs: px(fs), persp: px(BH * 3.4), mpx: px(m), PWpx: px(PW), PHpx: px(PH), spPx: px(sp), openW: px(2 * BW + 4),
+        csL: px(BW + e * .5), csT: px(e * .6), csW: px(BW + b),
+        groundShadow: "0 " + px(BH * .03) + " " + px(BH * .09) + " rgba(20,10,0,.5), 0 1px 3px rgba(0,0,0,.45)",
+        cW: px(BW + e + b + 1), cH: px(BH + e + b + 1),
+        pBoard: poly([[e, e], [BW + e, e], [BW + e + b, e + b], [BW + e + b, BH + e + b], [e + b, BH + e + b], [e, BH + e]]),
+        pSpine: poly([[0, BH - 1], [p0, BH], [p0 + e + b, BH + e + b], [e + b, BH + e + b]]),
+        pFore: poly([[BW - a, a], [BW - a + e, a + e], [BW - a + e, BH - a + e], [BW - a, BH - a]]),
+        pTail: poly([[p0, BH - a], [BW - a, BH - a], [BW - a + e, BH - a + e], [p0 + e, BH - a + e]]),
+        pFront: poly([[0, 0], [BW, 0], [BW + b, b], [BW + b, BH + b], [b, BH + b], [0, BH]]),
+        slipL: px(BW * .2), slipT: px(BH * .08), slipW: px(BW * .15), slipH: px(BH * .42),
+        zw: px(Math.max(18, BW * .13))
+      },
+      slideT: open ? "translateX(0px)" : "translateX(" + closedX.toFixed(2) + "px)",
+      closedShadowOp: (open || opening) && an !== "close" ? 0 : 1,
+      openShadowOp: (open || opening) && an !== "close" ? 1 : 0,
+      coverBg: wear(["100% 0", "100% 100%"]) + cloth(t.cloth, t.lift),
+      boardL: wear(["0 0", "0 100%"]) + cloth(t.cloth, t.lift),
+      boardR: wear(["100% 0", "100% 100%"]) + cloth(t.cloth, t.lift),
+      showLeft: open && an !== "close", showRight: open || opening, showClosed: !open || an === "close", showCover: !open || an === "close",
+      coverT: an === "close" ? "translateZ(1px) rotateY(-180deg)" : "translateZ(1px) rotateY(0deg)",
+      coverFOp: an === "close" ? 0 : 1, coverBOp: an === "close" ? 1 : 0,
+      turning: an === "next" || an === "prev",
+      leafT: an === "prev" ? "translateZ(1px) rotateY(-180deg)" : "translateZ(1px) rotateY(0deg)",
+      leafFOp: an === "prev" ? 0 : 1, leafBOp: an === "prev" ? 1 : 0,
+      coverFF: this.coverFF, coverBF: this.coverBF, leafFF: this.leafFF, leafBF: this.leafBF,
+      leftPage, rightPage, leafFront, leafBack, firstPage: pg(0),
+      stackL: stack(L + 1, -1), stackR: stack(pages.length - R, 1),
+      showZones: open,
+      prevPE: !an ? "auto" : "none",
+      prevLabel: s.spread > 0 ? "Previous pages" : "Close the album",
+      nextPE: s.spread < n - 1 && !an ? "auto" : "none",
+      goPrev: () => (this.state.spread > 0 ? this.turn(-1) : this.closeBook()), goNext: () => this.turn(1), openBook: this.openBook,
+      slideRef: this.slideRef, coverRef: this.coverRef, coverBS: this.coverBS, leafRef: this.leafRef,
+      leafFS: this.leafFS, leafBS: this.leafBS, shL: this.shL, shR: this.shR, edgeRef: this.edgeRef
+    });
+  }
+}
+</script>
+</body>
+</html>

@@ -505,6 +505,11 @@ export interface AppState {
   petRockPats: number;
   /** Achievements hung on the Rest room board; x/y are the icon centre as a fraction of the board. */
   achievementBoard: Array<{ id: string; uid?: string; x: number; y: number; size?: number; color?: string; rot?: number; icon?: string; name?: string; how?: string }>;
+  /** The day (YYYY-MM-DD) each achievement id was actually seen go from not-earned to earned, recorded
+   * the moment that happens - never back-filled for one already earned when tracking began, since that
+   * day is genuinely unknown. Powers the "book" achievement wall, which titles each entry by the day it
+   * was earned and leaves entries with no recorded day untitled. */
+  achievementEarnedOnDates: Record<string, string>;
   durakPuzzle: DurakPuzzleState;
   wordlePuzzle: WordlePuzzleState;
   geodlePuzzle: GeodlePuzzleState;

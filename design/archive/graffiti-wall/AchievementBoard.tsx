@@ -10,8 +10,6 @@ export type Achievement = {
   daily?: boolean;
   /** How many pieces of it may hang on the wall (1 unless it is a daily one). */
   copies?: number;
-  /** The day (YYYY-MM-DD) this was first seen earned. Only the "book" wall uses it. */
-  earnedAt?: string;
 };
 /** x/y: icon centre as a fraction of the board; size in px; colour and tilt are the spray-can look. */
 export type Placement = {

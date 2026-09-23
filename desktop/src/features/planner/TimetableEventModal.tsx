@@ -3,9 +3,17 @@ import type { Dispatch, SetStateAction } from "react";
 import { getCourseTasks, getSemesterCourses } from "../../lib/metrics";
 import { convertTodoRepeat, countCompletedUnitOccurrences, unitDecrementFor } from "../../lib/plannerActions";
 import { isValidIsoDate, makeTimetableEvent, parseIsoDate } from "../../lib/plannerSchedule";
+
+/** The ISO date `days` after (or, if negative, before) `iso`. */
+function shiftIso(iso: string, days: number) {
+  if (!isValidIsoDate(iso)) return "";
+  const date = parseIsoDate(iso);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 import { makeId } from "../../lib/storage";
 import { TimeField } from "./TimeField";
-import type { AppState, DailyTodo, TimetableEvent, TimetableEventKind } from "../../types";
+import type { AppState, DailyTodo, Task, TaskSubtype, TimetableEvent, TimetableEventKind } from "../../types";
 
 export type TimetableModalPrefill = { date: string; time: string; semesterId: string | null };
 
@@ -25,6 +33,10 @@ type Props = {
   onOpenManageSemesters: () => void;
   /** Wabi-Sabi look for the daily to-do form. */
   wabi?: boolean;
+  /** Offer "To-do" vs "Course task" (picking, or adding, an existing course task) on creation.
+   * Independent of `wabi`: the option reuses generic layout classes, so it renders fine under
+   * any app style, not just the Wabi-Sabi skin. */
+  allowCourseTask?: boolean;
   /** Current app message, shown inside the window in Wabi-Sabi (the global banner sits behind the modal). */
   message?: string;
   onDeleteWithUndo: (label: string, updater: (current: AppState) => AppState) => void;
@@ -37,14 +49,14 @@ type Props = {
  * truth for the stored TimetableEvent schema (see makeTimetableEvent). This modal still supports
  * editing an existing subject-bound occurrence in place, since that isn't a creation path.
  */
-export function TimetableEventModal({ state, setState, setMessage, target, onClose, onOpenManageSemesters, onDeleteWithUndo, wabi = false, message = "" }: Props) {
+export function TimetableEventModal({ state, setState, setMessage, target, onClose, onOpenManageSemesters, onDeleteWithUndo, wabi = false, allowCourseTask = false, message = "" }: Props) {
   const isEdit = target.mode === "edit";
   const editingEvent = target.mode === "edit" && target.entityKind === "event" ? target.event : null;
   const editingTodo = target.mode === "edit" && target.entityKind === "todo" ? target.todo : null;
   const isSubjectItem = Boolean(editingEvent);
 
   const activeSemesters = useMemo(() => state.semesters.filter((semester) => !semester.archived), [state.semesters]);
-  const initialSemesterId = editingEvent?.semesterId ?? (wabi && target.mode === "create" ? target.prefill.semesterId : null);
+  const initialSemesterId = editingEvent?.semesterId ?? (allowCourseTask && target.mode === "create" ? target.prefill.semesterId : null);
   const [semesterId] = useState(
     () => activeSemesters.find((semester) => semester.id === initialSemesterId)?.id ?? activeSemesters[0]?.id ?? "",
   );
@@ -69,11 +81,21 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
   // in via "+ Add Time", instead of implying every to-do needs a slot on the calendar.
   const [timeExpanded, setTimeExpanded] = useState(Boolean(editingTodo?.time));
 
-  // Wabi-Sabi: a new item can be a plain to-do or a course task placed on the calendar.
+  // A new item can be a plain to-do or a course task placed on the calendar.
   const [createKind, setCreateKind] = useState<"todo" | "course">("todo");
-  const courseMode = wabi && !isEdit && createKind === "course";
+  const courseMode = allowCourseTask && !isEdit && createKind === "course";
+  // Course task: pick an existing task, or make a new one right here (it is created together with its calendar entry).
+  const NEW_TASK = "__new__";
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newTaskSubtype, setNewTaskSubtype] = useState<TaskSubtype>("Lecture");
+  const newTaskUnitLabel: Record<TaskSubtype, string> = { Lecture: "Lecture", Session: "Session", Sheet: "Sheet", Other: "Task" };
 
   const isSheetKind = occurrenceKind === "sheet-release" || occurrenceKind === "sheet-deadline";
+  const makingNewTask = courseMode && (courseTasks.length === 0 || taskId === NEW_TASK);
+  const courseSubtype: TaskSubtype | null = makingNewTask ? newTaskSubtype : task?.subtype ?? null;
+  // A sheet is released on one date and due on another: the release defaults to a week before the due date until edited.
+  const [releaseEdit, setReleaseEdit] = useState<string | null>(null);
+  const releaseDate = releaseEdit ?? shiftIso(date, -7);
 
   function handleCourseChange(nextCourseId: string) {
     setCourseId(nextCourseId);
@@ -191,21 +213,59 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
     }
 
     if (courseMode) {
-      if (!courseId || !taskId || !task) {
-        setMessage("Pick a course and one of its tasks first.");
+      if (!courseId) {
+        setMessage("Pick a course first.");
+        return;
+      }
+      let target: Task | null = task;
+      let created: Task | null = null;
+      if (makingNewTask) {
+        const title = newTaskTitle.trim();
+        if (!title) {
+          setMessage("Give the new task a name first.");
+          return;
+        }
+        created = {
+          id: makeId(), semesterId, courseId, title, subtype: newTaskSubtype, unitLabel: newTaskUnitLabel[newTaskSubtype],
+          // Totals are counted from the calendar entries, so a new task starts empty.
+          totalUnits: 0, completedUnits: 0, dueDate: null, priority: "medium", notes: "", createdAt: new Date().toISOString(),
+        };
+        target = created;
+      }
+      if (!target) {
+        setMessage("Pick one of the course's tasks, or make a new one.");
         return;
       }
       const nextTime = timeExpanded ? time : "";
       const nextEndTime = timeExpanded ? endTime : "";
       if (!validateTimes(nextTime, nextEndTime, false)) return;
-      // A sheet is placed on its due date; everything else is a plain occurrence.
-      const event = makeTimetableEvent({
-        id: makeId(), semesterId, courseId, taskId,
-        kind: task.subtype === "Sheet" ? "sheet-deadline" : "occurrence",
-        label: task.title, date, time: nextTime, endTime: nextEndTime || null, repeatWeekly,
-        url: task.subtype === "Sheet" ? (url.trim() || null) : null,
-      });
-      setState((current) => ({ ...current, timetableEvents: [...current.timetableEvents, event] }));
+      // A sheet has a release date and a due date (two entries, both repeating if asked); everything else is one occurrence.
+      const isSheet = target.subtype === "Sheet";
+      if (isSheet && releaseDate && !isValidIsoDate(releaseDate)) {
+        setMessage("Pick a valid release date, or clear it.");
+        return;
+      }
+      if (isSheet && releaseDate && releaseDate > date) {
+        setMessage("A sheet can't be released after it is due.");
+        return;
+      }
+      const createdAt = new Date().toISOString();
+      const sheetUrl = isSheet ? (url.trim() || null) : null;
+      const events = [
+        ...(isSheet && releaseDate
+          ? [makeTimetableEvent({ id: makeId(), semesterId, courseId, taskId: target.id, kind: "sheet-release", label: target.title, date: releaseDate, time: "", endTime: null, repeatWeekly, url: sheetUrl, createdAt })]
+          : []),
+        makeTimetableEvent({
+          id: makeId(), semesterId, courseId, taskId: target.id,
+          kind: isSheet ? "sheet-deadline" : "occurrence",
+          label: target.title, date, time: nextTime, endTime: nextEndTime || null, repeatWeekly, url: sheetUrl, createdAt,
+        }),
+      ];
+      setState((current) => ({
+        ...current,
+        tasks: created ? [created, ...current.tasks] : current.tasks,
+        timetableEvents: [...current.timetableEvents, ...events],
+      }));
       onClose();
       return;
     }
@@ -258,7 +318,7 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
         </header>
 
         <div className="timetable-modal-form">
-          {wabi && !isEdit ? (
+          {allowCourseTask && !isEdit ? (
             <div className="wabi-todo-kind" role="radiogroup" aria-label="What to add">
               <button type="button" role="radio" aria-checked={createKind === "todo"} className={createKind === "todo" ? "active" : ""} onClick={() => setCreateKind("todo")}>To-do</button>
               <button type="button" role="radio" aria-checked={createKind === "course"} className={createKind === "course" ? "active" : ""} onClick={() => setCreateKind("course")}>Course task</button>
@@ -280,12 +340,26 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
                       <span>Task</span>
                       <select value={taskId} onChange={(event) => setTaskId(event.target.value)}>
                         {courseTasks.map((item) => <option key={item.id} value={item.id}>{item.title} · {item.subtype === "Session" ? "Exercise" : item.subtype}</option>)}
+                        <option value={NEW_TASK}>+ New task…</option>
                       </select>
                     </label>
                   ) : (
-                    <p className="section-note">This course has no tasks yet. Add one from Plan → Edit semester.</p>
+                    <p className="section-note">This course has no tasks yet - make the first one here.</p>
                   )}
-                  {task?.subtype === "Sheet" ? <p className="section-note">Sheets are placed on their due date.</p> : null}
+                  {makingNewTask ? (
+                    <div className="wabi-todo-newtask">
+                      <label className="field">
+                        <span>New task</span>
+                        <input value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} placeholder="e.g. Lecture, Exercise session, Serie" autoFocus />
+                      </label>
+                      <div className="wabi-todo-kind" role="radiogroup" aria-label="Task type">
+                        {([["Lecture", "Lecture"], ["Session", "Exercise"], ["Sheet", "Sheet"], ["Other", "Other"]] as const).map(([value, name]) => (
+                          <button key={value} type="button" role="radio" aria-checked={newTaskSubtype === value} className={newTaskSubtype === value ? "active" : ""} onClick={() => setNewTaskSubtype(value)}>{name}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {courseSubtype === "Sheet" ? <p className="section-note">A sheet has a release date and a due date. Leave the release empty to schedule only the due date.</p> : null}
                 </>
               ) : (
                 <p className="section-note">No courses yet. Add a semester and courses from Plan first.</p>
@@ -364,8 +438,14 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
             </div>
           ) : wabi ? (
             <div className="wabi-todo-when">
+              {courseMode && courseSubtype === "Sheet" ? (
+                <label className="field compact-field">
+                  <span>Release date</span>
+                  <input type="date" value={releaseDate} onChange={(event) => setReleaseEdit(event.target.value)} />
+                </label>
+              ) : null}
               <label className="field compact-field">
-                <span>Date</span>
+                <span>{courseMode && courseSubtype === "Sheet" ? "Due date" : "Date"}</span>
                 <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               </label>
               {timeExpanded ? (
@@ -386,8 +466,14 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
             </div>
           ) : (
             <>
+              {courseMode && courseSubtype === "Sheet" ? (
+                <label className="field compact-field">
+                  <span>Release date</span>
+                  <input type="date" value={releaseDate} onChange={(event) => setReleaseEdit(event.target.value)} />
+                </label>
+              ) : null}
               <label className="field compact-field">
-                <span>Date</span>
+                <span>{courseMode && courseSubtype === "Sheet" ? "Due date" : "Date"}</span>
                 <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
               </label>
 
@@ -420,7 +506,7 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
             </>
           )}
 
-          {courseMode && task?.subtype === "Sheet" ? (
+          {courseMode && courseSubtype === "Sheet" ? (
             <label className="field">
               <span>Link (optional)</span>
               <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." />
@@ -462,13 +548,15 @@ export function TimetableEventModal({ state, setState, setMessage, target, onClo
 
           {wabi && message ? <p className="wabi-task-message" role="alert">{message}</p> : null}
 
-          <button type="button" onClick={submit} disabled={(isSubjectItem || courseMode) && !taskId}>{isEdit ? "Save changes" : courseMode ? "Add to calendar" : "Create"}</button>
+          <button type="button" onClick={submit} disabled={(isSubjectItem || courseMode) && !taskId && !makingNewTask}>{isEdit ? "Save changes" : courseMode ? "Add to calendar" : "Create"}</button>
 
           {editingTodo?.repeatWeekly ? (
             <button type="button" className="ghost-button" onClick={deleteSeries}>Delete whole series</button>
           ) : null}
 
-          {!isEdit && !wabi ? (
+          {/* Once "Course task" is offered right here (allowCourseTask), this link is redundant - it only
+              earns its place when the only way to schedule a course item is to leave this modal. */}
+          {!isEdit && !wabi && !allowCourseTask ? (
             <button type="button" className="ghost-button timetable-modal-manage-link" onClick={onOpenManageSemesters}>
               Need to schedule a course item? Open Semester Manager
             </button>

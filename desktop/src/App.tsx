@@ -68,6 +68,8 @@ import { isTauriApp } from "./lib/obsidian";
 import { applyUndoPatch, countCompletedUnitOccurrences, diffForUndo, isEmptyUndoPatch, getOverdueTodos, setTodoOccurrenceTime, splitRecurringTodoAt, unitDecrementFor } from "./lib/plannerActions";
 import type { UndoPatch } from "./lib/plannerActions";
 import { TimeSpanFields } from "./features/planner/TimeSpanFields";
+import { MODERN_GARDEN_VARIANTS, ModernGarden } from "./features/garden/ModernGarden";
+import type { ModernGardenVariant } from "./features/garden/ModernGarden";
 import { TimeField } from "./features/planner/TimeField";
 import { displayTime } from "./lib/timeInput";
 import { formatSwissGrade, swissGrades } from "./lib/grades";
@@ -77,7 +79,9 @@ import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { WabiManageSemestersModal } from "./features/planner/WabiManageSemestersModal";
 import { TaskScheduleEditor } from "./features/planner/TaskScheduleEditor";
 import { RowMenu } from "./components/RowMenu";
-import { AchievementBoard } from "./features/rest/AchievementBoard";
+// AchievementBoard (the spray-paint wall) and InkGallery's other variants are still in the repo but
+// no longer mounted - the achievements room shows the album only.
+import { InkGallery } from "./features/rest/InkGallery";
 import { getScheduleHealth, withScheduleHealth } from "./lib/scheduleHealth";
 import { calculateScheduledDailyWork, calculateScheduledWorkload, getScheduledUnits } from "./lib/scheduleWorkload";
 import { TimetableEventModal } from "./features/planner/TimetableEventModal";
@@ -809,8 +813,8 @@ const squadRoleLabels: Record<SocialSquadRole, string> = {
 
 const squadRoles: SocialSquadRole[] = ["leader", "co_leader", "elder", "member"];
 const SQUAD_TRACKING_START_LABEL = "29.07.2026";
-const SQUAD_SEASON_NAME = "Summer Season 26";
-const SQUAD_SEASON_RANGE_LABEL = "29.07.2026 - 31.08.2026";
+const SQUAD_SEASON_NAME = "Frostbound Semester 26";
+const SQUAD_SEASON_RANGE_LABEL = "15.09.2026 - 18.12.2026";
 
 function squadRoleRank(role: SocialSquadRole) {
   return role === "leader" ? 4 : role === "co_leader" ? 3 : role === "elder" ? 2 : 1;
@@ -1306,7 +1310,7 @@ function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Ta
 
   sessions
     .filter((session) => (session.kind === "study" || session.kind === "exam") && session.courseId && courseMap.has(session.courseId))
-    .slice(-90)
+    .slice(-Math.round(22 * densityFactor))
     .forEach((session) => {
       const course = courseMap.get(session.courseId ?? "");
       if (!course) return;
@@ -1333,7 +1337,7 @@ function buildGardenItems(courses: Course[], sessions: StudySession[], tasks: Ta
   });
 
   const ambientBase = [4, 8, 12, 16, 21, 25][stage] ?? 4;
-  const ambient = Math.round((ambientBase + Math.min(8, Math.floor(weeklyMinutes / 90))) * densityFactor);
+  const ambient = Math.round((ambientBase + Math.min(8, Math.floor(weeklyMinutes / 90))) * densityFactor * 0.45);
   for (let index = 0; index < ambient; index += 1) {
     const rng = gardenRng(gardenHash(`ambient-${stage}-${index}`));
     items.push({ id: `ambient-${stage}-${index}`, kind: rng() < 0.6 ? "grass" : rng() < 0.5 ? "sprout" : "fern", maturity: 0.25 + rng() * 0.3, ambient: true });
@@ -1995,7 +1999,11 @@ function japanesePickSpecies(rng: () => number, maturity: number): JapaneseGarde
   return ["sakura", "momiji", "sakura", "bamboo", "pine"][Math.floor(rng() * 5)] as JapaneseGardenPlantKind;
 }
 
-const JG_ROWS = [0.1, 0.36, 0.62, 0.88];
+// Five depth rows instead of four, spaced a little further apart: with the canopy sizes
+// plants render at, four tightly-packed rows let neighbouring trees' canopies bleed into
+// each other's row band. More, evenly-spread rows give each depth its own clear vertical
+// slot so the garden reads as terraced rather than as one overlapping mass.
+const JG_ROWS = [0.08, 0.3, 0.52, 0.74, 0.94];
 const JG_UPPER: JapaneseGardenPondBoxShape = { cx: 63, cy: 64, rx: 9.5, ry: 3.8 };
 const JG_LOWER: JapaneseGardenPondBoxShape = { cx: 78, cy: 93, rx: 12.5, ry: 5 };
 const JG_FLOW: [number, number][] = [
@@ -2015,7 +2023,7 @@ const JAPANESE_GARDEN_TALL_KINDS: Partial<Record<JapaneseGardenPlantKind, true>>
   teahouse: true,
 };
 
-const JAPANESE_GARDEN_FILL_RATIO = [0.12, 0.26, 0.38, 0.48, 0.56, 0.62, 0.68, 0.74, 0.8];
+const JAPANESE_GARDEN_FILL_RATIO = [0.08, 0.14, 0.2, 0.24, 0.28, 0.3, 0.32, 0.34, 0.36];
 
 /* The river/bridge geometry was authored for a ~390x205 box. Dashboard layouts
    (e.g. the Focus layout's full-width hero card) can render this widget at far
@@ -2056,19 +2064,25 @@ function japaneseGardenOnWater(x: number, t: number, stage: number, containerWid
 }
 
 function japaneseGardenCells(stage: number, wide: boolean): JapaneseGardenCell[] {
-  const cols = wide ? 8 : 5;
-  const cw = 1 / cols;
+  const baseCols = wide ? 8 : 5;
   const upper = stage >= 5;
   const lower = stage >= 6;
   const cells: JapaneseGardenCell[] = [];
   for (let row = 0; row < JG_ROWS.length; row += 1) {
+    const t = JG_ROWS[row];
+    // The foreground rows render the biggest canopies (see the `depth` scale-up in
+    // JapaneseGardenWidget), so give them fewer, wider cells - the background rows can stay
+    // dense since their plants draw small. Alternate rows are also offset by half a cell so
+    // trunks don't line up in tidy columns straight down the card.
+    const cols = t > 0.82 ? baseCols - (wide ? 3 : 2) : t > 0.58 ? baseCols - (wide ? 1 : 1) : baseCols;
+    const cw = 1 / cols;
+    const stagger = row % 2 === 1 ? cw / 2 : 0;
     for (let col = 0; col < cols; col += 1) {
-      const x = (col + 0.5) / cols;
-      const t = JG_ROWS[row];
-      if (upper && t > 0.5 && t < 0.8 && x > 0.12 && x < 0.46) continue;
-      if (lower && t > 0.5 && t < 0.8 && x >= 0.3 && x < 0.62) continue;
-      if (lower && t > 0.8 && x > 0.46 && x < 0.92) continue;
-      const low = t > 0.8 && x < 0.4;
+      const x = ((col + 0.5) / cols + stagger) % 1;
+      if (upper && t > 0.42 && t < 0.62 && x > 0.12 && x < 0.46) continue;
+      if (lower && t > 0.42 && t < 0.62 && x >= 0.3 && x < 0.62) continue;
+      if (lower && t > 0.66 && x > 0.46 && x < 0.92) continue;
+      const low = t > 0.82 && x < 0.4;
       cells.push({ x, t, cw, low, key: `${row}-${col}` });
     }
   }
@@ -2176,8 +2190,8 @@ function placeJapaneseGardenItems(build: JapaneseGardenBuildResult, stage: numbe
   build.milestones.forEach((milestone) => push(milestone));
 
   let surplus = 0;
-  build.sessions.forEach((session) => {
-    if (!push(session)) surplus += 1;
+  build.sessions.forEach((session, index) => {
+    if (index >= (wide ? 14 : 8) || !push(session)) surplus += 1;
   });
 
   const target = Math.round(free.length * (JAPANESE_GARDEN_FILL_RATIO[stage] ?? 0.2));
@@ -2196,7 +2210,7 @@ function placeJapaneseGardenItems(build: JapaneseGardenBuildResult, stage: numbe
   }
 
   const fullness = 1 - free.length / Math.max(1, cells.length);
-  const growth = 1 + Math.min(0.32, surplus * 0.02) + Math.max(0, fullness - 0.7) * 0.35;
+  const growth = 1 + Math.min(0.08, surplus * 0.005) + Math.max(0, fullness - 0.7) * 0.2;
   return placed.map((plant) => ({ ...plant, growth: plant.ambient ? 1 + (growth - 1) * 0.3 : growth })).sort((a, b) => a.t - b.t);
 }
 
@@ -2564,7 +2578,7 @@ function JapaneseGardenWidget({ appState, weeklyMinutes }: { appState: AppState;
         const bed = containerWidth * (plant.cw || 0.125);
         const bottomPct = 1 + (1 - plant.t) * 55;
         const headroom = (containerHeight * (1 - bottomPct / 100) * 0.94) / 1.21;
-        let width = Math.min(bed * 0.66 * (japaneseGardenBaseWidth[plant.kind] || 1) * depth * (0.8 + 0.25 * (plant.maturity || 0.5)) * plant.growth, headroom, containerHeight * 0.46);
+        let width = Math.min(bed * 0.58 * (japaneseGardenBaseWidth[plant.kind] || 1) * depth * (0.8 + 0.25 * (plant.maturity || 0.5)) * plant.growth, headroom, containerHeight * 0.36);
         if (plant.low) width = Math.min(width, containerHeight * 0.17);
         const interactive = !plant.ambient;
         return (
@@ -2692,10 +2706,13 @@ function loadWabiCircleCompetitive(): boolean {
   return localStorage.getItem(WABI_CIRCLE_COMPETITIVE_KEY) === "true";
 }
 
-type GardenVariant = "western" | "japanese";
+type GardenVariant = "western" | "japanese" | ModernGardenVariant;
+
+const GARDEN_VARIANT_ORDER: GardenVariant[] = ["western", "japanese", ...MODERN_GARDEN_VARIANTS.map((variant) => variant.id)];
 
 function loadGardenVariant(): GardenVariant {
-  return localStorage.getItem(GARDEN_VARIANT_KEY) === "japanese" ? "japanese" : "western";
+  const stored = localStorage.getItem(GARDEN_VARIANT_KEY) as GardenVariant | null;
+  return stored && GARDEN_VARIANT_ORDER.includes(stored) ? stored : "western";
 }
 
 const dashboardWidgetIds: DashboardWidgetId[] = [
@@ -3298,7 +3315,6 @@ const AVATAR_IMAGE_COMPRESSION_ATTEMPTS = [
   { dimension: AVATAR_IMAGE_MAX_DIMENSION, quality: 0.45 },
   { dimension: 128, quality: 0.45 },
 ];
-const AVATAR_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const AVATAR_CROP_VIEWPORT_PX = 300;
 const AVATAR_CROP_MAX_ZOOM = 4;
 
@@ -3744,6 +3760,20 @@ function HelpExampleCards({ examples }: { examples: HelpExample[] }) {
 const TIMER_ONLY_SECTION: ReadonlySet<PersistSection> = new Set(["timer"]);
 const ALL_PERSIST_SECTIONS: ReadonlySet<PersistSection> = new Set(["timer", "social", "core"]);
 
+/** Harder achievements get a higher rarity and are sprayed bigger on the break-room wall. */
+const BREAK_ROOM_RARITY: Record<string, number> = {
+  "first-break": 0.08, "early-bird": 0.22, "night-owl": 0.22, "on-fire": 0.35, explorer: 0.4,
+  speedrunner: 0.55, veteran: 0.62, "full-house": 0.82, perfectionist: 1,
+};
+/** The Focus Fossil and Garden badges use tiny text symbols (◆ ❀ ...) on the profile; on the wall each gets a real picture. */
+const BREAK_ROOM_WALL_ICONS: Record<string, string> = {
+  "fossil-10": "\u{1F330}", "fossil-25": "\u{1F9AA}", "fossil-50": "\u{1F41A}", "fossil-100": "\u{1F52E}",
+  "fossil-250": "\u{1F9B4}", "fossil-500": "\u{1F3FA}", "fossil-1000": "\u{1F4C0}",
+  "garden-first-sprout": "\u{1F33C}", "garden-streak-bloom": "\u{1F338}", "garden-mushroom-ring": "\u{1F344}",
+  "garden-cross-pollinator": "\u{1F41D}", "garden-full-bloom": "\u{1F33A}", "garden-harvest-season": "\u{1F33E}",
+  "garden-wise-tree": "\u{1F332}",
+};
+
 function App() {
   const [state, setState] = useState<AppState>(() => {
     const loaded = loadAppState();
@@ -3888,6 +3918,9 @@ function App() {
   const [wabiNotesMenuOpen, setWabiNotesMenuOpen] = useState(false);
   // Wabi-Sabi dashboard "Something else": pick what to work on from today or the coming days.
   const [wabiPickerOpen, setWabiPickerOpen] = useState(false);
+  // The achievements room shows the album and nothing else; the old per-display picker and its
+  // remembered "study-tracker-achievement-view" setting are no longer read. The other displays'
+  // components are kept in the repo (see the achievements room below).
   // Rest room: click the tree to cycle through the watercolour trees (remembered on this device).
 // Widths keep every tree at the same scale (pine is the tallest); all of them stand on the pine's baseline.
   const restTrees = [
@@ -5289,15 +5322,15 @@ function App() {
     const rangeEnd = calendarDays[calendarDays.length - 1].iso;
     for (const semester of activeSemesters) {
       for (const occurrence of expandTimetableEvents(state.timetableEvents, state.holidays, semester, rangeStart, rangeEnd)) {
-        // Wabi-Sabi shows a sheet once, on its due date - not also on the day it is released.
-        if (appStyle === "wabi-sabi" && occurrence.event.kind === "sheet-release") continue;
+        // A sheet shows once, on its due date - not also on the day it is released.
+        if (occurrence.event.kind === "sheet-release") continue;
         const list = map.get(occurrence.date) ?? [];
         list.push(occurrence);
         map.set(occurrence.date, list);
       }
     }
     return map;
-  }, [calendarDays, activeSemesters, state.timetableEvents, state.holidays, appStyle]);
+  }, [calendarDays, activeSemesters, state.timetableEvents, state.holidays]);
   const todayCalendarEntries = useMemo(
     () =>
       state.calendarEntries
@@ -5499,6 +5532,76 @@ function App() {
       ],
     },
   ];
+
+  // The day an achievement is actually WATCHED flipping from not-earned to earned, recorded right then -
+  // this is what the "book" achievement wall titles each entry by. The first time this ever runs, every
+  // already-earned achievement is just the starting baseline, not a "just now" transition, so none of them
+  // get a date: we genuinely don't know when they were earned, and a made-up date is worse than none.
+  const seenEarnedIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const earnedIds = new Set<string>();
+    profileBadgeGroups.forEach((group) => {
+      const visit = (badges: ProfileBadge[]) => badges.forEach((badge) => { if (badge.earned) earnedIds.add(badge.id); });
+      visit(group.badges);
+      group.subgroups?.forEach((subgroup) => visit(subgroup.badges));
+    });
+    const baseline = seenEarnedIdsRef.current;
+    seenEarnedIdsRef.current = earnedIds;
+    if (!baseline) return; // first run: establish the baseline, don't date anything yet
+
+    const newlyEarned = [...earnedIds].filter((id) => !baseline.has(id) && !state.achievementEarnedOnDates[id]);
+    if (!newlyEarned.length) return;
+    setState((current) => {
+      const next = { ...current.achievementEarnedOnDates };
+      let changed = false;
+      newlyEarned.forEach((id) => {
+        if (next[id]) return;
+        next[id] = todayStr;
+        changed = true;
+      });
+      return changed ? { ...current, achievementEarnedOnDates: next } : current;
+    });
+    // profileBadgeGroups is rebuilt every render from state, so depending on the earned ids' own
+    // membership (not the array) is what avoids re-running this every render for no reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [[...profileBadgeGroups.flatMap((group) => [...group.badges, ...(group.subgroups?.flatMap((subgroup) => subgroup.badges) ?? [])]).filter((badge) => badge.earned).map((badge) => badge.id)].sort().join(","), state.achievementEarnedOnDates, todayStr]);
+
+  // Every earned badge, once, as the break room's walls want it. "rock-current" is only a copy of the newest
+  // pet-rock milestone, so it is left out (it made the same picture appear twice).
+  //
+  // Memoised on what the list is actually MADE of, not on profileBadgeGroups (rebuilt every render): the break
+  // room re-renders once a second while a timer runs, and a fresh array here means a fresh array identity for
+  // the album, which re-decodes all ~40 achievement pictures and re-renders every page on every tick.
+  const earnedAchievementsSignature = [
+    ...profileBadgeGroups
+      .flatMap((group) => [...group.badges, ...(group.subgroups?.flatMap((subgroup) => subgroup.badges) ?? [])])
+      .filter((badge) => badge.earned)
+      .map((badge) => `${badge.id}:${badge.count ?? 0}`),
+  ].sort().join(",");
+  const earnedAchievements = useMemo(() => {
+    const seen = new Set<string>();
+    const list: { id: string; icon: string; name: string; how: string; rarity: number; daily?: boolean; copies?: number; earnedAt?: string }[] = [];
+    const visit = (badges: ProfileBadge[], byPosition: boolean) => badges.forEach((badge, index) => {
+      if (!badge.earned || seen.has(badge.id) || badge.id === "rock-current") return;
+      seen.add(badge.id);
+      // Milestone lists are ordered easiest to hardest, so the position in the list is the difficulty.
+      const rarity = byPosition ? index / Math.max(1, badges.length - 1) : BREAK_ROOM_RARITY[badge.id] ?? 0.4;
+      list.push({
+        id: badge.id, icon: BREAK_ROOM_WALL_ICONS[badge.id] ?? badge.icon, name: badge.name, how: badge.how, rarity,
+        ...(badge.daily ? { daily: true, copies: Math.max(1, badge.count ?? 1) } : {}),
+        // Left out entirely when the day it was earned was never actually recorded - no guessed date.
+        ...(state.achievementEarnedOnDates[badge.id] ? { earnedAt: state.achievementEarnedOnDates[badge.id] } : {}),
+      });
+    });
+    profileBadgeGroups.forEach((group) => {
+      visit(group.badges, group.category !== "Break Room");
+      group.subgroups?.forEach((subgroup) => visit(subgroup.badges, true));
+    });
+    return list;
+    // profileBadgeGroups is deliberately not a dependency: it is a fresh array on every render, and
+    // earnedAchievementsSignature above already tracks everything about it this list is built from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [earnedAchievementsSignature, state.achievementEarnedOnDates]);
 
   const renderProfileBadgeCard = (badge: ProfileBadge) => (
     <button key={badge.id} type="button" className={`profile-badge-card ${badge.earned ? "earned" : "locked"}`}>
@@ -5970,7 +6073,7 @@ function App() {
     event.target.value = "";
     if (!file) return;
     try {
-      if (!AVATAR_IMAGE_TYPES.has(file.type)) throw new Error("Use PNG, JPEG, or WebP photos.");
+      if (file.type && !file.type.startsWith("image/")) throw new Error("Choose an image file.");
       if (file.size > AVATAR_SOURCE_IMAGE_MAX_BYTES) throw new Error("Photo is too large. Use an image under 1 MB.");
       const url = await blobToDataUrl(file);
       const element = await loadImageElement(url);
@@ -9488,11 +9591,17 @@ function App() {
     const course = courseLookup.get(event.courseId);
     const done = event.completedOccurrences.includes(calendarItemPopup.date);
         const close = () => setCalendarItemPopup(null);
+    // Same rule as the month/week grid and the day timeline: the label once, then its number in
+    // the series ("Lecture 3") when it has one - this popup is where Wabi-Sabi's own pills and
+    // timeline rows send you for detail, so it needs the count too, not just the bare label.
+    const popupDates = (scheduledUnits.get(event.taskId) ?? []).map((unit) => unit.date).sort();
+    const popupPosition = popupDates.indexOf(calendarItemPopup.date) + 1;
+    const popupTitle = `${event.label}${popupDates.length > 1 && popupPosition > 0 ? ` ${popupPosition}` : ""}`;
     return createPortal(
       <div className="calendar-item-popup-backdrop" onMouseDown={close}>
-        <section className="calendar-item-popup" role="dialog" aria-modal="true" aria-label={event.label} onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}>
+        <section className="calendar-item-popup" role="dialog" aria-modal="true" aria-label={popupTitle} onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()} style={{ "--entry-color": course?.color ?? "var(--accent)" } as CSSProperties}>
           <p className="calendar-item-popup-eyebrow">{course?.name ?? "General"}</p>
-          <h3>{event.label}</h3>
+          <h3>{popupTitle}</h3>
           <p className="calendar-item-popup-when">
             {formatDate(calendarItemPopup.date)}{event.time ? ` · ${displayTime(event.time)}${event.endTime ? `–${displayTime(event.endTime)}` : ""}` : " · any time"}
           </p>
@@ -9531,12 +9640,21 @@ function App() {
     // are gathered across every active semester rather than gating on a single date-range match.
     const dayEventOccurrences = activeSemesters.flatMap((semester) =>
       expandTimetableEvents(state.timetableEvents, state.holidays, semester, selectedCalendarDate, selectedCalendarDate),
-    ).filter((occurrence) => !(appStyle === "wabi-sabi" && occurrence.event.kind === "sheet-release"));
+    ).filter((occurrence) => occurrence.event.kind !== "sheet-release");
     const generatedRows = buildDailyTimeline(selectedCalendarDate, {
       eventOccurrences: dayEventOccurrences,
       exams: [],
       calendarEntries: [],
       dailyTodos: state.dailyTodos,
+      // The month/week grid shows a repeating item's number in its series ("Lecture 3") instead
+      // of the label twice - opening the day carries that same number through, instead of the
+      // occurrence going back to a bare, count-less label the moment you click into the day.
+    }).map((row) => {
+      if ((row.kind !== "occurrence" && row.kind !== "sheet-deadline") || !row.taskId) return row;
+      const dates = (scheduledUnits.get(row.taskId) ?? []).map((unit) => unit.date).sort();
+      const position = dates.indexOf(row.occurrenceDate) + 1;
+      if (dates.length <= 1 || position <= 0) return row;
+      return { ...row, title: `${row.title} ${position}` };
     });
     // A to-do with no time set is backlog, not a timeline item - it belongs in the Unscheduled
     // side panel next to unscheduled CalendarEntry items, not pinned to the top of the grid.
@@ -9862,7 +9980,7 @@ function App() {
                         />
                         <span className="calendar-task-copy">
                           <span className="calendar-task-title">{getCalendarEntryTitle(entry)}</span>
-                          <span className="calendar-task-course">{getCalendarEntryUnitLabel(entry)} · {course?.name ?? "No course"}</span>
+                          <span className="calendar-task-course">{getCalendarEntryUnitLabel(entry)}{course ? ` · ${course.name}` : ""}</span>
                         </span>
                       </div>
                     );
@@ -9886,6 +10004,10 @@ function App() {
                   {timetableOccurrences.slice(0, visibleTimetableLimit).map((occurrence) => {
                     const course = courseLookup.get(occurrence.event.courseId);
                     const unitLabel = taskLookup.get(occurrence.event.taskId)?.title ?? "Item";
+                    // The label once, then its number in the series if it has one ("Lecture 3"), not "Lecture: Lecture".
+                    const dates = (scheduledUnits.get(occurrence.event.taskId) ?? []).map((unit) => unit.date).sort();
+                    const position = dates.indexOf(occurrence.date) + 1;
+                    const pillText = `${occurrence.event.label || unitLabel}${dates.length > 1 && position > 0 ? ` ${position}` : ""}`;
                     return (
                       <div
                         key={`${occurrence.event.id}:${occurrence.date}`}
@@ -9893,7 +10015,8 @@ function App() {
                         style={{ "--pill-color": course?.color ?? "var(--accent)" } as CSSProperties}
                         onClick={appStyle === "wabi-sabi" ? (event) => { event.stopPropagation(); setCalendarItemPopup({ eventId: occurrence.event.id, date: occurrence.date }); } : undefined}
                       >
-                        <span>{unitLabel}: {occurrence.event.label}</span>
+                        <span className="calendar-task-title">{pillText}</span>
+                        {course ? <span className="calendar-task-course">{course.name}</span> : null}
                       </div>
                     );
                   })}
@@ -10190,25 +10313,31 @@ function App() {
   }
 
   function renderGardenCard(heightClass = "") {
+    const modern = MODERN_GARDEN_VARIANTS.find((variant) => variant.id === gardenVariant);
+    const position = GARDEN_VARIANT_ORDER.indexOf(gardenVariant) + 1;
+    // Courses and milestones from archived semesters no longer grow in the garden.
+    const gardenState = { ...state, courses: activeCourses, tasks: activeTasks };
     return (
       <article className={`panel-card design-card design-garden-card ${heightClass}`} data-tour="dashboard-garden">
         <div className="section-head compact-headline">
           <div>
             <p className="eyebrow">Knowledge Garden</p>
-            <h3>{gardenVariant === "japanese" ? "Japanese Garden of Knowledge" : "Growth from focus"}</h3>
+            <h3>{modern ? `Modern · ${modern.name}` : gardenVariant === "japanese" ? "Japanese Garden of Knowledge" : "Growth from focus"}</h3>
           </div>
           <button
             type="button"
             className="dashboard-todo-button"
-            onClick={() => setGardenVariant((variant) => (variant === "japanese" ? "western" : "japanese"))}
+            onClick={() => setGardenVariant((variant) => GARDEN_VARIANT_ORDER[(GARDEN_VARIANT_ORDER.indexOf(variant) + 1) % GARDEN_VARIANT_ORDER.length])}
           >
-            {gardenVariant === "japanese" ? "switch to Garden" : "switch to Japanese Garden"}
+            next style · {position}/{GARDEN_VARIANT_ORDER.length}
           </button>
         </div>
-        {gardenVariant === "japanese" ? (
-          <JapaneseGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
+        {modern ? (
+          <ModernGarden variant={modern.id} courses={activeCourses} sessions={state.sessions} weeklyMinutes={weeklyTotalMinutes} streak={getStreakDays(state)} />
+        ) : gardenVariant === "japanese" ? (
+          <JapaneseGardenWidget appState={gardenState} weeklyMinutes={weeklyTotalMinutes} />
         ) : (
-          <KnowledgeGardenWidget appState={state} weeklyMinutes={weeklyTotalMinutes} />
+          <KnowledgeGardenWidget appState={gardenState} weeklyMinutes={weeklyTotalMinutes} />
         )}
       </article>
     );
@@ -11258,36 +11387,7 @@ function App() {
   }
 
   function renderWabiBreakRoom() {
-    // Every earned badge, once. "rock-current" is only a copy of the newest pet-rock milestone, so it is left out
-    // (it made the same picture appear twice). Harder achievements get a higher rarity and are sprayed bigger.
-    const breakRoomRarity: Record<string, number> = {
-      "first-break": 0.08, "early-bird": 0.22, "night-owl": 0.22, "on-fire": 0.35, explorer: 0.4,
-      speedrunner: 0.55, veteran: 0.62, "full-house": 0.82, perfectionist: 1,
-    };
-    // The Focus Fossil and Garden badges use tiny text symbols (◆ ❀ ...) on the profile; on the wall each gets a real picture.
-    const wallIcons: Record<string, string> = {
-      "fossil-10": "\u{1F330}", "fossil-25": "\u{1F9AA}", "fossil-50": "\u{1F41A}", "fossil-100": "\u{1F52E}",
-      "fossil-250": "\u{1F9B4}", "fossil-500": "\u{1F3FA}", "fossil-1000": "\u{1F4C0}",
-      "garden-first-sprout": "\u{1F33C}", "garden-streak-bloom": "\u{1F338}", "garden-mushroom-ring": "\u{1F344}",
-      "garden-cross-pollinator": "\u{1F41D}", "garden-full-bloom": "\u{1F33A}", "garden-harvest-season": "\u{1F33E}",
-      "garden-wise-tree": "\u{1F332}",
-    };
-    const earnedAchievements = (() => {
-      const seen = new Set<string>();
-      const list: { id: string; icon: string; name: string; how: string; rarity: number; daily?: boolean; copies?: number }[] = [];
-      const visit = (badges: ProfileBadge[], byPosition: boolean) => badges.forEach((badge, index) => {
-        if (!badge.earned || seen.has(badge.id) || badge.id === "rock-current") return;
-        seen.add(badge.id);
-        // Milestone lists are ordered easiest to hardest, so the position in the list is the difficulty.
-        const rarity = byPosition ? index / Math.max(1, badges.length - 1) : breakRoomRarity[badge.id] ?? 0.4;
-        list.push({ id: badge.id, icon: wallIcons[badge.id] ?? badge.icon, name: badge.name, how: badge.how, rarity, ...(badge.daily ? { daily: true, copies: Math.max(1, badge.count ?? 1) } : {}) });
-      });
-      profileBadgeGroups.forEach((group) => {
-        visit(group.badges, group.category !== "Break Room");
-        group.subgroups?.forEach((subgroup) => visit(subgroup.badges, true));
-      });
-      return list;
-    })();
+    // earnedAchievements is memoised at the top of the component - see there for why.
     const breakMM = String(Math.floor(breakTimerRemaining / 60)).padStart(2, "0");
     const breakSS = String(breakTimerRemaining % 60).padStart(2, "0");
     const breakTotalSeconds = Math.max(1, breakTimerMinutes * 60);
@@ -11379,16 +11479,14 @@ function App() {
             <span className="wabi-faint-text">{rockStage.label} · {state.petRockPats} pat{state.petRockPats !== 1 ? "s" : ""}</span>
           </div>
         </> : wabiRestRoom === "achievements" ? (
-          <AchievementBoard
-            achievements={earnedAchievements}
-            placements={state.achievementBoard}
-            onReset={() => setState((current) => ({ ...current, achievementBoard: [] }))}
-            onPlace={(placement) => setState((current) => (
-              current.achievementBoard.some((item) => (item.uid ?? item.id) === (placement.uid ?? placement.id))
-                ? current
-                : { ...current, achievementBoard: [...current.achievementBoard, placement] }
-            ))}
-          />
+          <div className="wabi-ach-host">
+            {/* The album is the only achievement display now. The picker that used to sit above it
+                (Plaques / Shelf / Scroll / Book / Wall) is gone along with the strip of space it
+                took, so the book gets the full height of the room. The other displays' code is
+                still in the repo - AchievementBoard, graffiti.ts and InkGallery's ema/shelf/scroll
+                layouts - just not reachable from here. */}
+            <InkGallery variant="book" achievements={earnedAchievements} />
+          </div>
         ) : (
           <div className="wabi-meditation-room">
             <div className="wabi-breath-orbit" aria-live="polite">
@@ -12912,6 +13010,7 @@ function App() {
           onClose={() => setTimetableModalState(null)}
           onOpenManageSemesters={() => { setTimetableModalState(null); if (appStyle === "wabi-sabi") setManageSemestersMode("semesters"); setManageSemestersOpen(true); }}
           wabi={appStyle === "wabi-sabi"}
+          allowCourseTask
           message={message ?? ""}
           onDeleteWithUndo={performDelete}
         />
