@@ -11,6 +11,9 @@ const TIMER_KEY = "study-tracker-desktop-v3-timer";
 const SOCIAL_KEY = "study-tracker-desktop-v3-social";
 const CORE_KEY = "study-tracker-desktop-v3-core";
 
+/** Set after a backup restore is written, so the pre-reload unload flush can't overwrite it with the old in-memory state. */
+let restorePending = false;
+
 /** Every localStorage key that can hold part of AppState, across every format version this app has used. */
 export const APP_STATE_STORAGE_KEYS: readonly string[] = [STORAGE_KEY, LEGACY_V1_KEY, TIMER_KEY, SOCIAL_KEY, CORE_KEY];
 const avatarStyles: SocialAvatarStyle[] = ["classic", "serif", "cursive", "graffiti", "pixel", "mono"];
@@ -1647,6 +1650,7 @@ export function saveAppState(
   baselines: PersistenceBaselines,
   options: { forceSections?: ReadonlySet<PersistSection> } = {},
 ): Set<PersistSection> {
+  if (restorePending) return new Set();
   const now = new Date();
   const sectionsToWrite = new Set<PersistSection>([...getChangedSections(state, baselines), ...(options.forceSections ?? [])]);
 
@@ -1710,12 +1714,95 @@ export function saveAppState(
   return succeeded;
 }
 
-export function downloadBackup(state: AppState) {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+/** UI preferences kept in their own localStorage keys (not in AppState); backed up so a restored device looks and feels the same. */
+const PREFERENCE_STORAGE_KEYS: readonly string[] = [
+  "study-tracker-theme",
+  "study-tracker-palette",
+  "study-tracker-style",
+  "study-tracker-dashboard-layout",
+  "study-tracker-dashboard-custom-layout",
+  "study-tracker-field-dashboard-layout",
+  "study-tracker-wabi-circle-competitive",
+  "study-tracker-garden-variant",
+  "study-tracker-rest-tree",
+];
+
+export function buildBackup(state: AppState) {
+  const preferences: Record<string, string> = {};
+  for (const key of PREFERENCE_STORAGE_KEYS) {
+    const value = localStorage.getItem(key);
+    if (value !== null) preferences[key] = value;
+  }
+  return { app: "study-tracker", backupVersion: 2, exportedAt: new Date().toISOString(), state, preferences };
+}
+
+/** Returns where the backup was saved, or null if the user cancelled the save dialog. */
+export async function saveBackup(state: AppState): Promise<string | null> {
+  const contents = JSON.stringify(buildBackup(state), null, 2);
+  const fileName = `study-tracker-backup-${todayIso()}.json`;
+  if ("__TAURI_INTERNALS__" in window) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const { invoke } = await import("@tauri-apps/api/core");
+    const path = await save({ defaultPath: fileName, filters: [{ name: "Study Tracker backup", extensions: ["json"] }] });
+    if (!path) return null;
+    await invoke("write_backup_file", { path, contents });
+    return path;
+  }
+  const blob = new Blob([contents], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `study-tracker-backup-${todayIso()}.json`;
+  anchor.download = fileName;
   anchor.click();
   URL.revokeObjectURL(url);
+  return fileName;
+}
+
+/**
+ * Writes a backup file's contents into localStorage as the app's persisted state, so the next
+ * loadAppState() (after a reload) runs it through the normal migration/normalization pipeline.
+ * The backup's social identity (userId + deviceSecret) is what makes the restored device the
+ * same account as the original.
+ */
+export function restoreBackup(rawJson: string): void {
+  if (restorePending) return;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch {
+    throw new Error("That file is not valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("That file is not a Study Tracker backup.");
+  const wrapper = parsed as { backupVersion?: unknown; state?: unknown; preferences?: unknown };
+  const isWrapped = typeof wrapper.backupVersion === "number" && wrapper.state && typeof wrapper.state === "object";
+  const backup = (isWrapped ? wrapper.state : parsed) as Partial<AppState>;
+  const preferences = isWrapped && wrapper.preferences && typeof wrapper.preferences === "object" ? wrapper.preferences as Record<string, unknown> : {};
+  if (!Array.isArray(backup.sessions) || !Array.isArray(backup.courses) || !backup.social || typeof backup.social !== "object") {
+    throw new Error("That file is not a Study Tracker backup.");
+  }
+  const { social, timer, ...core } = backup;
+  if (typeof social.userId !== "string" || typeof social.deviceSecret !== "string" || !social.userId || !social.deviceSecret) {
+    throw new Error("This backup has no account identity to restore.");
+  }
+
+  const previous = [...APP_STATE_STORAGE_KEYS, ...PREFERENCE_STORAGE_KEYS].map((key) => [key, localStorage.getItem(key)] as const);
+  try {
+    localStorage.setItem(SOCIAL_KEY, JSON.stringify({ social }));
+    localStorage.setItem(CORE_KEY, JSON.stringify(core));
+    if (timer && typeof timer === "object") localStorage.setItem(TIMER_KEY, JSON.stringify({ timer }));
+    else localStorage.removeItem(TIMER_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_V1_KEY);
+    for (const key of PREFERENCE_STORAGE_KEYS) {
+      const value = preferences[key];
+      if (typeof value === "string") localStorage.setItem(key, value);
+    }
+    restorePending = true;
+  } catch (error) {
+    for (const [key, value] of previous) {
+      if (value === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, value);
+    }
+    throw new Error(`Could not store the backup: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
 }

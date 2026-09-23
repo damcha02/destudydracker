@@ -24799,3 +24799,80 @@ input[type="color"] {
 .gk-sun {
   opacity: 0.22;
 }
+
+/* "Something else" picker for the Modern and Field Notebook dashboards */
+.dpick-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.36);
+  padding: 24px;
+}
+.dpick {
+  box-sizing: border-box;
+  width: min(540px, 100%);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 0.28);
+  overflow: hidden;
+}
+.dpick-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 18px 22px 12px; }
+.dpick-head h2 { margin: 2px 0 0; font-size: 1.15rem; }
+.dpick-body { overflow-y: auto; padding: 0 22px 14px; }
+.dpick-label { margin: 10px 0 4px; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.dpick-ahead { margin-top: 22px; }
+.dpick-day { margin: 12px 0 2px; font-size: 0.78rem; color: var(--muted); }
+.dpick-empty { margin: 8px 0; color: var(--muted); font-size: 0.9rem; }
+.dpick-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 9px 10px;
+  margin: 2px 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dpick-item:hover { background: color-mix(in oklch, var(--accent) 12%, transparent); }
+.dpick-item em { font-style: normal; font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.dpick-foot { padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+.dpick-head-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.dpick-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--accent) 10%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--line));
+}
+.dpick-current > div { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.dpick-current span { font-size: 0.66rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.dpick-current em { font-style: normal; font-size: 0.78rem; color: var(--muted); }
+
+/* Field Notebook: squared paper sheet with ruled lines instead of rounded cards */
+.dpick-notebook .dpick {
+  border-radius: 0;
+  background: var(--fn-paper-1, var(--surface));
+  border: var(--fn-rule-hard, 1px solid var(--line));
+  box-shadow: 4px 4px 0 rgb(0 0 0 / 0.22);
+}
+.dpick-notebook .dpick-head { border-bottom: var(--fn-rule-soft, 1px solid var(--line)); }
+.dpick-notebook .dpick-head h2 { font-family: var(--fn-serif, Georgia, serif); }
+.dpick-notebook .dpick-item { border-radius: 0; border-bottom: var(--fn-rule-dot, 1px dotted var(--line)); margin: 0; padding: 9px 4px; }
+.dpick-notebook .dpick-item:hover { background: var(--fn-paper-3, rgb(0 0 0 / 0.05)); }
+.dpick-notebook .dpick-foot { border-top: var(--fn-rule-soft, 1px solid var(--line)); }

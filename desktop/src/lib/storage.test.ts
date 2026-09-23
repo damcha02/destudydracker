@@ -6,7 +6,9 @@ import {
   defaultState,
   defaultTimer,
   getChangedSections,
+  buildBackup,
   loadAppState,
+  restoreBackup,
   saveAppState,
 } from "./storage";
 import type { AppState, TimerState } from "../types";
@@ -474,5 +476,49 @@ describe("loadAppState - migration and corruption", () => {
     expect(result.tasks.find((task) => task.id === "t1")?.subtype).toBe("Sheet");
     expect(result.tasks.find((task) => task.id === "t2")?.subtype).toBe("Lecture");
     expect(result.tasks.find((task) => task.id === "t3")?.subtype).toBe("Session");
+  });
+});
+
+describe("restoreBackup", () => {
+  it("rejects files that are not backups", async () => {
+    const { restoreBackup } = await import("./storage");
+    expect(() => restoreBackup("nope")).toThrow(/valid JSON/);
+    expect(() => restoreBackup("{}")).toThrow(/not a Study Tracker backup/);
+    expect(() => restoreBackup(JSON.stringify({ sessions: [], courses: [], social: {} }))).toThrow(/account identity/);
+  });
+});
+
+describe("backup round trip", () => {
+  it("restores study time, semesters, courses, deadlines, achievements and the account on a blank device", () => {
+    const original = {
+      ...defaultState,
+      semesters: [{ id: "sem1", name: "HS26", createdAt: "2026-09-01T00:00:00.000Z", startDate: "2026-09-14", endDate: "2026-12-23", phase: "active", archived: false, archivedAt: null }],
+      courses: [{ id: "c1", semesterId: "sem1", name: "Analysis", color: "#123456", targetGrade: 5.5, createdAt: "2026-09-01T00:00:00.000Z", externalUrl: null }],
+      tasks: [{ id: "t1", semesterId: "sem1", courseId: "c1", title: "Sheet 3", subtype: "Sheet", unitLabel: "sheet", totalUnits: 4, completedUnits: 1, dueDate: "2026-10-05", priority: "high", notes: "", createdAt: "2026-09-02T00:00:00.000Z" }],
+      exams: [{ id: "e1", semesterId: "sem1", courseId: "c1", title: "Final", examDate: "2027-01-20", weight: 100, preparedness: 40, location: "HG E 5" }],
+      sessions: [{ id: "s1", semesterId: "sem1", courseId: "c1", taskId: "t1", kind: "study", goal: "g", learned: "l", blocker: "", nextStep: "", confidence: 3, startedAt: "2026-09-20T09:00:00.000Z", endedAt: "2026-09-20T10:30:00.000Z", minutes: 90, presetLabel: "Deep" }],
+      lifetimeStudyMinutes: 4321,
+      lifetimeStudySessions: 77,
+      petRockPats: 1234,
+      achievementEarnedOnDates: { "early-bird": "2026-09-10" },
+      social: { ...defaultState.social, userId: "user-abc", deviceSecret: "secret-xyz", friendCode: "ABCD-2345", displayName: "Dani" },
+    } as unknown as AppState;
+
+    const file = JSON.stringify(buildBackup(original));
+    storage.clear();
+    restoreBackup(file);
+    const loaded = loadAppState();
+
+    expect(loaded.semesters).toMatchObject([{ id: "sem1", name: "HS26", startDate: "2026-09-14", endDate: "2026-12-23" }]);
+    expect(loaded.courses).toMatchObject([{ id: "c1", name: "Analysis", targetGrade: 5.5 }]);
+    expect(loaded.tasks).toMatchObject([{ id: "t1", title: "Sheet 3", dueDate: "2026-10-05" }]);
+    expect(loaded.exams).toMatchObject([{ id: "e1", title: "Final", examDate: "2027-01-20" }]);
+    expect(loaded.sessions).toMatchObject([{ id: "s1", minutes: 90 }]);
+    expect(loaded.lifetimeStudyMinutes).toBe(4321);
+    expect(loaded.lifetimeStudySessions).toBe(77);
+    expect(loaded.petRockPats).toBe(1234);
+    expect(loaded.achievementEarnedOnDates).toEqual({ "early-bird": "2026-09-10" });
+    expect(loaded.social.userId).toBe("user-abc");
+    expect(loaded.social.deviceSecret).toBe("secret-xyz");
   });
 });

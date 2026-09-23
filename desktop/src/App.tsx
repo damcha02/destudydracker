@@ -51,7 +51,7 @@ import {
 } from "./lib/metrics";
 import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
-import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, downloadBackup, loadAppState, makeId, saveAppState } from "./lib/storage";
+import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, loadAppState, makeId, restoreBackup, saveAppState, saveBackup } from "./lib/storage";
 import type { PersistenceBaselines, PersistSection } from "./lib/storage";
 import { startTimerPersistenceHeartbeat } from "./lib/timerPersistence";
 import { closeTimerSegments, getDisplayRemainingSeconds, getIdleTimerSeconds, getTimerActiveSeconds } from "./lib/timerDisplay";
@@ -592,7 +592,8 @@ const primaryTabs: Array<{ id: TabKey; label: string }> = [
 ];
 
 const menuHelpItems: MenuHelpItem[] = [
-  { title: "Backup JSON", body: "Downloads a copy of your local Study Tracker data. Use it before big changes or when moving data manually." },
+  { title: "Settings → Backup and restore", body: "Saves a file with all your Study Tracker data (sessions, achievements, pet rock pats, settings, theme) and your account. You choose where it goes. Use it before big changes or to move to a new device." },
+  { title: "Restore from file", body: "In Settings. Loads a backup file and replaces this device's data with it. On a new device this makes it the same account as the original." },
   { title: "Change theme", body: "Opens color palettes and the light/dark mode selector. The small sun/moon button is the fastest light/dark toggle." },
   { title: "Personal", body: "Set your display name and daily focus goal. The goal is used by Dashboard progress and daily study context." },
   { title: "Options", body: "Control visual effects, social feed images and polls, the help/info buttons, telemetry, and which tabs appear in navigation." },
@@ -3340,9 +3341,14 @@ function blobToDataUrl(blob: Blob) {
   });
 }
 
-async function dataUrlToBlob(dataUrl: string) {
-  const response = await fetch(dataUrl);
-  return response.blob();
+function dataUrlToBlob(dataUrl: string) {
+  const match = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
+  if (!match) throw new Error("Could not read photo.");
+  const [, mimeType, isBase64, payload] = match;
+  const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return new Blob([bytes], { type: mimeType || "image/webp" });
 }
 
 function loadImageElement(dataUrl: string) {
@@ -3815,6 +3821,7 @@ function App() {
   const endlessContinuousStartedAtRef = useRef<string | null>(null);
   const endlessInactivityPromptRef = useRef<EndlessInactivityPrompt | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const restoreBackupInputRef = useRef<HTMLInputElement | null>(null);
   const [wabiMenuPosition, setWabiMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const wabiMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const [activeMenuPanel, setActiveMenuPanel] = useState<MenuPanel>(null);
@@ -6855,6 +6862,29 @@ function App() {
       setMessage(getErrorMessage(error, "Could not update squad settings."));
     } finally {
       setSocialSyncing(false);
+    }
+  }
+
+  async function handleBackupClick() {
+    setMenuOpen(false);
+    try {
+      const savedTo = await saveBackup(state);
+      if (savedTo) setMessage(`Backup saved to ${savedTo}`);
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not save the backup."));
+    }
+  }
+
+  async function handleRestoreBackupFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!window.confirm("Restore this backup? It replaces ALL data on this device with the backup's data, and this device becomes the backup's account.")) return;
+    try {
+      restoreBackup(await file.text());
+      window.location.reload();
+    } catch (error) {
+      setMessage(getErrorMessage(error, "Could not restore the backup."));
     }
   }
 
@@ -10361,10 +10391,30 @@ function App() {
             <h3>Planned today</h3>
             <p className="section-note">From your calendar schedule.</p>
           </div>
-          <button type="button" className="dashboard-todo-button" onClick={openDashboardTodoModal}>
-            TODO
-          </button>
+          <div className="dpick-head-actions">
+            <button type="button" className="dashboard-todo-button" onClick={() => setWabiPickerOpen(true)}>
+              SOMETHING ELSE
+            </button>
+            <button type="button" className="dashboard-todo-button" onClick={openDashboardTodoModal}>
+              TODO
+            </button>
+          </div>
         </div>
+
+        {(() => {
+          const picked = options?.onSelectEntry ? null : getPickedDashboardRow();
+          return picked ? (
+            <div className="dpick-current">
+              <div>
+                <span>Working on</span>
+                <strong>{picked.title}</strong>
+                <em>{picked.meta}</em>
+              </div>
+              <button type="button" className="ghost-button small-button" onClick={() => startPickedRow(picked)}>Focus</button>
+              <button type="button" className="ghost-button small-button" onClick={() => setWabiOneThingPick(null)} aria-label="Clear">×</button>
+            </div>
+          ) : null;
+        })()}
 
         <div className="design-task-list">
           {entries.length ? (
@@ -10745,6 +10795,7 @@ function App() {
       ? `${getCalendarEntryUnitLabel(selectedQuietEntry)} · ${selectedQuietCourse?.name ?? "General focus"} · ${selectedQuietTask?.dueDate ? `due ${formatDate(selectedQuietTask.dueDate)}` : formatTimeRange(selectedQuietEntry)}`
       : "Select a task below, or place one in the planner calendar.";
     const quietExams = upcomingExams.slice(0, 4);
+    const quietPick = getPickedDashboardRow();
 
     return (
       <section className="fn-dashboard fn-quiet-dashboard fade-up">
@@ -10752,7 +10803,7 @@ function App() {
           <div>
             <p className="fn-stamp-line">{todayLabel} · semester desk · week {weekNumber}</p>
             <h2>On the desk</h2>
-            <p><strong>{selectedQuietTitle}</strong> · {selectedQuietMeta}</p>
+            <p><strong>{quietPick ? quietPick.title : selectedQuietTitle}</strong> · {quietPick ? quietPick.meta : selectedQuietMeta}</p>
           </div>
           {renderFieldDashboardSwitch()}
         </header>
@@ -10760,8 +10811,8 @@ function App() {
         <div className="fn-quiet-grid">
           <main className="fn-quiet-main">
             <div className="fn-quiet-action-row">
-              {selectedQuietTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedQuietTask)}>Start focus</button> : null}
-              <button type="button" className="ghost-button" onClick={openDashboardTodoModal}>Something else</button>
+              {quietPick ? <button type="button" onClick={() => startPickedRow(quietPick)}>Start focus</button> : selectedQuietTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedQuietTask)}>Start focus</button> : null}
+              <button type="button" className="ghost-button" onClick={() => setWabiPickerOpen(true)}>Something else</button>
               <span>{formatMinutes(todayMinutes)} of {formatMinutes(dailyGoalMinutes)} done today.</span>
             </div>
 
@@ -10771,7 +10822,7 @@ function App() {
               {quietTasks.length ? quietTasks.map((entry) => {
                 const task = taskLookup.get(entry.taskId);
                 const course = task ? courseLookup.get(task.courseId) : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId) : null;
-                const active = selectedQuietEntry?.id === entry.id;
+                const active = !quietPick && selectedQuietEntry?.id === entry.id;
                 return (
                   <div
                     key={entry.id}
@@ -10788,7 +10839,7 @@ function App() {
                     <button
                       type="button"
                       className="fn-quiet-row-body"
-                      onClick={() => setSelectedQuietDashboardEntryId(entry.id)}
+                      onClick={() => { setWabiOneThingPick(null); setSelectedQuietDashboardEntryId(entry.id); }}
                     >
                       <i />
                       <span>{task?.title ?? entry.adHocTitle ?? "Calendar task"} <em>{course?.name ?? "General"}</em></span>
@@ -10843,6 +10894,7 @@ function App() {
     const selectedFullMeta = selectedFullEntry
       ? `${getCalendarEntryUnitLabel(selectedFullEntry)} · ${selectedFullCourse?.name ?? "General focus"} · ${selectedFullTask?.dueDate ? `due ${formatDate(selectedFullTask.dueDate)}` : formatTimeRange(selectedFullEntry)}`
       : "Select one planned task from the queue.";
+    const fullPick = getPickedDashboardRow();
 
     return (
       <section className="fn-dashboard fn-full-dashboard fade-up">
@@ -10872,15 +10924,15 @@ function App() {
                 <div>
                   <span className="fn-course-code">{selectedFullCourse ? selectedFullCourse.name.slice(0, 4).toUpperCase() : "DESK"}</span>
                   <span className="fn-pressure">Selected block</span>
-                  <h3>{selectedFullTitle}</h3>
-                  <p>{selectedFullMeta}</p>
+                  <h3>{fullPick ? fullPick.title : selectedFullTitle}</h3>
+                  <p>{fullPick ? fullPick.meta : selectedFullMeta}</p>
                 </div>
                 <div className="fn-next-actions">
-                  {selectedFullTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedFullTask)}>Start focus</button> : null}
-                  <button type="button" className="ghost-button" onClick={openDashboardTodoModal}>Something else</button>
+                  {fullPick ? <button type="button" onClick={() => startPickedRow(fullPick)}>Start focus</button> : selectedFullTask ? <button type="button" onClick={() => focusTaskFromDashboard(selectedFullTask)}>Start focus</button> : null}
+                  <button type="button" className="ghost-button" onClick={() => setWabiPickerOpen(true)}>Something else</button>
                 </div>
               </article>
-              {renderUrgentTasks(5, { selectedEntryId: selectedFullEntry?.id ?? null, onSelectEntry: (entry) => setSelectedQuietDashboardEntryId(entry.id) })}
+              {renderUrgentTasks(5, { selectedEntryId: selectedFullEntry?.id ?? null, onSelectEntry: (entry) => { setWabiOneThingPick(null); setSelectedQuietDashboardEntryId(entry.id); } })}
             </section>
           </main>
 
@@ -11587,16 +11639,6 @@ function App() {
         role="menu"
         style={{ position: "fixed", top: wabiMenuPosition.top, left: wabiMenuPosition.left, right: "auto" }}
       >
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            downloadBackup(state);
-            setMenuOpen(false);
-          }}
-        >
-          Backup JSON
-        </button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
@@ -11911,6 +11953,92 @@ function App() {
       course: row.kind === "todo" ? "To-do" : course,
       when: row.kind === "sheet-deadline" ? "due" : row.time ? displayTime(row.time) : "any time",
     };
+  }
+
+  function getPickedDashboardRow() {
+    if (!wabiOneThingPick) return null;
+    const row = getOpenRowsForDate(wabiOneThingPick.date).find((item) => item.refId === wabiOneThingPick.refId) ?? null;
+    if (!row) return null;
+    const info = describeTimelineRow(row);
+    const dayLabel = row.occurrenceDate === calendarToday ? null : new Intl.DateTimeFormat("en", { weekday: "short", day: "numeric", month: "short" }).format(new Date(`${row.occurrenceDate}T00:00:00`));
+    return { row, task: info.task, title: info.title, meta: [info.course, dayLabel, info.when].filter(Boolean).join(" \u00b7 ") };
+  }
+
+  function startPickedRow(picked: NonNullable<ReturnType<typeof getPickedDashboardRow>>) {
+    if (picked.task) focusTaskFromDashboard(picked.task);
+    else focusTodoInTimer(picked.row.title);
+  }
+
+  /** "Something else" picker for the Modern and Field Notebook dashboards (Wabi-Sabi has its own). */
+  function renderDashboardPickerModal() {
+    if (!wabiPickerOpen) return null;
+    const close = () => setWabiPickerOpen(false);
+    const notebook = appStyle === "field-notebook";
+    const dayFormat = new Intl.DateTimeFormat("en", { weekday: "long", day: "numeric", month: "short" });
+    const openEntries = todayCalendarEntries.filter((entry) => !entry.completed);
+    const todayRows = getOpenRowsForDate(calendarToday);
+    const ahead: { date: string; rows: DailyTimelineRow[] }[] = [];
+    for (let offset = 1; offset <= 14; offset += 1) {
+      const date = localIsoDate(addCalendarDays(new Date(`${calendarToday}T00:00:00`), offset));
+      const rows = getOpenRowsForDate(date);
+      if (rows.length) ahead.push({ date, rows });
+    }
+    const chooseRow = (row: DailyTimelineRow) => { setWabiOneThingPick({ refId: row.refId, date: row.occurrenceDate }); setSelectedTaskId(null); close(); };
+    const renderRow = (row: DailyTimelineRow) => {
+      const info = describeTimelineRow(row);
+      return (
+        <button key={`${row.id}:${row.occurrenceDate}`} type="button" className="dpick-item" onClick={() => chooseRow(row)}>
+          <span>{info.title}</span>
+          <em>{[info.course, info.when].filter(Boolean).join(" \u00b7 ")}</em>
+        </button>
+      );
+    };
+    return createPortal(
+      <div className={`dpick-backdrop ${notebook ? "dpick-notebook" : "dpick-modern"}`} onMouseDown={close}>
+        <section className="dpick" role="dialog" aria-modal="true" aria-label="Choose what to work on" onMouseDown={(event) => event.stopPropagation()}>
+          <header className="dpick-head">
+            <div>
+              <p className="eyebrow">{notebook ? "Something else" : "Switch focus"}</p>
+              <h2>Choose what to work on</h2>
+            </div>
+            <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
+          </header>
+          <div className="dpick-body">
+            <p className="dpick-label">Planned today</p>
+            {openEntries.length || todayRows.length ? (
+              <>
+                {openEntries.map((entry) => {
+                  const task = taskLookup.get(entry.taskId);
+                  const course = task ? courseLookup.get(task.courseId)?.name : entry.adHocCourseId ? courseLookup.get(entry.adHocCourseId)?.name : null;
+                  return (
+                    <button key={entry.id} type="button" className="dpick-item" onClick={() => { setWabiOneThingPick(null); setSelectedQuietDashboardEntryId(entry.id); setSelectedTaskId(entry.taskId); close(); }}>
+                      <span>{task?.title ?? entry.adHocTitle ?? "Study block"}</span>
+                      <em>{[course, formatTimeRange(entry)].filter(Boolean).join(" \u00b7 ")}</em>
+                    </button>
+                  );
+                })}
+                {todayRows.map(renderRow)}
+              </>
+            ) : <p className="dpick-empty">Nothing else open today.</p>}
+            {ahead.length ? (
+              <>
+                <p className="dpick-label dpick-ahead">Work ahead</p>
+                {ahead.map((group) => (
+                  <div key={group.date}>
+                    <p className="dpick-day">{dayFormat.format(new Date(`${group.date}T00:00:00`))}</p>
+                    {group.rows.map(renderRow)}
+                  </div>
+                ))}
+              </>
+            ) : null}
+          </div>
+          <footer className="dpick-foot">
+            <button type="button" className="dashboard-todo-button" onClick={() => { close(); openDashboardTodoModal(); }}>+ New to-do or course task</button>
+          </footer>
+        </section>
+      </div>,
+      document.body,
+    );
   }
 
   function renderWabiPickerModal() {
@@ -12652,6 +12780,16 @@ function App() {
               </div>
               <div className="linux-update-command-card">
                 <div>
+                  <strong>Backup and restore</strong>
+                  <span>Save all your data (study time, semesters, deadlines, achievements, settings, account) to a file, or restore from one. Restoring replaces everything on this device.</span>
+                </div>
+                <div className="update-actions">
+                  <button type="button" className="ghost-button" onClick={() => void handleBackupClick()}>Backup to file</button>
+                  <button type="button" className="ghost-button" onClick={() => restoreBackupInputRef.current?.click()}>Restore from file</button>
+                </div>
+              </div>
+              <div className="linux-update-command-card">
+                <div>
                   <strong>Privacy</strong>
                   <span>What social sync collects for abuse prevention, and how long it's kept.</span>
                 </div>
@@ -12778,6 +12916,7 @@ function App() {
 
   return (
     <>
+      <input ref={restoreBackupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void handleRestoreBackupFile(event)} />
       {showWindowTitlebar ? (
         <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>
           <div className="window-titlebar-title">Study Tracker</div>
@@ -12875,16 +13014,6 @@ function App() {
             </button>
             {menuOpen ? (
               <div className="topbar-menu" role="menu">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    downloadBackup(state);
-                    setMenuOpen(false);
-                  }}
-                >
-                  Backup JSON
-                </button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
@@ -13026,7 +13155,7 @@ function App() {
 
       {appStyle === "wabi-sabi" ? renderCalendarItemPopup() : null}
       {appStyle === "wabi-sabi" ? renderSessionLogsModal() : null}
-      {appStyle === "wabi-sabi" ? renderWabiPickerModal() : null}
+      {appStyle === "wabi-sabi" ? renderWabiPickerModal() : renderDashboardPickerModal()}
 
       {manageSemestersOpen ? (
         appStyle === "wabi-sabi" ? (
