@@ -121,7 +121,7 @@ function normalizeAvatar(avatar: unknown, displayName: string): SocialAvatar {
     return { kind: "letter", letter, style };
   }
   if (record.kind === "photo") {
-    const url = typeof record.url === "string" && record.url.startsWith("data:image/") ? record.url : "";
+    const url = typeof record.url === "string" && (record.url.startsWith("data:image/") || /^https:\/\/[^/]+\/profile\/avatar\//.test(record.url)) ? record.url : "";
     if (url) {
       return {
         kind: "photo",
