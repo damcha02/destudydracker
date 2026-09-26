@@ -1458,7 +1458,7 @@ async function scoreSquadDate(env: Env, date: string) {
     JOIN squad_member_history h ON h.squad_id = s.id AND h.joined_at <= ? AND (h.left_at IS NULL OR h.left_at >= ?)
     LEFT JOIN competitive_daily_stats ds ON ds.user_id = h.user_id AND ds.date = ?
     GROUP BY s.id, s.name
-    HAVING memberCount >= 2
+    HAVING memberCount >= 1
   `).bind(dayEnd, dayStart, date).all<{ squadId: string; name: string; memberCount: number; activeMemberCount: number; totalMinutes: number; totalSessions: number }>();
 
   const ranked = rows.results
@@ -1529,7 +1529,7 @@ async function getSquadScoreLeaderboard(env: Env, period: SquadScorePeriod) {
       JOIN squad_members sm ON sm.squad_id = s.id
       LEFT JOIN competitive_daily_stats ds ON ds.user_id = sm.user_id AND ds.date = ?
       GROUP BY s.id, s.name, s.is_private
-      HAVING memberCount >= 2
+      HAVING memberCount >= 1
       ORDER BY CASE WHEN activeMemberCount > 0 THEN CAST(totalMinutes AS REAL) / activeMemberCount ELSE 0 END DESC, totalMinutes DESC, s.name ASC
       LIMIT 50
     `).bind(date).all<{ squadId: string; squadName: string; isPrivate: number; memberCount: number; activeMemberCount: number; totalMinutes: number; totalSessions: number }>();

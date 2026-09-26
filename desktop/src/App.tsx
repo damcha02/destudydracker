@@ -14,6 +14,8 @@ import { TimerClockDigits } from "./components/TimerClockDigits";
 import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import SkribblRoom from "./components/SkribblRoom";
 import { SakuraScatter } from "./components/SakuraScatter";
+import { WhatsNewModal } from "./components/WhatsNewModal";
+import { consumeReleaseNote } from "./lib/releaseNotes";
 import type { VaultScreenHandle } from "./features/vault/VaultScreen";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
@@ -3989,6 +3991,7 @@ function App() {
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
   const wordleModalRef = useRef<HTMLDivElement | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
+  const [whatsNew, setWhatsNew] = useState<ReturnType<typeof consumeReleaseNote>>(null);
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
   const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
@@ -4222,7 +4225,10 @@ function App() {
     }
 
     void getVersion()
-      .then(setCurrentAppVersion)
+      .then((version) => {
+        setCurrentAppVersion(version);
+        setWhatsNew(consumeReleaseNote(version));
+      })
       .catch((error: unknown) => {
         console.warn("Could not read app version.", error);
         setCurrentAppVersion("unknown");
@@ -12916,6 +12922,7 @@ function App() {
 
   return (
     <>
+      {whatsNew ? <WhatsNewModal version={whatsNew.version} note={whatsNew.note} onClose={() => setWhatsNew(null)} /> : null}
       <input ref={restoreBackupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void handleRestoreBackupFile(event)} />
       {showWindowTitlebar ? (
         <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>

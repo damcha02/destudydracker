@@ -16,6 +16,13 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if ! grep -qF "\"$VERSION\":" "$SCRIPT_DIR/desktop/src/lib/releaseNotes.ts"; then
+  echo "Error: no release notes for $VERSION."
+  echo "Add a \"$VERSION\" entry to desktop/src/lib/releaseNotes.ts first (this is the 'What's new' popup users see)."
+  echo "To release without a popup anyway: SKIP_RELEASE_NOTES=1 ./update-version.sh $VERSION"
+  [ "${SKIP_RELEASE_NOTES:-}" = "1" ] || exit 1
+fi
+
 node - "$SCRIPT_DIR" "$VERSION" <<'NODE'
 const fs = require('fs');
 const path = require('path');

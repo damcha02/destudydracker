@@ -24876,3 +24876,21 @@ input[type="color"] {
 .dpick-notebook .dpick-item { border-radius: 0; border-bottom: var(--fn-rule-dot, 1px dotted var(--line)); margin: 0; padding: 9px 4px; }
 .dpick-notebook .dpick-item:hover { background: var(--fn-paper-3, rgb(0 0 0 / 0.05)); }
 .dpick-notebook .dpick-foot { border-top: var(--fn-rule-soft, 1px solid var(--line)); }
+
+/* What's new modal */
+.whatsnew-backdrop { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 16px; background: oklch(0.1 0.02 250 / 0.55); backdrop-filter: blur(4px); animation: whatsnew-fade 0.2s ease-out; }
+.whatsnew-card { width: min(520px, 100%); max-height: 85vh; overflow: auto; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--accent-line); border-radius: 18px; box-shadow: 0 24px 60px oklch(0 0 0 / 0.4); animation: whatsnew-pop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
+.whatsnew-hero { padding: 28px 28px 20px; background: linear-gradient(135deg, var(--accent-soft), transparent 70%); border-bottom: 1px solid var(--accent-line); }
+.whatsnew-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: var(--surface-inset); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.whatsnew-hero h2 { margin: 12px 0 4px; font-size: 28px; line-height: 1.15; }
+.whatsnew-hero p { margin: 0; color: var(--ink-3); }
+.whatsnew-list { list-style: none; margin: 0; padding: 16px 28px; display: grid; gap: 14px; }
+.whatsnew-list li { display: flex; gap: 14px; align-items: flex-start; }
+.whatsnew-list li > div { display: grid; gap: 2px; }
+.whatsnew-list li span:last-child { color: var(--ink-2); font-size: 14px; }
+.whatsnew-icon { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft); font-size: 18px; }
+.whatsnew-cta { display: block; margin: 4px 28px 24px auto; padding: 10px 24px; border: 0; border-radius: 10px; background: var(--accent-strong); color: #fff; font-weight: 700; cursor: pointer; }
+.whatsnew-cta:hover { background: var(--accent); }
+@keyframes whatsnew-fade { from { opacity: 0; } }
+@keyframes whatsnew-pop { from { opacity: 0; transform: translateY(16px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .whatsnew-backdrop, .whatsnew-card { animation: none; } }

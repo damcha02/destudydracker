@@ -827,7 +827,7 @@ export function SocialScreen(props: Props) {
                   {socialScope === "squad" && !squadScoreLeaderboard.length ? (
                     <div className="arena-empty">
                       <strong>No eligible squads yet</strong>
-                      <span>Squads need at least 2 members to enter the Squad Arena.</span>
+                      <span>Squads appear in the Squad Arena once they have at least 1 member.</span>
                     </div>
                   ) : null}
                   {socialScope !== "squad" && !socialLeaderboard.length ? (
