@@ -596,6 +596,7 @@ const primaryTabs: Array<{ id: TabKey; label: string }> = [
 const menuHelpItems: MenuHelpItem[] = [
   { title: "Settings → Backup and restore", body: "Saves a file with all your Study Tracker data (sessions, achievements, pet rock pats, settings, theme) and your account. You choose where it goes. Use it before big changes or to move to a new device." },
   { title: "Restore from file", body: "In Settings. Loads a backup file and replaces this device's data with it. On a new device this makes it the same account as the original." },
+  { title: "Change style", body: "Opens the style picker directly, so you can switch the overall look of the app without going through themes." },
   { title: "Change theme", body: "Opens color palettes and the light/dark mode selector. The small sun/moon button is the fastest light/dark toggle." },
   { title: "Personal", body: "Set your display name and daily focus goal. The goal is used by Dashboard progress and daily study context." },
   { title: "Options", body: "Control visual effects, social feed images and polls, the help/info buttons, telemetry, and which tabs appear in navigation." },
@@ -6894,8 +6895,9 @@ function App() {
     }
   }
 
-  function openMenuPanel(panel: Exclude<MenuPanel, null>) {
+  function openMenuPanel(panel: Exclude<MenuPanel, null>, themeView?: ThemePanelView) {
     setActiveMenuPanel(panel);
+    if (panel === "theme" && themeView) setThemePanelView(themeView);
     setMenuOpen(false);
     setDeleteConfirmOpen(false);
     if (panel === "personal") {
@@ -11645,7 +11647,8 @@ function App() {
         role="menu"
         style={{ position: "fixed", top: wabiMenuPosition.top, left: wabiMenuPosition.left, right: "auto" }}
       >
-        <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("theme", "themes")}>Change theme</button>
+        <button type="button" role="menuitem" onClick={() => openMenuPanel("theme", "styles")}>Change style</button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
         <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>
@@ -12560,20 +12563,13 @@ function App() {
           <div className="settings-panel-head">
             <div>
               <p className="eyebrow">Menu</p>
-              <h2>{activeMenuPanel === "theme" ? "Theme" : activeMenuPanel === "personal" ? "Personal" : activeMenuPanel === "options" ? "Options" : "Settings"}</h2>
+              <h2>{activeMenuPanel === "theme" ? (themePanelView === "styles" ? "Style" : "Theme") : activeMenuPanel === "personal" ? "Personal" : activeMenuPanel === "options" ? "Options" : "Settings"}</h2>
             </div>
             <button type="button" className="ghost-button small-button" onClick={closeMenuPanel}>Close</button>
           </div>
 
           {activeMenuPanel === "theme" ? (
             <div className="settings-panel-body">
-              <div className="theme-panel-switch" aria-label="Appearance picker">
-                {(["themes", "styles"] as const).map((view) => (
-                  <button key={view} type="button" className={themePanelView === view ? "active" : ""} onClick={() => setThemePanelView(view)}>
-                    {view === "themes" ? "Themes" : "Styles"}
-                  </button>
-                ))}
-              </div>
               {themePanelView === "themes" ? (
                 (
                   <div className="theme-choice-grid">
@@ -13021,7 +13017,8 @@ function App() {
             </button>
             {menuOpen ? (
               <div className="topbar-menu" role="menu">
-                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme")}>Change theme</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme", "themes")}>Change theme</button>
+                <button type="button" role="menuitem" onClick={() => openMenuPanel("theme", "styles")}>Change style</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("personal")}>Personal</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("options")}>Options</button>
                 <button type="button" role="menuitem" onClick={() => openMenuPanel("settings")}>Settings</button>

@@ -269,6 +269,11 @@ function pageStackShadow(remaining: number, totalPages: number, dir: 1 | -1, fon
 
 type BookAnim = "open" | "close" | "next" | "prev" | null;
 
+/** How long the finished leaf/cover is held on screen after a turn has been applied, so the board
+ *  it covers can repaint to its new page out of sight. A few frames is all it needs; long enough to
+ *  survive a slow one, short enough that it cannot be felt as input lag on the next turn. */
+const SETTLE_MS = 90;
+
 function prefersReducedMotion() {
   return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
@@ -296,11 +301,18 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
   const [open, setOpen] = useState(false);
   const [spread, setSpread] = useState(0);
   const [anim, setAnim] = useState<BookAnim>(null);
-  // True once a turn is past its halfway point, where the leaf stands edge-on and has begun to
-  // cover the board it is landing on. The board it lands on switches to its destination page at
-  // that moment rather than when the leaf finally goes away - see the page selection below.
-  const [pastHalf, setPastHalf] = useState(false);
-  const halfTimeoutRef = useRef<number | null>(null);
+  // The turn has played out and its result has been applied to `open`/`spread`, but the animated
+  // element is deliberately left mounted (holding its final frame) for a moment longer. That gives
+  // the board underneath a chance to repaint with its new page while it is still completely hidden,
+  // so removing the leaf afterwards reveals something already correct. Doing both in one commit is
+  // what used to show a frame of the previous spread.
+  const [settling, setSettling] = useState(false);
+  const settleTimeoutRef = useRef<number | null>(null);
+  /** The spread a turn started from. The three pages that are not being repainted stay pinned to
+   *  this for the whole turn, so advancing `spread` part-way through cannot disturb them. State
+   *  rather than a ref because the render reads it: it is set in the same batch as `anim`, so the
+   *  two always commit together. */
+  const [turnFrom, setTurnFrom] = useState(0);
 
   useLayoutEffect(() => {
     const element = rootRef.current;
@@ -317,7 +329,7 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
   // `onfinish`, so the in-flight turn can no longer come back and setState on a dead component.
   useEffect(() => () => {
     if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-    if (halfTimeoutRef.current) window.clearTimeout(halfTimeoutRef.current);
+    if (settleTimeoutRef.current) window.clearTimeout(settleTimeoutRef.current);
     activeAnimsRef.current.forEach((animation) => { try { animation.cancel(); } catch { /* already done */ } });
     activeAnimsRef.current = [];
   }, []);
@@ -366,12 +378,14 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
       finished = true;
       runningRef.current = null;
       if (timeoutRef.current) window.clearTimeout(timeoutRef.current);
-      if (halfTimeoutRef.current) window.clearTimeout(halfTimeoutRef.current);
-      setPastHalf(false);
+      // Apply the result, but leave `anim` alone: the leaf (or cover) stays mounted on its last
+      // frame, still covering the board it landed on, while that board quietly repaints to its new
+      // page underneath. Only then does the element come away - see SETTLE_MS.
       if (kind === "open") setOpen(true);
       else if (kind === "close") { setOpen(false); setSpread(0); }
-      else setSpread((current) => current + (kind === "next" ? 1 : -1));
-      setAnim(null);
+      else setSpread(turnFrom + (kind === "next" ? 1 : -1));
+      setSettling(true);
+      settleTimeoutRef.current = window.setTimeout(() => { setSettling(false); setAnim(null); }, SETTLE_MS);
       // The animations are NOT cancelled here. Cancelling drops their `fill: forwards` and snaps
       // every element back to its inline style, so it is only safe once React has committed the
       // render that clears `anim` - which unmounts the leaf and repaints the spread at its new
@@ -396,24 +410,19 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
     //
     // Sign: CSS rotateY sends the +X side away from the viewer, so a right-hand page pivoting on
     // its left edge has to go negative for its free edge to lift towards you before sweeping left.
-    // "prev" is the mirror image and goes positive. The cover keeps the old scaleX squish - it
-    // hinges rather than turning over, and its two faces are not a sheet of paper.
-    if (kind === "next" || kind === "prev") {
-      const spin = kind === "next" ? -180 : 180;
-      anims.push(target.animate(
-        [{ transform: "rotateY(0deg)" }, { transform: `rotateY(${spin}deg)` }],
-        { duration, easing, fill: "forwards" },
-      ));
-    } else {
-      anims.push(target.animate(
-        [
-          { transform: "scaleX(1)", offset: 0 },
-          { transform: "scaleX(0)", offset: 0.5 },
-          { transform: "scaleX(1)", offset: 1 },
-        ],
-        { duration, easing, fill: "forwards" },
-      ));
-    }
+    // "prev" is the mirror image and goes positive.
+    //
+    // The cover is hinged at the same spine and swings through the same half circle: opening lays
+    // it over onto the left board (0 -> -180), closing brings it back onto the right (-180 -> 0).
+    // It used to keep the flat scaleX squish, which both read as a squash rather than a swing and
+    // made the browser re-rasterise the cloth's eight stacked gradients at a new width every
+    // frame - the reason opening and closing felt rougher than turning a page.
+    const spin = kind === "next" ? -180 : kind === "prev" ? 180 : kind === "open" ? -180 : 0;
+    const from = kind === "close" ? -180 : 0;
+    anims.push(target.animate(
+      [{ transform: `rotateY(${from}deg)` }, { transform: `rotateY(${spin}deg)` }],
+      { duration, easing, fill: "forwards" },
+    ));
 
     // Deliberately just the rotation plus the one cross-fade (and, for open/close, the cover's
     // own reveal/slide) - the cast-shadow and shade overlays this used to also animate were pure
@@ -442,9 +451,6 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
     activeAnimsRef.current = anims;
     anims[0].onfinish = finish;
     timeoutRef.current = window.setTimeout(finish, duration + 250);
-    if (kind === "next" || kind === "prev") {
-      halfTimeoutRef.current = window.setTimeout(() => setPastHalf(true), duration / 2);
-    }
   }
 
   // Setting `anim` is what puts the leaf (or the cover) in the DOM; the animation can only be
@@ -471,6 +477,7 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
     const target = spreadIndex + (direction === "next" ? 1 : -1);
     if (!open || anim || target < 0 || target >= spreadCount) return;
     if (prefersReducedMotion()) { setSpread(target); return; }
+    setTurnFrom(spreadIndex);
     setAnim(direction);
   }
   function closeBook() {
@@ -518,17 +525,15 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
   }, [open, anim, spreadIndex, spreadCount]);
 
   const at = (index: number) => pages[index] ?? null;
-  const L = spreadIndex * 2;
+  // Laid out from the spread the turn STARTED on, so that advancing `spread` at the end of the turn
+  // moves only the one board we mean to move (below) and leaves the other three pages alone.
+  const base = anim === "next" || anim === "prev" ? turnFrom : spreadIndex;
+  const L = base * 2;
   const R = L + 1;
   let leftPage = at(L);
   let rightPage = at(R);
   let leafFront: BookPageData | null = null;
   let leafBack: BookPageData | null = null;
-  // The board the leaf is landing on takes its destination page at the halfway mark, while the leaf
-  // is over it and the change cannot be seen - not when the leaf unmounts. Doing it at unmount put
-  // the board's repaint and the leaf's removal in the same commit, and a single frame's lag in that
-  // repaint showed the page that had been underneath all along: one frame of the previous spread,
-  // a fifth of a second after the turn had visibly finished.
   // Both directions put the page that LIFTS on the front face and the page that LANDS on the back
   // face, so the front is always the one on show at rotation 0 and the back always the one on show
   // at the half turn. That has to match the faces' own pre-rotation: the back face is permanently
@@ -536,15 +541,23 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
   // mirrored before the leaf has moved. Giving "prev" the opposite assignment - as it had, from
   // back when the turn was a flat scaleX squish and mirroring could not arise - showed the whole
   // reverse turn back-to-front.
-  if (anim === "next") { rightPage = at(R + 2); leafFront = at(R); leafBack = at(R + 1); if (pastHalf) leftPage = at(L + 2); }
-  if (anim === "prev") { leftPage = at(L - 2); leafFront = at(L); leafBack = at(L - 1); if (pastHalf) rightPage = at(R - 2); }
+  //
+  // The board the leaf lands on repaints to its destination page the moment `spread` advances,
+  // which finish() does while the landed leaf still covers it completely. It must NOT happen any
+  // earlier: halfway through the turn the leaf stands edge-on and is exactly zero pixels wide, so
+  // it hides nothing at all, and swapping the page there put the next page's pictures on the
+  // previous page in full view.
+  if (anim === "next") { rightPage = at(R + 2); leafFront = at(R); leafBack = at(R + 1); if (spread > base) leftPage = at(L + 2); }
+  if (anim === "prev") { leftPage = at(L - 2); leafFront = at(L); leafBack = at(L - 1); if (spread < base) rightPage = at(R - 2); }
   if (anim === "open") rightPage = at(1);
 
   const opening = anim === "open";
   const showLeft = open && anim !== "close";
   const showRight = open || opening;
   const showClosed = !open || anim === "close";
-  const showCover = !open || anim === "close";
+  // Held past the end of an opening too: the cover is what hides the left board while that board
+  // paints its first page, exactly as the leaf does for a page turn.
+  const showCover = !open || anim === "close" || (anim === "open" && settling);
   const showZones = open;
   const turning = anim === "next" || anim === "prev";
   const g = geometry;
@@ -658,7 +671,17 @@ function BookGallery({ achievements }: { achievements: Achievement[] }) {
             ) : null}
 
             {showCover ? (
-              <div ref={coverRef} className="wabi-book-cover-flip" style={{ left: px(g.BW), width: px(g.BW), height: px(g.BH), fontSize: px(g.fontSize) }}>
+              <div
+                ref={coverRef}
+                className="wabi-book-cover-flip"
+                style={{
+                  left: px(g.BW), width: px(g.BW), height: px(g.BH), fontSize: px(g.fontSize),
+                  // A close begins with the cover already laid open over the left board, so it
+                  // starts its swing from there rather than popping upright for a frame first.
+                  transform: anim === "close" ? "rotateY(-180deg)" : "rotateY(0deg)",
+                  ...(anim === "open" || anim === "close" ? { willChange: "transform" } : {}),
+                }}
+              >
                 <div
                   ref={coverFrontRef}
                   className="wabi-book-cover-face"
