@@ -17,6 +17,12 @@ const vaultSpaces: Array<{ id: VaultSpace; label: string }> = [
   { id: "daily", label: "Daily" },
 ];
 
+const VAULT_FOLDER_PREVIEW: Array<{ name: string; hint: string }> = [
+  { name: "Daily", hint: "one note per study day" },
+  { name: "References", hint: "a page per course" },
+  { name: "Summaries", hint: "imported PDFs and slides" },
+];
+
 function localIsoDate(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -527,7 +533,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
 
   async function loadVaultNote(vaultPath = state.settings.vaultPath, noteDate = vaultNoteDate) {
     if (!vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
 
@@ -548,7 +554,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
 
   async function handleSaveVaultNote() {
     if (!state.settings.vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
 
@@ -585,7 +591,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
     options: { silent?: boolean } = {},
   ) {
     if (!vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
     if (!semester || !course) {
@@ -614,7 +620,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
 
   async function handleSaveReferenceNote() {
     if (!state.settings.vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
     if (!selectedReferenceSemester || !selectedReferenceCourse) {
@@ -659,7 +665,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
     options: { silent?: boolean } = {},
   ) {
     if (!vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
     if (!semester || !course) {
@@ -686,7 +692,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
 
   async function handleAddSummaryFiles() {
     if (!state.settings.vaultPath) {
-      setMessage("Create or link an Obsidian vault first.");
+      setMessage("Create or link a vault first.");
       return;
     }
     if (!selectedSummarySemester || !selectedSummaryCourse) {
@@ -805,16 +811,22 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                 <strong>{state.settings.vaultName || "StudyTrackerVault"}</strong>
                 <em>{state.settings.vaultPath ? "SYNCED" : "NOT LINKED"}</em>
               </div>
-              <div className="fn-vault-tabs">
-                {vaultSpaces.map((space) => (
-                  <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>{space.label}</button>
-                ))}
-              </div>
+              {state.settings.vaultPath ? (
+                <div className="fn-vault-tabs">
+                  {vaultSpaces.map((space) => (
+                    <button key={space.id} type="button" className={vaultSpace === space.id ? "active" : ""} onClick={() => setVaultSpace(space.id)}>{space.label}</button>
+                  ))}
+                </div>
+              ) : null}
               <div className="fn-vault-tools">
                 <button type="button" onClick={() => setMarkdownCheatsheetOpen(true)}>Markdown</button>
-                <button type="button" onClick={() => setVaultSetupOpen((current) => !current)}>{vaultSetupOpen ? "Close setup" : "Vault setup"}</button>
+                {state.settings.vaultPath ? (
+                  <button type="button" onClick={() => setVaultSetupOpen((current) => !current)}>{vaultSetupOpen ? "Close setup" : "Vault setup"}</button>
+                ) : null}
               </div>
-              {vaultSpace === "daily" ? (
+              {!state.settings.vaultPath ? (
+                <p className="fn-vault-rail-hint">Drawers appear once a vault folder is linked.</p>
+              ) : vaultSpace === "daily" ? (
                 <>
                   <div className="fn-rail-section">
                     <div className="fn-rail-label">Recent daily notes</div>
@@ -893,7 +905,7 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
           {appStyle !== "field-notebook" ? <div className="vault-hero">
             <div>
               <h1>Vault</h1>
-              <p>Your Obsidian-compatible markdown knowledge base.</p>
+              <p>Your plain-markdown knowledge base, stored as files you own.</p>
             </div>
             <div className="vault-hero-actions">
               {state.settings.vaultPath ? (
@@ -902,9 +914,11 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
               <button type="button" className="ghost-button" data-tour="vault-markdown" onClick={() => setMarkdownCheatsheetOpen(true)}>
                 Markdown
               </button>
-              <button type="button" className="ghost-button vault-settings-button" data-tour="vault-setup" onClick={() => setVaultSetupOpen((current) => !current)}>
-                {vaultSetupOpen ? "Close setup" : "Vault setup"}
-              </button>
+              {state.settings.vaultPath ? (
+                <button type="button" className="ghost-button vault-settings-button" data-tour="vault-setup" onClick={() => setVaultSetupOpen((current) => !current)}>
+                  {vaultSetupOpen ? "Close setup" : "Vault setup"}
+                </button>
+              ) : null}
             </div>
           </div> : null}
 
@@ -957,22 +971,49 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
           ) : null}
 
           {!state.settings.vaultPath ? (
-            <article className="panel-card vault-empty-card">
-              <p className="eyebrow">No vault linked</p>
-              <h2>Connect your markdown vault</h2>
-              <p className="section-note">Notes are saved as standard `.md` files you can open in Obsidian or any editor.</p>
-              <div className="control-row roomy-top">
-                <button type="button" data-tour="vault-link" onClick={handleLinkVault}>Link existing vault</button>
-                <button type="button" className="ghost-button" data-tour="vault-create" onClick={handleCreateVault}>Create new vault</button>
+            <article className="panel-card vault-onboard-card">
+              <div className="vault-onboard-head">
+                <p className="eyebrow">No vault linked</p>
+                <h2>Set up your notes vault</h2>
+                <p className="section-note">A vault is just a folder on your computer. Study Tracker writes plain <code>.md</code> files into it, so every note stays readable in any editor and stays yours.</p>
+              </div>
+
+              <div className="vault-onboard-body">
+                <div className="vault-onboard-preview" aria-hidden="true">
+                  <span className="vault-onboard-root">{(state.settings.vaultName || "StudyTrackerVault")}/</span>
+                  {VAULT_FOLDER_PREVIEW.map((folder) => (
+                    <span key={folder.name} className="vault-onboard-branch">
+                      <em>{folder.name}/</em>
+                      <i>{folder.hint}</i>
+                    </span>
+                  ))}
+                </div>
+
+                <div className="vault-onboard-form">
+                  <label className="field">
+                    <span>Vault name</span>
+                    <input
+                      data-tour="vault-name"
+                      value={state.settings.vaultName}
+                      onChange={(event) => setState((current) => ({ ...current, settings: { ...current.settings, vaultName: event.target.value } }))}
+                      placeholder="StudyTrackerVault"
+                    />
+                  </label>
+                  <div className="vault-onboard-actions">
+                    <button type="button" data-tour="vault-create" onClick={handleCreateVault}>Create new vault</button>
+                    <button type="button" className="ghost-button" data-tour="vault-link" onClick={handleLinkVault}>Link existing folder</button>
+                  </div>
+                  <p className="vault-onboard-foot">Create builds a fresh folder with the structure on the left. Link points Study Tracker at a folder you already keep notes in.</p>
+                </div>
               </div>
             </article>
           ) : null}
 
-          {vaultSetupOpen ? (
+          {state.settings.vaultPath && vaultSetupOpen ? (
             <article className="panel-card vault-settings-panel">
               <div className="section-head">
                 <div>
-                  <p className="eyebrow">Obsidian vault</p>
+                  <p className="eyebrow">Markdown vault</p>
                   <h2>Vault configuration</h2>
                 </div>
               </div>
@@ -988,15 +1029,15 @@ export const VaultScreen = forwardRef<VaultScreenHandle, Props>(function VaultSc
                 </label>
                 <label className="field wide">
                   <span>Current vault path</span>
-                  <input data-tour="vault-path" value={state.settings.vaultPath ?? "Not created yet"} readOnly />
+                  <input data-tour="vault-path" value={state.settings.vaultPath ?? ""} readOnly />
                 </label>
               </div>
               <div className="vault-folder-strip" aria-label="Vault folders">
-                {["Daily", "References", "Summaries"].map((folder) => <span key={folder}>{folder}</span>)}
+                {VAULT_FOLDER_PREVIEW.map((folder) => <span key={folder.name}>{folder.name}</span>)}
               </div>
               <div className="control-row left roomy-top">
                 <button type="button" data-tour="vault-create" onClick={handleCreateVault}>Create new vault</button>
-                <button type="button" className="ghost-button" data-tour="vault-link" onClick={handleLinkVault}>Link existing vault</button>
+                <button type="button" className="ghost-button" data-tour="vault-link" onClick={handleLinkVault}>Link existing folder</button>
               </div>
             </article>
           ) : null}

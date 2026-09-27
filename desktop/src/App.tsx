@@ -15,7 +15,11 @@ import { WabiRestFluidRing } from "./components/WabiRestFluidRing";
 import SkribblRoom from "./components/SkribblRoom";
 import { SakuraScatter } from "./components/SakuraScatter";
 import { WhatsNewModal } from "./components/WhatsNewModal";
-import { consumeReleaseNote } from "./lib/releaseNotes";
+import { WelcomeTourModal } from "./components/WelcomeTourModal";
+import { PageGuideModal } from "./components/PageGuideModal";
+import { PAGE_GUIDES } from "./lib/pageGuides";
+import { consumeStartupAnnouncement } from "./lib/releaseNotes";
+import { markWelcomeTourSeen } from "./lib/welcomeTour";
 import type { VaultScreenHandle } from "./features/vault/VaultScreen";
 import { useTimerProgressRing } from "./hooks/useTimerProgressRing";
 import { useTimerTick } from "./hooks/useTimerTick";
@@ -567,18 +571,6 @@ type TourStep = {
   tab?: TabKey;
 };
 
-type HelpExample = {
-  task: string;
-  unitLabel: string;
-  total: number;
-  done: number;
-  next: number;
-  caption: string;
-  result: string;
-  heading: string;
-  tone: "c1" | "c2" | "c3";
-};
-
 type MenuHelpItem = {
   title: string;
   body: string;
@@ -691,7 +683,7 @@ const pageHelp: Record<TabKey, PageHelp> = {
   },
   vault: {
     title: "Vault",
-    purpose: "Use this page for markdown notes that stay compatible with Obsidian or any normal text editor.",
+    purpose: "Use this page for markdown notes that stay readable in any normal text editor.",
     steps: [
       "Create or link a vault folder.",
       "Use Daily notes for session reflections.",
@@ -699,10 +691,10 @@ const pageHelp: Record<TabKey, PageHelp> = {
     ],
     tour: [
       { target: "vault-setup", title: "Open vault setup", body: "The Vault needs a folder before it can save notes. Setup is where you create or link that folder." },
-      { target: "vault-name", title: "Vault name", body: "This is the display name for your markdown vault. It can match your Obsidian vault name." },
+      { target: "vault-name", title: "Vault name", body: "This is the display name for your markdown vault. It is also the folder name when you create a new one." },
       { target: "vault-path", title: "Vault path", body: "This shows where notes will be written. If no path exists yet, create or link a vault." },
       { target: "vault-create", title: "Create vault", body: "Create new vault makes a fresh folder structure for Daily, References, and Summaries." },
-      { target: "vault-link", title: "Link existing vault", body: "Use this if you already have an Obsidian vault or folder you want Study Tracker to write into." },
+      { target: "vault-link", title: "Link existing vault", body: "Use this if you already have a notes folder you want Study Tracker to write into." },
       { target: "vault-markdown", title: "Markdown cheatsheet", body: "Markdown help shows examples for headings, lists, links, quotes, and code blocks." },
       { target: "vault-spaces", title: "Switch vault spaces", body: "Daily is for study logs, References is for course notes, and Summaries is for PDFs or imported material." },
       { target: "vault-daily-date", title: "Choose daily note date", body: "Daily notes are date-based. Pick the day you want to load, edit, or save." },
@@ -758,39 +750,6 @@ const pageHelp: Record<TabKey, PageHelp> = {
       { target: "break-rock", title: "Pet rock", body: "A tiny playful interaction. It is intentionally low-stakes: click it, smile, then return to focus." },
     ],
   },
-};
-
-const helpExamples: Record<TabKey, HelpExample[]> = {
-  dashboard: [
-    { task: "Pick today's focus", unitLabel: "Step", total: 4, done: 1, next: 2, caption: "Open Dashboard, then inspect the top recommendation", result: "Next: Check urgent tasks", heading: "Fast daily workflow", tone: "c1" },
-    { task: "Read workload pressure", unitLabel: "Signal", total: 5, done: 3, next: 4, caption: "Health, urgent work, and exams tell you where pressure is building", result: "Next: Choose one task", heading: "Focus signals", tone: "c2" },
-    { task: "Review weekly rhythm", unitLabel: "Day", total: 7, done: 4, next: 5, caption: "Use the focus chart to see consistency without overthinking one bad day", result: "Next: Fill the next gap", heading: "Weekly check", tone: "c3" },
-  ],
-  planner: [
-    { task: "Watch lectures", unitLabel: "Lecture", total: 10, done: 3, next: 4, caption: "3 down, the glowing one is up next", result: "Next: Lecture 4 of 10", heading: "Three ways students use units", tone: "c1" },
-    { task: "Exercise sheets", unitLabel: "Sheet", total: 14, done: 6, next: 7, caption: "Halfway through the pile", result: "Next: Sheet 7 of 14", heading: "Three ways students use units", tone: "c2" },
-    { task: "Old exams", unitLabel: "Exam", total: 5, done: 1, next: 2, caption: "One solved, four to go", result: "Next: Exam 2 of 5", heading: "Three ways students use units", tone: "c3" },
-  ],
-  timer: [
-    { task: "Start a focus block", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Choose a preset, link work if useful, then start", result: "Next: Start timer", heading: "Common timer flows", tone: "c1" },
-    { task: "Link a task", unitLabel: "Field", total: 3, done: 1, next: 2, caption: "Semester, course, and task links make the session count in the right place", result: "Next: Pick course", heading: "Common timer flows", tone: "c2" },
-    { task: "Save a session", unitLabel: "Step", total: 5, done: 4, next: 5, caption: "Saving turns your focus block into dashboard stats and vault context", result: "Next: Save session", heading: "Common timer flows", tone: "c3" },
-  ],
-  vault: [
-    { task: "Create your vault", unitLabel: "Step", total: 3, done: 1, next: 2, caption: "Connect a folder once so notes save as normal markdown files", result: "Next: Link folder", heading: "Note-taking examples", tone: "c1" },
-    { task: "Write a daily note", unitLabel: "Part", total: 4, done: 2, next: 3, caption: "Daily notes can collect what you learned, blockers, and next steps", result: "Next: Add reflection", heading: "Note-taking examples", tone: "c2" },
-    { task: "Use markdown", unitLabel: "Format", total: 5, done: 3, next: 4, caption: "Headings, lists, links, and code blocks preview inside the app", result: "Next: Try a link", heading: "Note-taking examples", tone: "c3" },
-  ],
-  friends: [
-    { task: "Share a session", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Finish a timer block, write one sentence, then post it", result: "Next: Add note", heading: "Social examples", tone: "c1" },
-    { task: "Check accountability", unitLabel: "Space", total: 5, done: 1, next: 2, caption: "Feed, leaderboard, friends, squad, and profile each support a different kind of motivation", result: "Next: Open leaderboard", heading: "Social examples", tone: "c2" },
-    { task: "Build your circle", unitLabel: "Step", total: 3, done: 1, next: 2, caption: "Use friend codes and squads when you want focused competition", result: "Next: Add friend", heading: "Social examples", tone: "c3" },
-  ],
-  break: [
-    { task: "Earn a break", unitLabel: "Step", total: 4, done: 2, next: 3, caption: "Study time fills XP so breaks feel intentional, not accidental", result: "Next: Unlock activity", heading: "Break examples", tone: "c1" },
-    { task: "Reset properly", unitLabel: "Cue", total: 5, done: 3, next: 4, caption: "Use water, stretch prompts, and short games as a real reset", result: "Next: Drink water", heading: "Break examples", tone: "c2" },
-    { task: "Return to focus", unitLabel: "Step", total: 3, done: 2, next: 3, caption: "A good break ends by sending you back to the next focus block", result: "Next: Start timer", heading: "Break examples", tone: "c3" },
-  ],
 };
 
 
@@ -3729,43 +3688,6 @@ function GuidedTourOverlay({ help, stepIndex, onBack, onNext, onClose }: { help:
   );
 }
 
-function HelpExampleCards({ examples }: { examples: HelpExample[] }) {
-  const heading = examples[0]?.heading ?? "Examples";
-  return (
-    <div className="planner-unit-examples">
-      <div className="help-example-heading">
-        <span>{heading}</span>
-        <hr />
-      </div>
-      <div className="hp-stack">
-        {examples.map((example) => {
-          const progress = Math.round((example.done / example.total) * 100);
-          return (
-            <article key={example.task} className={`hp-card ${example.tone}`}>
-              <div className="hp-head">
-                <span className="hp-task">{example.task}</span>
-                <span className="hp-unit">{example.unitLabel.toLowerCase()} · <b>{example.next}</b> next · {example.total} total</span>
-              </div>
-              <div className="hp-row" aria-label={`${example.done} completed, ${example.next} next, ${example.total} total`}>
-                {Array.from({ length: example.total }, (_, index) => {
-                  const unit = index + 1;
-                  const stateClass = unit <= example.done ? "done" : unit === example.next ? "next" : "";
-                  return <span key={unit} className={`hp-cell ${stateClass}`}>{unit}</span>;
-                })}
-              </div>
-              <p className="hp-caption">{example.caption} <span aria-hidden="true">-&gt;</span> <b>{example.result}</b></p>
-              <div className="hp-progress" aria-label={`${progress}% complete`}>
-                <span className="hp-pct">{progress}%</span>
-                <div className="hp-track"><div className="hp-fill" style={{ width: `${progress}%` }} /></div>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 const TIMER_ONLY_SECTION: ReadonlySet<PersistSection> = new Set(["timer"]);
 const ALL_PERSIST_SECTIONS: ReadonlySet<PersistSection> = new Set(["timer", "social", "core"]);
 
@@ -3840,6 +3762,9 @@ function App() {
   const [fieldPlannerDeleteTarget, setFieldPlannerDeleteTarget] = useState<FieldPlannerDeleteTarget | null>(null);
   const [fieldPlannerWorkloadId, setFieldPlannerWorkloadId] = useState<string>(TOTAL_WORKLOAD_ID);
   const [helpTab, setHelpTab] = useState<TabKey | null>(null);
+  // The welcome introduction, reopened from the Dashboard question mark. Separate from the
+  // first-run showing (startupAnnounce) so replaying it cannot re-trigger first-run behaviour.
+  const [introReplayOpen, setIntroReplayOpen] = useState(false);
   const [menuHelpOpen, setMenuHelpOpen] = useState(false);
   const [tourState, setTourState] = useState<{ tab: TabKey; step: number } | null>(null);
   const [semesterName, setSemesterName] = useState("");
@@ -3992,7 +3917,7 @@ function App() {
   const seenFeedCommentIdsRef = useRef<Set<string> | null>(null);
   const wordleModalRef = useRef<HTMLDivElement | null>(null);
   const [currentAppVersion, setCurrentAppVersion] = useState("loading...");
-  const [whatsNew, setWhatsNew] = useState<ReturnType<typeof consumeReleaseNote>>(null);
+  const [startupAnnounce, setStartupAnnounce] = useState<ReturnType<typeof consumeStartupAnnouncement>>(null);
   const [updateInstallSupport, setUpdateInstallSupport] = useState<UpdateInstallSupport>(DEFAULT_UPDATE_INSTALL_SUPPORT);
   const [linuxUpdateDownload, setLinuxUpdateDownload] = useState<LinuxUpdateDownload | null>(null);
   const [linuxPackageDownloading, setLinuxPackageDownloading] = useState(false);
@@ -4228,7 +4153,7 @@ function App() {
     void getVersion()
       .then((version) => {
         setCurrentAppVersion(version);
-        setWhatsNew(consumeReleaseNote(version));
+        setStartupAnnounce(consumeStartupAnnouncement(version));
       })
       .catch((error: unknown) => {
         console.warn("Could not read app version.", error);
@@ -5644,14 +5569,23 @@ function App() {
   }
 
   function openPageHelp(tab: TabKey) {
-    setHelpTab(tab);
     setMenuHelpOpen(false);
     setTourState(null);
+    // The Dashboard has no guide of its own: its question mark brings back the introduction, which
+    // is the overview of every tab and the only place that still explains the menu.
+    if (tab === "dashboard") {
+      setHelpTab(null);
+      setIntroReplayOpen(true);
+      return;
+    }
+    setIntroReplayOpen(false);
+    setHelpTab(tab);
   }
 
   function openMenuHelp() {
     setMenuHelpOpen(true);
     setHelpTab(null);
+    setIntroReplayOpen(false);
     setTourState(null);
   }
 
@@ -11223,7 +11157,7 @@ function App() {
                   data-tour="timer-learned"
                   value={state.timer.learned}
                   onChange={(event) => setState((current) => ({ ...current, timer: { ...current.timer, learned: event.target.value } }))}
-                  placeholder="Short reflection that can go straight into Obsidian later."
+                  placeholder="Short reflection that can go straight into your vault later."
                 />
               </label>
               <label className="field">
@@ -12913,12 +12847,22 @@ function App() {
   // Keep macOS traffic lights native; Linux and Windows use the compact app bar.
   // Hidden while the timer's real fullscreen overlay is active — there's no window chrome to control then.
   const showWindowTitlebar = isTauriApp() && !/Macintosh|Mac OS X/.test(navigator.userAgent) && !fullscreen;
-  const openHelp = helpTab ? pageHelp[helpTab] : null;
+  // On the Dashboard the question mark reopens the introduction, so it should not promise a guide.
+  const pageHelpButtonLabel = state.activeTab === "dashboard"
+    ? "Open the introduction"
+    : `${pageHelp[state.activeTab].title} guide`;
+  // Dashboard is excluded from PAGE_GUIDES - openPageHelp sends it to the introduction instead.
+  const openHelp = helpTab && helpTab !== "dashboard" ? PAGE_GUIDES[helpTab] : null;
   const activeTourHelp = tourState ? pageHelp[tourState.tab] : null;
 
   return (
     <>
-      {whatsNew ? <WhatsNewModal version={whatsNew.version} note={whatsNew.note} onClose={() => setWhatsNew(null)} /> : null}
+      {startupAnnounce?.kind === "welcome" ? (
+        <WelcomeTourModal onClose={() => { markWelcomeTourSeen(); setStartupAnnounce(null); }} />
+      ) : null}
+      {startupAnnounce?.kind === "notes" ? (
+        <WhatsNewModal releases={startupAnnounce.releases} onClose={() => setStartupAnnounce(null)} />
+      ) : null}
       <input ref={restoreBackupInputRef} type="file" accept="application/json,.json" hidden onChange={(event) => void handleRestoreBackupFile(event)} />
       {showWindowTitlebar ? (
         <div className="window-titlebar" onMouseDown={() => void startWindowDrag()}>
@@ -13120,7 +13064,7 @@ function App() {
           ))}
         </div>
         {state.settings.showHelpButton !== false ? (
-          <button type="button" className="page-help-button tab-help-button" onClick={() => openPageHelp(state.activeTab)} aria-label={`Open ${pageHelp[state.activeTab].title} help`} title={`${pageHelp[state.activeTab].title} help`}>
+          <button type="button" className="page-help-button tab-help-button" onClick={() => openPageHelp(state.activeTab)} aria-label={pageHelpButtonLabel} title={pageHelpButtonLabel}>
             ?
           </button>
         ) : null}
@@ -13195,31 +13139,15 @@ function App() {
         )
       ) : null}
 
-      {openHelp ? (
-        <div className="help-modal-backdrop" onMouseDown={() => setHelpTab(null)}>
-          <section className="help-modal" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${openHelp.title} help`}>
-            <div className="help-modal-head">
-              <div>
-                <p className="eyebrow">Page guide</p>
-                <h2>{openHelp.title}</h2>
-              </div>
-              <button type="button" className="ghost-button small-button" onClick={() => setHelpTab(null)} aria-label="Close page guide">X</button>
-            </div>
-            <p className="help-purpose">{openHelp.purpose}</p>
-            <div className="help-section">
-              <h3>Start here</h3>
-              <ol>
-                {openHelp.steps.map((step) => <li key={step}>{step}</li>)}
-              </ol>
-            </div>
-            {helpTab === "planner" ? <HelpExampleCards examples={helpExamples.planner} /> : null}
-            <div className="help-modal-actions">
-              <button type="button" className="ghost-button" onClick={() => setHelpTab(null)}>Close</button>
-              <button type="button" className="help-tutorial-button" onClick={() => startPageTour(helpTab!)}>Start tutorial <span aria-hidden="true">-&gt;</span></button>
-            </div>
-          </section>
-        </div>
+      {openHelp && helpTab ? (
+        <PageGuideModal
+          guide={openHelp}
+          onClose={() => setHelpTab(null)}
+          onStartTutorial={() => startPageTour(helpTab)}
+        />
       ) : null}
+
+      {introReplayOpen ? <WelcomeTourModal onClose={() => setIntroReplayOpen(false)} /> : null}
 
       {socialNamePromptOpen ? (
         <div className="help-modal-backdrop" onMouseDown={() => setSocialNamePromptOpen(false)}>

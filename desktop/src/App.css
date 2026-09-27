@@ -4931,6 +4931,111 @@
   gap: 16px;
 }
 
+.vault-onboard-card {
+  width: min(760px, 100%);
+  margin: 34px auto;
+  display: grid;
+  gap: 22px;
+}
+
+.vault-onboard-head {
+  display: grid;
+  gap: 6px;
+  max-width: 62ch;
+}
+
+.vault-onboard-head h2 {
+  margin: 0;
+}
+
+.vault-onboard-head code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+}
+
+.vault-onboard-body {
+  display: grid;
+  grid-template-columns: minmax(200px, 0.85fr) minmax(240px, 1fr);
+  gap: 26px;
+  align-items: start;
+}
+
+.vault-onboard-preview {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.vault-onboard-root {
+  color: var(--text);
+}
+
+.vault-onboard-branch {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-left: 14px;
+  position: relative;
+}
+
+.vault-onboard-branch::before {
+  content: "└";
+  position: absolute;
+  left: 0;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.vault-onboard-branch em {
+  font-style: normal;
+  color: var(--text);
+}
+
+.vault-onboard-branch i {
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
+.vault-onboard-form {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.vault-onboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.vault-onboard-foot {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .vault-onboard-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.fn-vault-rail-hint {
+  margin: 0;
+  padding: 0 18px;
+  color: var(--ink-4);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
 .vault-folder-strip {
   display: flex;
   flex-wrap: wrap;
@@ -14345,6 +14450,7 @@ input[type="color"] {
 :root[data-app-style="field-notebook"] .session-log-card,
 :root[data-app-style="field-notebook"] .vault-document,
 :root[data-app-style="field-notebook"] .vault-empty-card,
+:root[data-app-style="field-notebook"] .vault-onboard-card,
 :root[data-app-style="field-notebook"] .vault-settings-panel,
 :root[data-app-style="field-notebook"] .summary-file-list,
 :root[data-app-style="field-notebook"] .summary-viewer-card,
@@ -16762,11 +16868,33 @@ input[type="color"] {
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-space-panel,
 :root[data-app-style="field-notebook"] .fn-vault .vault-settings-panel,
+:root[data-app-style="field-notebook"] .fn-vault .vault-onboard-card,
 :root[data-app-style="field-notebook"] .fn-vault .vault-empty-card {
   margin: 0;
   border: 0 !important;
   border-radius: 0 !important;
   padding: 20px 34px 40px;
+}
+
+:root[data-app-style="field-notebook"] .fn-vault .vault-onboard-card {
+  width: 100%;
+  max-width: 720px;
+  padding-top: 30px;
+}
+
+:root[data-app-style="field-notebook"] .vault-onboard-head h2 {
+  font-family: var(--font-serif);
+  font-weight: 500;
+}
+
+:root[data-app-style="field-notebook"] .vault-onboard-preview {
+  border: var(--fn-edge);
+  border-radius: 0;
+  background: var(--surface-2);
+}
+
+:root[data-app-style="field-notebook"] .vault-onboard-branch::before {
+  content: "·";
 }
 
 :root[data-app-style="field-notebook"] .fn-vault .vault-document-wrap,
@@ -19256,6 +19384,37 @@ input[type="color"] {
 
 :root[data-app-style="wabi-sabi"] .wabi-vault .vault-hero {
   display: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-vault .vault-onboard-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 48px 0 0;
+  margin: 0 auto;
+  gap: 28px;
+}
+
+:root[data-app-style="wabi-sabi"] .vault-onboard-preview {
+  border: 0;
+  border-left: var(--wabi-rule-hard);
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 0 2px 18px;
+}
+
+:root[data-app-style="wabi-sabi"] .vault-onboard-branch::before {
+  content: "";
+}
+
+:root[data-app-style="wabi-sabi"] .vault-onboard-branch {
+  padding-left: 0;
+}
+
+:root[data-app-style="wabi-sabi"] .vault-onboard-branch i,
+:root[data-app-style="wabi-sabi"] .vault-onboard-foot {
+  color: var(--wabi-faint);
 }
 
 :root[data-app-style="wabi-sabi"] .wabi-vault .vault-nav {
@@ -24908,7 +25067,9 @@ input[type="color"] {
 .whatsnew-backdrop { position: fixed; inset: 0; z-index: 10000; display: grid; place-items: center; padding: 16px; background: oklch(0.1 0.02 250 / 0.55); backdrop-filter: blur(4px); animation: whatsnew-fade 0.2s ease-out; }
 .whatsnew-card { width: min(520px, 100%); max-height: 85vh; overflow: auto; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--accent-line); border-radius: 18px; box-shadow: 0 24px 60px oklch(0 0 0 / 0.4); animation: whatsnew-pop 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2); }
 .whatsnew-hero { padding: 28px 28px 20px; background: linear-gradient(135deg, var(--accent-soft), transparent 70%); border-bottom: 1px solid var(--accent-line); }
-.whatsnew-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: var(--surface-inset); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+/* --on-accent, not a fixed light/dark value: an accent can be pale cream in one theme and deep blue
+   in another, and only the theme knows which text colour survives on top of it. */
+.whatsnew-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; background: var(--accent); color: var(--on-accent); font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
 .whatsnew-hero h2 { margin: 12px 0 4px; font-size: 28px; line-height: 1.15; }
 .whatsnew-hero p { margin: 0; color: var(--ink-3); }
 .whatsnew-list { list-style: none; margin: 0; padding: 16px 28px; display: grid; gap: 14px; }
@@ -24916,8 +25077,62 @@ input[type="color"] {
 .whatsnew-list li > div { display: grid; gap: 2px; }
 .whatsnew-list li span:last-child { color: var(--ink-2); font-size: 14px; }
 .whatsnew-icon { flex: none; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft); font-size: 18px; }
-.whatsnew-cta { display: block; margin: 4px 28px 24px auto; padding: 10px 24px; border: 0; border-radius: 10px; background: var(--accent-strong); color: #fff; font-weight: 700; cursor: pointer; }
-.whatsnew-cta:hover { background: var(--accent); }
+/* --accent paired with --on-accent, as .calendar-primary-button does: --on-accent is the colour each
+   theme guarantees is readable on --accent. A fixed #fff here was invisible in Field Notebook dark,
+   whose accent is a near-white cream. */
+.whatsnew-cta { display: block; margin: 4px 28px 24px auto; padding: 10px 24px; border: 0; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-weight: 700; cursor: pointer; }
+.whatsnew-cta:hover { background: var(--accent-strong); }
 @keyframes whatsnew-fade { from { opacity: 0; } }
 @keyframes whatsnew-pop { from { opacity: 0; transform: translateY(16px) scale(0.96); } }
 @media (prefers-reduced-motion: reduce) { .whatsnew-backdrop, .whatsnew-card { animation: none; } }
+.whatsnew-release + .whatsnew-release { border-top: 1px solid var(--accent-line); }
+.whatsnew-release-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 0; padding: 18px 28px 0; font-size: 16px; }
+.whatsnew-release-version { flex: none; color: var(--ink-4); font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+
+/* Welcome tour - reuses the what's-new card, adds stepping */
+.tour-card { display: flex; flex-direction: column; }
+.tour-overview { padding-bottom: 8px; }
+.tour-overview li span:last-child { color: var(--ink-3); }
+.tour-stop { padding: 30px 28px 22px; text-align: center; }
+.tour-stop-icon { margin: 0 auto 14px; width: 62px; height: 62px; display: grid; place-items: center; border-radius: 18px; background: var(--accent-soft); font-size: 30px; }
+.tour-stop .whatsnew-badge { margin-bottom: 10px; }
+.tour-stop h2 { margin: 0 0 6px; font-size: 26px; }
+.tour-stop-tagline { margin: 0 0 12px; color: var(--accent); font-weight: 600; }
+.tour-stop-body { margin: 0 auto; max-width: 42ch; color: var(--ink-2); line-height: 1.55; text-align: left; }
+.tour-footer { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 28px 22px; border-top: 1px solid var(--accent-line); }
+.tour-dots { display: flex; gap: 6px; }
+.tour-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-line); transition: background 0.2s, transform 0.2s; }
+.tour-dots span.active { background: var(--accent); transform: scale(1.35); }
+.tour-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.tour-next { margin: 0; }
+@media (max-width: 420px) {
+  .tour-footer { justify-content: center; }
+  .tour-actions { margin-left: 0; }
+}
+
+/* Page guide - the question-mark popup, built on the same card as the welcome tour */
+.guide-card { max-height: 88vh; }
+.guide-hero { display: flex; align-items: flex-start; gap: 16px; }
+.guide-hero-icon { flex: none; width: 54px; height: 54px; display: grid; place-items: center; border-radius: 16px; background: var(--accent-soft); font-size: 26px; }
+.guide-hero h2 { margin: 8px 0 2px; font-size: 26px; }
+.guide-tagline { margin: 0; color: var(--accent); font-weight: 600; }
+.guide-intro { margin: 0; padding: 18px 28px 0; color: var(--ink-2); line-height: 1.55; }
+.guide-steps-heading { margin: 18px 0 0; padding: 0 28px; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4); }
+.guide-steps { margin: 10px 0 0; padding: 0 28px; list-style: none; counter-reset: guide-step; display: grid; gap: 12px; }
+.guide-steps li { counter-increment: guide-step; display: flex; gap: 14px; align-items: flex-start; }
+.guide-steps li::before {
+  content: counter(guide-step);
+  flex: none; width: 26px; height: 26px; margin-top: 1px;
+  display: grid; place-items: center;
+  border-radius: 50%; background: var(--accent-soft); color: var(--accent);
+  font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.guide-steps li > div { display: grid; gap: 2px; }
+.guide-steps li span { color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.guide-tips { margin: 18px 0 0; padding: 14px 28px; list-style: none; display: grid; gap: 8px; background: var(--surface-inset); border-block: 1px solid var(--accent-line); }
+.guide-tips li { display: flex; gap: 10px; align-items: flex-start; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.guide-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; padding: 18px 28px 22px; }
+.guide-done { margin: 0; }
+@media (max-width: 420px) {
+  .guide-hero { flex-direction: column; gap: 10px; }
+}
