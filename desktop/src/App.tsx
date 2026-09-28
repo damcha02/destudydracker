@@ -79,11 +79,14 @@ import type { ModernGardenVariant } from "./features/garden/ModernGarden";
 import { TimeField } from "./features/planner/TimeField";
 import { displayTime } from "./lib/timeInput";
 import { formatSwissGrade, swissGrades } from "./lib/grades";
+import { collectPinwallItems } from "./lib/pinwall";
+import type { PinwallRef } from "./lib/pinwall";
 import { buildDailyTimeline, computeOverlapLayout, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
 import { WabiManageSemestersModal } from "./features/planner/WabiManageSemestersModal";
 import { TaskScheduleEditor } from "./features/planner/TaskScheduleEditor";
+import { PinwallModal } from "./features/planner/PinwallModal";
 import { RowMenu } from "./components/RowMenu";
 // AchievementBoard (the spray-paint wall) and InkGallery's other variants are still in the repo but
 // no longer mounted - the achievements room shows the album only.
@@ -3838,6 +3841,7 @@ function App() {
   const [timetableModalState, setTimetableModalState] = useState<TimetableModalState>(null);
   const [timetableEditMode, setTimetableEditMode] = useState(false);
   const [manageSemestersOpen, setManageSemestersOpen] = useState(false);
+  const [pinwallOpen, setPinwallOpen] = useState(false);
   const [manageSemestersInitialCourseId, setManageSemestersInitialCourseId] = useState<string | null>(null);
   const [manageSemestersInitialSemesterId, setManageSemestersInitialSemesterId] = useState<string | null>(null);
   const [manageSemestersMode, setManageSemestersMode] = useState<"full" | "semesters" | "courses">("full");
@@ -4797,6 +4801,13 @@ function App() {
     return calculateScheduledWorkload(activeTasks, scheduledUnits, calendarToday);
   }, [activeTasks, scheduledUnits, calendarToday]);
   const isTotalWorkloadSelected = selectedTaskId === TOTAL_WORKLOAD_ID;
+  // Count on the planner's pinwall trigger: this week's unchecked items. calendarToday is a
+  // dependency only so the count rolls over at midnight along with the rest of the planner.
+  const pinwallWeekCount = useMemo(
+    () => (state.activeTab === "planner" ? collectPinwallItems(state, "week", new Date()).length : 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.activeTab, state.semesters, state.tasks, state.timetableEvents, state.holidays, state.calendarEntries, state.dailyTodos, calendarToday],
+  );
   const fieldPlannerWorkload = useMemo(() => {
     if (fieldPlannerWorkloadId === TOTAL_WORKLOAD_ID) return { ...totalWorkload, label: "Total workload" };
 
@@ -9295,17 +9306,27 @@ function App() {
       toggleDailyTodoOccurrence(row.refId, row.occurrenceDate);
       return;
     }
+    toggleTimetableOccurrence(row.refId, row.occurrenceDate);
+  }
+
+  function completePinwallItem(ref: PinwallRef) {
+    if (ref.kind === "todo") toggleDailyTodoOccurrence(ref.id, ref.occurrenceDate);
+    else if (ref.kind === "event") toggleTimetableOccurrence(ref.id, ref.occurrenceDate);
+    else toggleCalendarEntry(ref.id);
+  }
+
+  function toggleTimetableOccurrence(eventId: string, occurrenceDate: string) {
     setState((current) => {
-      const event = current.timetableEvents.find((item) => item.id === row.refId);
+      const event = current.timetableEvents.find((item) => item.id === eventId);
       if (!event) return current;
-      const wasCompleted = event.completedOccurrences.includes(row.occurrenceDate);
+      const wasCompleted = event.completedOccurrences.includes(occurrenceDate);
       const timetableEvents = current.timetableEvents.map((item) =>
-        item.id === row.refId
+        item.id === eventId
           ? {
               ...item,
               completedOccurrences: wasCompleted
-                ? item.completedOccurrences.filter((date) => date !== row.occurrenceDate)
-                : [...item.completedOccurrences, row.occurrenceDate],
+                ? item.completedOccurrences.filter((date) => date !== occurrenceDate)
+                : [...item.completedOccurrences, occurrenceDate],
             }
           : item,
       );
@@ -13105,6 +13126,15 @@ function App() {
       {appStyle === "wabi-sabi" ? renderSessionLogsModal() : null}
       {appStyle === "wabi-sabi" ? renderWabiPickerModal() : renderDashboardPickerModal()}
 
+      {pinwallOpen ? (
+        <PinwallModal
+          state={state}
+          variant={appStyle === "field-notebook" ? "notebook" : appStyle === "wabi-sabi" ? "wabi" : "modern"}
+          onComplete={completePinwallItem}
+          onClose={() => setPinwallOpen(false)}
+        />
+      ) : null}
+
       {manageSemestersOpen ? (
         appStyle === "wabi-sabi" ? (
           <WabiManageSemestersModal
@@ -13502,6 +13532,20 @@ function App() {
             <aside className="fn-planner-rail" aria-label="Planner folders">
               <div className="fn-rail-section">
                 <button type="button" className="ghost-button fn-manage-semesters-button" onClick={() => setManageSemestersOpen(true)}>Manage Semesters</button>
+                <button
+                  type="button"
+                  className="fn-pinwall-trigger"
+                  onClick={() => setPinwallOpen(true)}
+                  title="Review unchecked lectures, sheets and to-dos from the past"
+                  aria-label={`Pinwall of the past${pinwallWeekCount ? `, ${pinwallWeekCount} unchecked this week` : ""}`}
+                >
+                  <span className="fn-pinwall-trigger-pin" aria-hidden="true" />
+                  <span className="fn-pinwall-trigger-text">
+                    <strong>Pinwall</strong>
+                    <span>Left unchecked</span>
+                  </span>
+                  <em className={pinwallWeekCount ? "" : "is-clear"}>{pinwallWeekCount || "✓"}</em>
+                </button>
                 <div className="fn-rail-label">Semesters</div>
                 {activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
@@ -13596,7 +13640,13 @@ function App() {
               <div>
                 <p className="eyebrow">{appStyle === "wabi-sabi" ? "Plan" : "Planner"}</p>
                 <h2>{appStyle === "wabi-sabi" ? `${openTaskCount} thing${openTaskCount === 1 ? "" : "s"} growing` : "Semesters, courses, and tasks"}</h2>
-                {appStyle === "wabi-sabi" ? null : <p className="section-note">Click a semester or course to expand it. Click it again to collapse.</p>}
+                {appStyle === "wabi-sabi" ? (
+                  <button type="button" className="wabi-pinwall-trigger" onClick={() => setPinwallOpen(true)} title="Review unchecked lectures, sheets and to-dos from the past">
+                    <span className="wabi-pinwall-trigger-kanji" aria-hidden="true">残</span>
+                    <span>{pinwallWeekCount ? `${pinwallWeekCount} left behind this week` : "Nothing left behind this week"}</span>
+                    <span aria-hidden="true">→</span>
+                  </button>
+                ) : <p className="section-note">Click a semester or course to expand it. Click it again to collapse.</p>}
               </div>
               {appStyle === "wabi-sabi" ? (
                 <span className="wabi-plan-current-semester">
@@ -13605,6 +13655,22 @@ function App() {
               ) : null}
               {appStyle === "wabi-sabi" ? null : (
               <div className="page-head-actions">
+                {appStyle === "modern" ? (
+                  <button
+                    type="button"
+                    className="ghost-button modern-pinwall-trigger"
+                    onClick={() => setPinwallOpen(true)}
+                    title="Review unchecked lectures, sheets and to-dos from the past"
+                    aria-label={`Pinwall${pinwallWeekCount ? `, ${pinwallWeekCount} unchecked this week` : ""}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M9 3h6l-1 6 3 3v2H7v-2l3-3-1-6Z" />
+                      <path d="M12 14v7" />
+                    </svg>
+                    Pinwall
+                    {pinwallWeekCount ? <span className="modern-pinwall-count">{pinwallWeekCount}</span> : null}
+                  </button>
+                ) : null}
                 <button type="button" className="ghost-button" onClick={() => { setManageSemestersMode("full"); setManageSemestersOpen(true); }}>Manage Semesters</button>
                 <button type="button" className="ghost-button" data-tour="planner-add-semester" onClick={() => setShowSemesterForm((current) => !current)}>
                   {showSemesterForm ? "Close" : "+ Add semester"}
