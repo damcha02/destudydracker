@@ -25981,3 +25981,296 @@ input[type="color"] {
 @media (max-width: 420px) {
   .guide-hero { flex-direction: column; gap: 10px; }
 }
+
+/* Wabi exam prep planning (Manage semesters) */
+.wabi-msm-scope .manage-semesters-exams {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.wabi-msm-scope .manage-semesters-exam-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.wabi-msm-scope .manage-semesters-prep {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  border: 1px dashed color-mix(in oklch, var(--wabi-vermilion) 45%, transparent);
+}
+
+.wabi-msm-scope .manage-semesters-prep-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+}
+
+.wabi-msm-scope .manage-semesters-prep-pick.done {
+  opacity: 0.55;
+}
+
+.wabi-msm-scope .course-exam-pill {
+  margin-left: 8px;
+}
+
+/* Wabi exams, exam prep and the deadline runway */
+.wabi-exam-chip.active,
+.wabi-exam-kinds .active {
+  background: color-mix(in oklch, var(--wabi-vermilion) 12%, transparent);
+  border-color: var(--wabi-vermilion);
+  color: var(--wabi-vermilion);
+}
+
+.wabi-exam-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wabi-exam-kinds button {
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Exams and deadlines: the one loud thing in the wabi calendar. */
+:root[data-app-style="wabi-sabi"] {
+  --wabi-exam-red: color-mix(in oklch, var(--wabi-vermilion) 62%, #ff2a1a);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 3px 4px 3px 7px;
+  border: 0;
+  border-left: 3px solid var(--wabi-exam-red);
+  border-radius: 0;
+  background: color-mix(in oklch, var(--wabi-exam-red) 20%, transparent);
+  color: var(--wabi-ink);
+  font: 500 11px/1.3 var(--font-sans);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.project {
+  background: var(--wabi-exam-red);
+  color: var(--wabi-paper);
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill .wabi-exam-pill-kind {
+  font: 700 9.5px/1.25 var(--font-sans);
+  letter-spacing: 0.08em;
+  color: var(--wabi-exam-red);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.project .wabi-exam-pill-kind {
+  color: inherit;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill .wabi-exam-pill-title {
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.focused {
+  outline: 2px solid var(--wabi-exam-red);
+  outline-offset: 2px;
+}
+
+.wabi-runway-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  border-radius: var(--r-md);
+  border: 1px solid color-mix(in oklch, var(--wabi-vermilion) 40%, transparent);
+  background: color-mix(in oklch, var(--wabi-vermilion) 7%, transparent);
+  animation: wabi-runway-in 280ms ease-out;
+}
+
+@keyframes wabi-runway-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+.wabi-runway-count {
+  display: grid;
+  justify-items: center;
+  min-width: 64px;
+  line-height: 1;
+  color: var(--wabi-vermilion);
+}
+
+.wabi-runway-count strong {
+  font-size: 2.6rem;
+  font-weight: 500;
+  font-family: var(--font-display, inherit);
+}
+
+.wabi-runway-count span {
+  margin-top: 4px;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.wabi-runway-body {
+  flex: 1;
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wabi-runway-title em {
+  margin-left: 8px;
+  font-style: normal;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.wabi-runway-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wabi-runway-dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--wabi-vermilion);
+  opacity: 0.75;
+}
+
+.wabi-runway-dots i.rest {
+  opacity: 0.22;
+}
+
+.wabi-runway-dots i.due {
+  opacity: 1;
+  border-radius: 2px;
+  transform: rotate(45deg);
+}
+
+.calendar-day-card.runway-day {
+  background: color-mix(in oklch, var(--wabi-vermilion) calc(5% + var(--runway-t, 0) * 14%), transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--wabi-vermilion) 22%, transparent);
+  transition: background 240ms ease;
+}
+
+.calendar-day-card.runway-end {
+  box-shadow: inset 0 0 0 2px var(--wabi-vermilion);
+}
+
+.calendar-day-card.runway-day .calendar-day-top {
+  display: flex;
+  justify-content: space-between;
+}
+
+.calendar-day-card.runway-day .calendar-day-top .runway-count {
+  font-size: 0.72rem;
+  color: var(--wabi-vermilion);
+  letter-spacing: 0.04em;
+}
+
+.wabi-plan-stage {
+  display: block;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--wabi-vermilion);
+}
+
+.wabi-plan-course.quiet {
+  opacity: 0.38;
+}
+
+.wabi-plan-course.quiet:hover {
+  opacity: 0.8;
+}
+
+.wabi-plan-course-days {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--wabi-vermilion);
+}
+
+.wabi-task-modal .wabi-exam-form .wabi-exam-kinds {
+  margin-top: 4px;
+}
+
+.wabi-msm-scope .manage-semesters-exam-item .manage-semesters-unit-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 0;
+}
+
+.wabi-msm-scope .manage-semesters-exam-date {
+  flex-basis: 100%;
+}
+
+.wabi-msm-scope .exam-kind-pill {
+  color: var(--wabi-vermilion);
+  border-color: color-mix(in oklch, var(--wabi-vermilion) 45%, transparent);
+}
+
+.wabi-day-exams {
+  display: grid;
+  gap: 6px;
+  padding: 0 0 12px;
+}
+
+.wabi-day-exam {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 4px solid var(--wabi-exam-red);
+  border-radius: 0;
+  background: color-mix(in oklch, var(--wabi-exam-red) 18%, transparent);
+  color: var(--wabi-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wabi-day-exam strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  color: var(--wabi-exam-red);
+}
+
+.wabi-day-exam span em {
+  margin-left: 8px;
+  font-style: normal;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+
+.wabi-day-exam small {
+  font-size: 0.78rem;
+  opacity: 0.8;
+}
