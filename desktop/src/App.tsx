@@ -81,7 +81,7 @@ import { displayTime } from "./lib/timeInput";
 import { formatSwissGrade, swissGrades } from "./lib/grades";
 import { collectPinwallItems } from "./lib/pinwall";
 import type { PinwallRef } from "./lib/pinwall";
-import { EXAM_KINDS, examCalendarLabel, examKindLabel, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep } from "./lib/examPhase";
+import { EXAM_KINDS, buildExamMarksByDate, examKindLabel, examMarkLabel, type ExamMark, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep } from "./lib/examPhase";
 import { buildDailyTimeline, computeOverlapLayout, type ExpandOptions, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
@@ -3768,6 +3768,9 @@ function App() {
   const [wabiExamKindDraft, setWabiExamKindDraft] = useState<ExamKind | null>(null);
   const [wabiPrepUnits, setWabiPrepUnits] = useState("6");
   const [wabiRunwayExamId, setWabiRunwayExamId] = useState<string | null>(null);
+  const [wabiExamTip, setWabiExamTip] = useState<{ exam: ExamMark; x: number; top: number; bottom: number } | null>(null);
+  const [wabiExamNote, setWabiExamNote] = useState("");
+  const [wabiExamRelease, setWabiExamRelease] = useState("");
   const [fieldPlannerDeleteTarget, setFieldPlannerDeleteTarget] = useState<FieldPlannerDeleteTarget | null>(null);
   const [fieldPlannerWorkloadId, setFieldPlannerWorkloadId] = useState<string>(TOTAL_WORKLOAD_ID);
   const [helpTab, setHelpTab] = useState<TabKey | null>(null);
@@ -3853,7 +3856,7 @@ function App() {
   const [manageSemestersMode, setManageSemestersMode] = useState<"full" | "semesters" | "courses">("full");
   const [taskScheduleOpen, setTaskScheduleOpen] = useState(false);
   // Wabi-Sabi calendar: the small "mark done" window for a scheduled timetable item.
-  const [calendarItemPopup, setCalendarItemPopup] = useState<{ eventId: string; date: string } | null>(null);
+  const [calendarItemPopup, setCalendarItemPopup] = useState<{ eventId: string; date: string; todo?: boolean } | null>(null);
   function closeManageSemesters() {
     setManageSemestersOpen(false);
     setManageSemestersInitialCourseId(null);
@@ -5246,15 +5249,6 @@ function App() {
     map.forEach((entries) => entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
     return map;
   }, [state.calendarEntries]);
-  const examsByDate = useMemo(() => {
-    const map = new Map<string, Exam[]>();
-    state.exams.forEach((exam) => {
-      const exams = map.get(exam.examDate) ?? [];
-      exams.push(exam);
-      map.set(exam.examDate, exams);
-    });
-    return map;
-  }, [state.exams]);
   const deadlinesByDate = useMemo(() => {
     const map = new Map<string, Task[]>();
     state.tasks.forEach((task) => {
@@ -5280,6 +5274,7 @@ function App() {
     return map;
   }, [calendarDays, state.dailyTodos]);
   // Wabi-sabi: clicking an exam/deadline pill lights up the days left until it.
+  const wabiExamMarksByDate = useMemo(() => buildExamMarksByDate(state.exams), [state.exams]);
   const wabiRunwayExam = appStyle === "wabi-sabi" && wabiRunwayExamId ? state.exams.find((exam) => exam.id === wabiRunwayExamId) ?? null : null;
   const wabiRunway = useMemo(() => (wabiRunwayExam ? getRunway(calendarToday, wabiRunwayExam.examDate) : null), [wabiRunwayExam, calendarToday]);
   // Wabi-sabi only: exam-prep tasks are scheduled after the semester ended, so their events may run
@@ -7947,6 +7942,8 @@ function App() {
     setTaskSubtypeChosen(false);
     setWabiExamKindDraft(null);
     setWabiPrepUnits("6");
+    setWabiExamNote("");
+    setWabiExamRelease("");
   }
 
   /** Wabi-sabi: true while the semester is past its end date and before its last exam (the exam prep stage). */
@@ -7972,6 +7969,8 @@ function App() {
       preparedness: 35,
       location: "",
       kind: wabiExamKindDraft,
+      ...(wabiExamNote.trim() ? { note: wabiExamNote.trim() } : {}),
+      ...(wabiExamKindDraft === "project" && isValidIsoDate(wabiExamRelease) && wabiExamRelease < taskDraft.dueDate ? { releaseDate: wabiExamRelease } : {}),
     };
     setState((current) => ({ ...current, exams: [exam, ...current.exams] }));
     setFieldPlannerTaskMode(null);
@@ -9650,6 +9649,35 @@ function App() {
 
   function renderCalendarItemPopup() {
     if (!calendarItemPopup) return null;
+    if (calendarItemPopup.todo) {
+      const todo = state.dailyTodos.find((item) => item.id === calendarItemPopup.eventId);
+      if (!todo) return null;
+      const todoDone = todo.repeatWeekly ? todo.completedOccurrences.includes(calendarItemPopup.date) : todo.completed;
+      const closeTodo = () => setCalendarItemPopup(null);
+      return createPortal(
+        <div className="calendar-item-popup-backdrop" onMouseDown={closeTodo}>
+          <section className="calendar-item-popup" role="dialog" aria-modal="true" aria-label={todo.title} onMouseDown={(mouseEvent) => mouseEvent.stopPropagation()}>
+            <p className="calendar-item-popup-eyebrow">To-do{todo.repeatWeekly ? " · weekly" : ""}</p>
+            <h3>{todo.title}</h3>
+            <p className="calendar-item-popup-when">
+              {formatDate(calendarItemPopup.date)}{todo.time ? ` · ${displayTime(todo.time)}${todo.endTime ? `–${displayTime(todo.endTime)}` : ""}` : " · any time"}
+            </p>
+            <button
+              type="button"
+              className={`calendar-item-popup-done ${todoDone ? "is-done" : ""}`}
+              aria-pressed={todoDone}
+              onClick={() => toggleDailyTodoOccurrence(todo.id, calendarItemPopup.date)}
+            >
+              {todoDone ? "\u2713 Completed \u00b7 undo" : "Mark as completed"}
+            </button>
+            <div className="calendar-item-popup-actions">
+              <button type="button" className="ghost-button small-button" onClick={closeTodo}>Close</button>
+            </div>
+          </section>
+        </div>,
+        document.body,
+      );
+    }
     const event = state.timetableEvents.find((item) => item.id === calendarItemPopup.eventId);
     if (!event) return null;
     const course = courseLookup.get(event.courseId);
@@ -9692,14 +9720,14 @@ function App() {
     if (!selectedCalendarDate || !selectedDate) return null;
 
     const selectedEntries = selectedCalendarDate ? (calendarEntriesByDate.get(selectedCalendarDate) ?? []) : [];
-    const selectedExams = selectedCalendarDate ? (examsByDate.get(selectedCalendarDate) ?? []) : [];
+    const selectedExams: ExamMark[] = selectedCalendarDate ? (wabiExamMarksByDate.get(selectedCalendarDate) ?? []) : [];
     const selectedDeadlines = selectedCalendarDate ? (deadlinesByDate.get(selectedCalendarDate) ?? []) : [];
     const timedEntries = selectedEntries
       .filter((entry) => entry.startTime)
       .sort((a, b) => (a.startTime ?? "").localeCompare(b.startTime ?? ""));
     const unscheduledEntries = selectedEntries.filter((entry) => !entry.startTime);
     // Wabi-sabi: exams and deadlines have no time of day, so they sit in a red strip above the timeline.
-    const selectedDayExams = appStyle === "wabi-sabi" && selectedCalendarDate ? (examsByDate.get(selectedCalendarDate) ?? []) : [];
+    const selectedDayExams: ExamMark[] = appStyle === "wabi-sabi" && selectedCalendarDate ? (wabiExamMarksByDate.get(selectedCalendarDate) ?? []) : [];
 
     // A semester's own startDate/endDate may be unset (quick "+ Add semester" doesn't ask for
     // dates) - expandTimetableEvents already clamps gracefully when they're null, so occurrences
@@ -9787,29 +9815,29 @@ function App() {
                 Done
               </button>
             </div>
-          </div>
 
           {selectedDayExams.length ? (
             <div className="wabi-day-exams">
               {selectedDayExams.map((exam) => {
                 const examCourse = courseLookup.get(exam.courseId);
-                const left = getRunway(calendarToday, exam.examDate)?.daysLeft;
+                const left = getRunway(calendarToday, selectedCalendarDate!)?.daysLeft;
                 return (
                   <button
-                    key={exam.id}
+                    key={`${exam.id}${exam.releaseMark ? ":release" : ""}`}
                     type="button"
                     className="wabi-day-exam"
                     title="Show the days left in the calendar"
                     onClick={() => { setWabiRunwayExamId(exam.id); closeCalendarDrawer(); }}
                   >
-                    <strong>{examCalendarLabel(examKindOf(exam))}</strong>
-                    <span>{exam.title}{examCourse ? <em>{examCourse.name}</em> : null}</span>
-                    <small>{left === undefined ? "passed" : left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`}</small>
+                    <strong>{examMarkLabel(exam)}</strong>
+                    <span>{exam.title}{examCourse ? <em>{examCourse.name}</em> : null}{exam.note ? <em className="wabi-day-exam-note">{exam.note}</em> : null}</span>
+                    <small>{left === undefined ? (exam.releaseMark ? "released" : "passed") : left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`}</small>
                   </button>
                 );
               })}
             </div>
           ) : null}
+          </div>
           <div className="calendar-day-view-body">
             <div className="calendar-timeline">
               <div
@@ -9856,17 +9884,17 @@ function App() {
                 </div>
               </section>
 
-              {selectedExams.length || selectedDeadlines.length ? (
+              {(appStyle === "wabi-sabi" ? 0 : selectedExams.length) || selectedDeadlines.length ? (
                 <section className="calendar-drawer-section">
                   <div>
                     <strong>Fixed markers</strong>
                     <small>Exams and deadlines are pulled from the planner.</small>
                   </div>
                   <div className="calendar-expanded-list drawer-list">
-                    {selectedExams.map((exam) => (
-                      <div key={exam.id} className="calendar-marker-row exam-marker">
-                        <strong>Exam</strong>
-                        <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}</span>
+                    {(appStyle === "wabi-sabi" ? [] : selectedExams).map((exam) => (
+                      <div key={`${exam.id}${exam.releaseMark ? ":release" : ""}`} className="calendar-marker-row exam-marker">
+                        <strong>{exam.releaseMark ? "Released" : examKindLabel(examKindOf(exam))}</strong>
+                        <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}{exam.note ? ` · ${exam.note}` : ""}</span>
                       </div>
                     ))}
                     {selectedDeadlines.map((task) => (
@@ -9999,7 +10027,7 @@ function App() {
                 {wabiRunway.daysLeft === 0 ? null : <span>{wabiRunway.daysLeft === 1 ? "day left" : "days left"}</span>}
               </div>
               <div className="wabi-runway-body">
-                <span className="wabi-runway-title">{wabiRunwayExam.title}<em>{examKindLabel(examKindOf(wabiRunwayExam))}{runwayCourse ? ` · ${runwayCourse.name}` : ""} · {formatDate(wabiRunwayExam.examDate)}</em></span>
+                <span className="wabi-runway-title">{wabiRunwayExam.title}<em>{examKindLabel(examKindOf(wabiRunwayExam))}{runwayCourse ? ` · ${runwayCourse.name}` : ""} · {formatDate(wabiRunwayExam.examDate)}{wabiRunwayExam.releaseDate ? ` · released ${formatDate(wabiRunwayExam.releaseDate)}` : ""}</em></span>
                 <div className="wabi-runway-dots" aria-hidden="true">
                   {wabiRunway.days.map((iso, index) => {
                     const weekday = parseCalendarDate(iso).getDay();
@@ -10012,10 +10040,21 @@ function App() {
             </div>
           );
         })() : null}
+        {wabiExamTip ? createPortal(
+          <div
+            className={`wabi-exam-tip ${wabiExamTip.top < 110 ? "below" : ""}`}
+            role="tooltip"
+            style={{ left: `${wabiExamTip.x}px`, top: `${wabiExamTip.top < 110 ? wabiExamTip.bottom + 8 : wabiExamTip.top - 8}px` }}
+          >
+            <strong>{courseLookup.get(wabiExamTip.exam.courseId)?.name ?? "No course"}</strong>
+            {wabiExamTip.exam.note ? <span>{wabiExamTip.exam.note}</span> : null}
+          </div>,
+          document.body,
+        ) : null}
         <div className={`calendar-grid ${calendarView === "week" ? "week-view" : "month-view"}`}>
           {calendarDays.map((day) => {
             const entries = calendarEntriesByDate.get(day.iso) ?? [];
-            const exams = examsByDate.get(day.iso) ?? [];
+            const exams: ExamMark[] = wabiExamMarksByDate.get(day.iso) ?? [];
             const deadlines = deadlinesByDate.get(day.iso) ?? [];
             const timetableOccurrences = timetableOccurrencesByDate.get(day.iso) ?? [];
             const todos = dailyTodosByDate.get(day.iso) ?? [];
@@ -10063,14 +10102,14 @@ function App() {
                     {todos.slice(0, visibleTodoLimit).map(({ todo, occurrenceDate }) => {
                       const isDone = todo.repeatWeekly ? todo.completedOccurrences.includes(occurrenceDate) : todo.completed;
                       return (
-                        <div key={`${todo.id}:${occurrenceDate}`} className={`calendar-pill todo-pill ${isDone ? "completed" : ""}`}>
-                          <input
-                            className="calendar-task-checkbox"
-                            type="checkbox"
-                            checked={isDone}
-                            onChange={() => toggleDailyTodoOccurrence(todo.id, occurrenceDate)}
-                            onClick={(event) => event.stopPropagation()}
-                          />
+                        <div
+                          key={`${todo.id}:${occurrenceDate}`}
+                          role="button"
+                          tabIndex={0}
+                          className={`calendar-pill todo-pill ${isDone ? "completed" : ""}`}
+                          onClick={(event) => { event.stopPropagation(); setCalendarItemPopup({ eventId: todo.id, date: occurrenceDate, todo: true }); }}
+                          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setCalendarItemPopup({ eventId: todo.id, date: occurrenceDate, todo: true }); } }}
+                        >
                           <span className="calendar-task-copy">
                             <span className="calendar-task-title">{todo.title}{todo.repeatWeekly ? <em className="timetable-solved-badge">Weekly</em> : null}</span>
                           </span>
@@ -10102,25 +10141,38 @@ function App() {
                   {exams.slice(0, visibleExamLimit).map((exam) => {
                     const course = courseLookup.get(exam.courseId);
                     if (appStyle === "wabi-sabi") {
+                      const toggleRunway = () => setWabiRunwayExamId((current) => (current === exam.id ? null : exam.id));
                       return (
                         <div
-                          key={exam.id}
+                          key={`${exam.id}${exam.releaseMark ? ":release" : ""}`}
                           role="button"
                           tabIndex={0}
                           aria-pressed={wabiRunwayExamId === exam.id}
-                          title="Show the days left"
-                          className={`calendar-pill exam-pill wabi-exam-pill ${examKindOf(exam) === "project" ? "project" : ""} ${wabiRunwayExamId === exam.id ? "focused" : ""}`}
-                          onClick={(event) => { event.stopPropagation(); setWabiRunwayExamId((current) => (current === exam.id ? null : exam.id)); }}
-                          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); setWabiRunwayExamId((current) => (current === exam.id ? null : exam.id)); } }}
+                          aria-label={`${examMarkLabel(exam)} ${exam.title}${course ? `, ${course.name}` : ""}`}
+                          className={`calendar-pill exam-pill wabi-exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""} ${wabiRunwayExamId === exam.id ? "focused" : ""}`}
+                          onClick={(event) => { event.stopPropagation(); toggleRunway(); }}
+                          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); toggleRunway(); } }}
+                          onMouseEnter={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setWabiExamTip({ exam, x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }); }}
+                          onMouseLeave={() => setWabiExamTip(null)}
+                          onFocus={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setWabiExamTip({ exam, x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }); }}
+                          onBlur={() => setWabiExamTip(null)}
                         >
-                          <strong className="wabi-exam-pill-kind">{examCalendarLabel(examKindOf(exam))}</strong>
+                          <strong className="wabi-exam-pill-kind">{examMarkLabel(exam)}</strong>
                           <span className="wabi-exam-pill-title">{exam.title}</span>
                         </div>
                       );
                     }
+                    const tipAt = (event: { currentTarget: HTMLElement }) => { const rect = event.currentTarget.getBoundingClientRect(); setWabiExamTip({ exam, x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }); };
                     return (
-                      <div key={exam.id} className="calendar-pill exam-pill" style={{ "--pill-color": course?.color ?? "var(--danger)" } as CSSProperties}>
-                        <span>Exam: {exam.title}</span>
+                      <div
+                        key={`${exam.id}${exam.releaseMark ? ":release" : ""}`}
+                        className={`calendar-pill exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""}`}
+                        style={{ "--pill-color": course?.color ?? "var(--danger)" } as CSSProperties}
+                        aria-label={`${exam.releaseMark ? "Project released" : examKindLabel(examKindOf(exam))}: ${exam.title}${course ? `, ${course.name}` : ""}`}
+                        onMouseEnter={tipAt}
+                        onMouseLeave={() => setWabiExamTip(null)}
+                      >
+                        <span>{exam.releaseMark ? "Released" : examKindLabel(examKindOf(exam))}: {exam.title}</span>
                       </div>
                     );
                   })}
@@ -12445,7 +12497,7 @@ function App() {
       const hideDueDate = subtypeHidesDueDate(draft.subtype);
       const ScheduleWrap = appStyle === "wabi-sabi" ? "details" : "div";
       const showRestOfForm = !creating || taskSubtypeChosen;
-      const wabiCreating = appStyle === "wabi-sabi" && creating;
+      const wabiCreating = creating;
       const examMode = wabiCreating && wabiExamKindDraft !== null;
       const prepTask = appStyle === "wabi-sabi" && (creating ? isSemesterInPrep(taskDraft.semesterId) : Boolean(task?.prep));
       const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -12511,11 +12563,21 @@ function App() {
                 </div>
               </div>
               <label className="field">
-                <span>Date</span>
+                <span>{wabiExamKindDraft === "project" ? "Deadline" : "Date"}</span>
                 <input type="date" value={taskDraft.dueDate} onChange={(event) => setTaskDraft((current) => ({ ...current, dueDate: event.target.value }))} onKeyDown={confirmTaskDueDate} />
               </label>
+              {wabiExamKindDraft === "project" ? (
+                <label className="field">
+                  <span>Released (optional)</span>
+                  <input type="date" value={wabiExamRelease} max={taskDraft.dueDate || undefined} onChange={(event) => setWabiExamRelease(event.target.value)} onKeyDown={confirmTaskDueDate} />
+                </label>
+              ) : null}
+              <label className="field fn-task-form-title">
+                <span>Note (optional, shown when you hover it)</span>
+                <input value={wabiExamNote} maxLength={120} onChange={(event) => setWabiExamNote(event.target.value)} placeholder="Room HG F 3, bring calculator..." />
+              </label>
               <p className="section-note fn-task-form-notice">
-                {wabiExamKindDraft === "session" ? "Session exams sit in the calendar and open the exam prep stage once the semester has ended." : "Shows up in the calendar as a one-time item, marked red."}
+                {wabiExamKindDraft === "session" ? (appStyle === "wabi-sabi" ? "Session exams sit in the calendar and open the exam prep stage once the semester has ended." : "Session exams sit in the calendar on their date.") : "Shows up in the calendar as a one-time item, marked red."}
               </p>
             </div>
           </>
@@ -13308,7 +13370,7 @@ function App() {
         />
       ) : null}
 
-      {appStyle === "wabi-sabi" ? renderCalendarItemPopup() : null}
+      {renderCalendarItemPopup()}
       {appStyle === "wabi-sabi" ? renderSessionLogsModal() : null}
       {appStyle === "wabi-sabi" ? renderWabiPickerModal() : renderDashboardPickerModal()}
 
@@ -13783,6 +13845,13 @@ function App() {
                                       <em>{task.completedUnits}/{task.totalUnits}</em>
                                     </button>
                                   )) : <p className="fn-sidebar-empty">No tasks yet.</p>}
+                                  {[...state.exams.filter((exam) => exam.courseId === course.id)].sort((a, b) => a.examDate.localeCompare(b.examDate)).map((exam) => (
+                                    <div key={exam.id} className="fn-sidebar-exam" title={exam.note || undefined}>
+                                      <span><b>{examKindLabel(examKindOf(exam))}</b> {exam.title}</span>
+                                      <em>{formatDate(exam.examDate)}</em>
+                                    </div>
+                                  ))}
+                                  <button type="button" className="fn-sidebar-add-task" onClick={() => openAddTaskModalFor(semester.id, course.id)}>+ Add task or exam</button>
                                 </div>
                               </div>
                             );

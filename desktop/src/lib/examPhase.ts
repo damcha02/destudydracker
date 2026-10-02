@@ -35,6 +35,24 @@ export function examCalendarLabel(kind: ExamKind): string {
   }
 }
 
+export function examMarkLabel(mark: ExamMark): string {
+  return mark.releaseMark ? "PROJECT_RELEASE" : examCalendarLabel(examKindOf(mark));
+}
+
+/** A calendar marker for an exam: the exam itself, or (for projects) the day it was released. */
+export type ExamMark = Exam & { releaseMark?: true };
+
+/** Wabi-sabi calendar markers by date: every exam on its date, plus each project on its release date. */
+export function buildExamMarksByDate(exams: Exam[]): Map<string, ExamMark[]> {
+  const map = new Map<string, ExamMark[]>();
+  const push = (date: string, mark: ExamMark) => map.set(date, [...(map.get(date) ?? []), mark]);
+  for (const exam of exams) {
+    push(exam.examDate, exam);
+    if (examKindOf(exam) === "project" && exam.releaseDate && exam.releaseDate < exam.examDate) push(exam.releaseDate, { ...exam, releaseMark: true });
+  }
+  return map;
+}
+
 export type SemesterStage = "lectures" | "prep" | "done";
 
 function addDays(dateIso: string, days: number): string {

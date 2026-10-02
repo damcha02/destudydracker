@@ -74,6 +74,10 @@ export interface Exam {
   location: string;
   /** Absent means "session" (the behaviour before exam kinds existed). */
   kind?: ExamKind;
+  /** Wabi-sabi: a tiny note shown under the subject name when hovering the exam in the calendar. */
+  note?: string;
+  /** Wabi-sabi: for project submissions, the day the project was handed out. */
+  releaseDate?: string;
 }
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;

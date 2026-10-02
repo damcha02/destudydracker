@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Exam, Semester, Task, TimetableEvent } from "../types";
 import { expandTimetableEvents } from "./plannerSchedule";
-import { examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy } from "./examPhase";
+import { buildExamMarksByDate, examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy } from "./examPhase";
 
 const semester = (over: Partial<Semester> = {}): Semester => ({ id: "s", name: "HS", createdAt: "", startDate: "2026-09-14", endDate: "2026-12-25", phase: "semester", archived: false, archivedAt: null, ...over });
 const exam = (id: string, courseId: string, examDate: string, over: Partial<Exam> = {}): Exam => ({ id, semesterId: "s", courseId, title: id, examDate, weight: 40, preparedness: 0, location: "", ...over });
@@ -91,5 +91,17 @@ describe("scheduling prep tasks past the semester end", () => {
   });
   it("is unchanged without options", () => {
     expect(expandTimetableEvents(events, [], semester(), "2026-12-01", "2027-02-28").every((o) => o.event.taskId === "lecture")).toBe(true);
+  });
+});
+
+describe("buildExamMarksByDate", () => {
+  it("puts projects on their release date as well as their deadline", () => {
+    const marks = buildExamMarksByDate([exam("p", "a", "2026-12-20", { kind: "project", releaseDate: "2026-12-01" }), exam("m", "a", "2026-12-01", { kind: "midterm" })]);
+    expect(marks.get("2026-12-20")).toHaveLength(1);
+    expect(marks.get("2026-12-01")!.map((mark) => [mark.id, Boolean(mark.releaseMark)])).toEqual([["p", true], ["m", false]]);
+  });
+  it("ignores a release date that is not before the deadline, and releases on non-projects", () => {
+    const marks = buildExamMarksByDate([exam("p", "a", "2026-12-20", { kind: "project", releaseDate: "2026-12-25" }), exam("m", "a", "2026-12-10", { kind: "midterm", releaseDate: "2026-12-01" })]);
+    expect([...marks.keys()].sort()).toEqual(["2026-12-10", "2026-12-20"]);
   });
 });

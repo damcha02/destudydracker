@@ -86,7 +86,7 @@ export function WabiManageSemestersModal({
   const [editingCourseId, setEditingCourseId] = useState<string | null>(null);
   const [courseEditDraft, setCourseEditDraft] = useState({ name: "", color: "#8fb4ff", externalUrl: "", targetGrade: "4" });
   const [editingExamId, setEditingExamId] = useState<string | null>(null);
-  const [examEditDraft, setExamEditDraft] = useState<{ title: string; examDate: string; kind: ExamKind }>({ title: "", examDate: "", kind: "midterm" });
+  const [examEditDraft, setExamEditDraft] = useState<{ title: string; examDate: string; kind: ExamKind; note: string; releaseDate: string }>({ title: "", examDate: "", kind: "midterm", note: "", releaseDate: "" });
   const [examRemoveConfirm, setExamRemoveConfirm] = useState<string | null>(null);
   const [repeatSelection, setRepeatSelection] = useState<string[]>([]);
   const [courseRemoveConfirm, setCourseRemoveConfirm] = useState<string | null>(null);
@@ -151,7 +151,7 @@ export function WabiManageSemestersModal({
 
   function startEditExam(exam: Exam) {
     setEditingExamId(exam.id);
-    setExamEditDraft({ title: exam.title, examDate: exam.examDate, kind: examKindOf(exam) });
+    setExamEditDraft({ title: exam.title, examDate: exam.examDate, kind: examKindOf(exam), note: exam.note ?? "", releaseDate: exam.releaseDate ?? "" });
   }
 
   function saveExamEdit() {
@@ -161,7 +161,14 @@ export function WabiManageSemestersModal({
     }
     setState((current) => ({
       ...current,
-      exams: current.exams.map((exam) => (exam.id === editingExamId ? { ...exam, title: examEditDraft.title.trim(), examDate: examEditDraft.examDate, kind: examEditDraft.kind } : exam)),
+      exams: current.exams.map((exam) => (exam.id === editingExamId ? {
+        ...exam,
+        title: examEditDraft.title.trim(),
+        examDate: examEditDraft.examDate,
+        kind: examEditDraft.kind,
+        note: examEditDraft.note.trim() || undefined,
+        releaseDate: examEditDraft.kind === "project" && isValidIsoDate(examEditDraft.releaseDate) && examEditDraft.releaseDate < examEditDraft.examDate ? examEditDraft.releaseDate : undefined,
+      } : exam)),
     }));
     setEditingExamId(null);
     setMessage("Exam updated.");
@@ -691,6 +698,13 @@ export function WabiManageSemestersModal({
                                     <select aria-label="Exam kind" value={examEditDraft.kind} onChange={(event) => setExamEditDraft((current) => ({ ...current, kind: event.target.value as ExamKind }))}>
                                       {EXAM_KINDS.map((kind) => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
                                     </select>
+                                    {examEditDraft.kind === "project" ? (
+                                      <label className="manage-semesters-exam-release">
+                                        <span className="section-note">Released</span>
+                                        <input type="date" value={examEditDraft.releaseDate} max={examEditDraft.examDate || undefined} onChange={(event) => setExamEditDraft((current) => ({ ...current, releaseDate: event.target.value }))} />
+                                      </label>
+                                    ) : null}
+                                    <input className="manage-semesters-exam-note" value={examEditDraft.note} maxLength={120} onChange={(event) => setExamEditDraft((current) => ({ ...current, note: event.target.value }))} placeholder="Tiny note (shown on hover)" />
                                     <button type="button" onClick={saveExamEdit}>Save</button>
                                     <button type="button" className="ghost-button small-button" onClick={() => setEditingExamId(null)}>Cancel</button>
                                   </div>
@@ -698,7 +712,7 @@ export function WabiManageSemestersModal({
                                   <div key={exam.id} className="manage-semesters-unit-row manage-semesters-exam-item">
                                     <span className="manage-semesters-unit-label">
                                       {exam.title}<span className="semester-phase-pill course-exam-pill exam-kind-pill">{examKindLabel(examKindOf(exam))}</span>
-                                      <span className="section-note manage-semesters-exam-date">{formatDate(exam.examDate)}</span>
+                                      <span className="section-note manage-semesters-exam-date">{formatDate(exam.examDate)}{exam.releaseDate ? ` · released ${formatDate(exam.releaseDate)}` : ""}{exam.note ? ` · ${exam.note}` : ""}</span>
                                     </span>
                                     {examRemoveConfirm === exam.id ? (
                                       <>
@@ -843,7 +857,7 @@ export function WabiManageSemestersModal({
                                 ) : null}
                               </div>
                             ))}
-                            <button type="button" className="ghost-button small-button" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task</button>
+                            <button type="button" className="ghost-button small-button" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task or exam</button>
                           </div>
                           ) : null}
                         </div>

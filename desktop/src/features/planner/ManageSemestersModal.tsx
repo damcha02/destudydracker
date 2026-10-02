@@ -669,7 +669,7 @@ export function ManageSemestersModal({
                             </div>
                           );
                         })}
-                        <button type="button" className="msm-add-task" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task</button>
+                        <button type="button" className="msm-add-task" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task or exam</button>
                       </div>
                     </section>
                   );

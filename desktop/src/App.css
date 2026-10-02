@@ -8686,7 +8686,8 @@ input[type="color"] {
 
 .todo-pill {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  cursor: pointer;
   gap: 7px;
   align-items: start;
   background: color-mix(in oklch, var(--surface-raised) 92%, var(--ink-4) 8%);
@@ -24121,31 +24122,31 @@ input[type="color"] {
   width: min(260px, calc(100vw - 32px));
   padding: 14px 16px 12px;
   border: 1px solid var(--wabi-rule-soft, var(--line));
-  border-left: 3px solid var(--entry-color, var(--wabi-sage));
-  background: var(--wabi-paper);
-  color: var(--wabi-ink);
+  border-left: 3px solid var(--entry-color, var(--wabi-sage, var(--accent)));
+  background: var(--wabi-paper, var(--surface-raised, var(--surface)));
+  color: var(--wabi-ink, var(--ink));
   box-shadow: 0 14px 36px rgb(0 0 0 / 0.22);
 }
 
 .calendar-item-popup h3 { margin: 1px 0 2px; font: 500 17px var(--font-serif); overflow-wrap: anywhere; }
-.calendar-item-popup-eyebrow { margin: 0; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--wabi-muted); }
-.calendar-item-popup-when { margin: 0 0 12px; font-size: 12px; color: var(--wabi-muted); }
+.calendar-item-popup-eyebrow { margin: 0; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--wabi-muted, var(--ink-4)); }
+.calendar-item-popup-when { margin: 0 0 12px; font-size: 12px; color: var(--wabi-muted, var(--ink-4)); }
 
 .calendar-item-popup-done {
   width: 100%;
   min-height: 34px;
   padding: 7px 12px;
-  border: 1px solid var(--wabi-sage);
+  border: 1px solid var(--wabi-sage, var(--accent));
   border-radius: 2px;
   background: transparent;
-  color: var(--wabi-sage-deep, var(--wabi-sage));
+  color: var(--wabi-sage-deep, var(--wabi-sage, var(--accent)));
   font: 600 12.5px var(--font-sans, inherit);
   letter-spacing: 0.04em;
   cursor: pointer;
 }
 
-.calendar-item-popup-done:hover { background: var(--wabi-paper-2); }
-.calendar-item-popup-done.is-done { background: var(--wabi-sage); color: var(--wabi-paper); }
+.calendar-item-popup-done:hover { background: var(--wabi-paper-2, var(--surface-sunken, var(--line-soft))); }
+.calendar-item-popup-done.is-done { background: var(--wabi-sage, var(--accent)); color: var(--wabi-paper, var(--surface-raised, var(--surface))); }
 
 .calendar-item-popup-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .calendar-item-popup-actions .ghost-button { min-height: 0; padding: 3px 8px; font-size: 10.5px; }
@@ -24928,8 +24929,20 @@ input[type="color"] {
   justify-content: center;
 }
 
-/* Wabi-Sabi: the sidebar never scrolls (its menus always fit) */
-:root[data-app-style="wabi-sabi"] .wabi-nav { overflow: visible; }
+/* Wabi-Sabi: the nav scrolls on its own (thin, hidden bar) when an open course list is taller than the window,
+   so the footer (tended today / quiet mode) always stays pinned at the bottom. */
+:root[data-app-style="wabi-sabi"] .wabi-nav {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+:root[data-app-style="wabi-sabi"] .wabi-nav::-webkit-scrollbar { display: none; }
+:root[data-app-style="wabi-sabi"] .wabi-brand,
+:root[data-app-style="wabi-sabi"] .wabi-health,
+:root[data-app-style="wabi-sabi"] .wabi-toolbar,
+:root[data-app-style="wabi-sabi"] .wabi-sidebar-foot { flex: none; }
 
 /* Rest room: the games block fills the remaining height (no dead space at the bottom) */
 .wabi-break-grid > .wabi-break-lower { align-self: stretch; }
@@ -26023,9 +26036,9 @@ input[type="color"] {
 /* Wabi exams, exam prep and the deadline runway */
 .wabi-exam-chip.active,
 .wabi-exam-kinds .active {
-  background: color-mix(in oklch, var(--wabi-vermilion) 12%, transparent);
-  border-color: var(--wabi-vermilion);
-  color: var(--wabi-vermilion);
+  background: color-mix(in oklch, var(--wabi-vermilion, var(--danger)) 12%, transparent);
+  border-color: var(--wabi-vermilion, var(--danger));
+  color: var(--wabi-vermilion, var(--danger));
 }
 
 .wabi-exam-kinds {
@@ -26039,9 +26052,9 @@ input[type="color"] {
   font-size: 0.82rem;
   padding: 5px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border, var(--line));
   background: transparent;
-  color: var(--text);
+  color: var(--text, var(--ink));
   cursor: pointer;
 }
 
@@ -26273,4 +26286,187 @@ input[type="color"] {
 .wabi-day-exam small {
   font-size: 0.78rem;
   opacity: 0.8;
+}
+
+/* Day view: the exam strip lives inside the head so it never overlaps the timeline grid. */
+:root[data-app-style="wabi-sabi"] .calendar-day-view-head .wabi-day-exams {
+  flex: 1 0 100%;
+  padding: 4px 0 0;
+}
+
+.wabi-day-exam {
+  align-items: center;
+}
+
+.wabi-day-exam span {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 0;
+}
+
+.wabi-day-exam .wabi-day-exam-note {
+  flex-basis: 100%;
+  margin-left: 0;
+  font-size: 0.78rem;
+}
+
+/* Project release markers are outlined, the deadline stays solid. */
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.release {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--wabi-exam-red) 55%, transparent);
+}
+
+.wabi-exam-tip {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, -100%);
+  display: grid;
+  gap: 2px;
+  max-width: 240px;
+  padding: 7px 10px;
+  border: 1px solid var(--wabi-ink, var(--ink));
+  background: var(--wabi-paper, var(--surface-raised, var(--surface)));
+  color: var(--wabi-ink, var(--ink));
+  font: 400 12px/1.35 var(--font-sans);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  animation: wabi-exam-tip-in 140ms ease-out;
+}
+
+/* Fade only: the tip is positioned with transform, so the animation must not touch it. */
+@keyframes wabi-exam-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.wabi-exam-tip.below {
+  transform: translate(-50%, 0);
+}
+
+.wabi-exam-tip strong {
+  font-weight: 600;
+}
+
+.wabi-exam-tip span {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.wabi-msm-scope .manage-semesters-exam-note {
+  flex: 1 1 180px;
+}
+
+/* Exams in the Modern and Field Notebook styles: a fixed vivid red that stands out on every theme,
+   solid with white text. Projects get a heavier bar, release days are outlined. */
+:root:not([data-app-style="wabi-sabi"]) {
+  --exam-pop: #e5192e;
+  --exam-pop-ink: #fff;
+}
+
+:root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) {
+  --exam-pop: #ff4a5c;
+  --exam-pop-ink: #1a0508;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill {
+  border: 1px solid var(--exam-pop);
+  border-left: 5px solid var(--exam-pop);
+  background: var(--exam-pop);
+  color: var(--exam-pop-ink);
+  font-weight: 700;
+  cursor: default;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill span {
+  color: inherit;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.release {
+  background: color-mix(in oklch, var(--exam-pop) 14%, transparent);
+  color: var(--exam-pop);
+  border-style: dashed;
+  border-left-style: solid;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker {
+  border-left: 4px solid var(--exam-pop);
+  background: color-mix(in oklch, var(--exam-pop) 16%, transparent);
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker strong {
+  color: var(--exam-pop);
+}
+
+/* Field Notebook sidebar: exams under each subject, and the add button */
+.fn-sidebar-exam {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 3px 0;
+  padding: 4px 8px;
+  border-left: 4px solid var(--exam-pop, #e5192e);
+  background: color-mix(in oklch, var(--exam-pop, #e5192e) 16%, transparent);
+  font-size: 0.82rem;
+}
+
+.fn-sidebar-exam b {
+  color: var(--exam-pop, #e5192e);
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+}
+
+.fn-sidebar-exam em {
+  flex: none;
+  font-style: normal;
+  opacity: 0.75;
+}
+
+.fn-sidebar-add-task {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  margin: 4px 0 2px;
+  padding: 2px 0;
+  font-size: 0.78rem;
+  opacity: 0.7;
+}
+
+.fn-sidebar-add-task:hover,
+.fn-sidebar-add-task:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* Field Notebook forces every pill onto the paper surface with !important; exams must win that. */
+:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill {
+  background: var(--exam-pop) !important;
+  color: var(--exam-pop-ink);
+  border: 1px solid var(--exam-pop);
+  border-left: 5px solid var(--exam-pop);
+}
+
+:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill.release {
+  background: color-mix(in oklch, var(--exam-pop) 16%, var(--surface)) !important;
+  color: var(--exam-pop);
+}
+
+:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill span {
+  color: inherit;
+}
+
+/* White text on the solid red in both modes (the dark-mode ink was unreadable on it). */
+:root:not([data-app-style="wabi-sabi"]) {
+  --exam-pop-ink: #fff;
+}
+
+:root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) {
+  --exam-pop: #e5303f;
+  --exam-pop-ink: #fff;
+}
+
+:root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.release,
+:root[data-theme="dark"][data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill.release {
+  color: #ff8a95;
 }
