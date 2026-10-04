@@ -12100,12 +12100,35 @@ function App() {
     }).filter((row) => row.kind !== "sheet-release" && !row.completed);
   }
 
+  /** A calendar occurrence's own number in its series ("Lecture 3" for the third slot), the same
+   *  rule as the calendar grid - not the task's progress, which would call tomorrow's lecture 3
+   *  "Lecture 2" while lecture 2 from last week is still unticked. */
+  function getTimelineRowTitle(row: DailyTimelineRow, task: Task | null) {
+    if (task && (row.kind === "occurrence" || row.kind === "sheet-deadline")) {
+      const dates = (scheduledUnits.get(task.id) ?? []).map((unit) => unit.date).sort();
+      const position = dates.indexOf(row.occurrenceDate) + 1;
+      if (dates.length > 1 && position > 0) return `${task.title} ${position}`;
+    }
+    return task ? getWabiUnitInfo(task).heading : row.title;
+  }
+
+  /** Unticked to-dos and course items from the past two weeks, oldest day first. */
+  function getMissedRowGroups() {
+    const groups: { date: string; rows: DailyTimelineRow[] }[] = [];
+    for (let offset = -14; offset <= -1; offset += 1) {
+      const date = localIsoDate(addCalendarDays(new Date(`${calendarToday}T00:00:00`), offset));
+      const rows = getOpenRowsForDate(date);
+      if (rows.length) groups.push({ date, rows });
+    }
+    return groups;
+  }
+
   function describeTimelineRow(row: DailyTimelineRow) {
     const task = row.taskId ? taskLookup.get(row.taskId) ?? null : null;
     const course = row.courseId ? courseLookup.get(row.courseId)?.name ?? null : null;
     return {
       task,
-      title: task ? getWabiUnitInfo(task).heading : row.title,
+      title: getTimelineRowTitle(row, task),
       course: row.kind === "todo" ? "To-do" : course,
       when: row.kind === "sheet-deadline" ? "due" : row.time ? displayTime(row.time) : "any time",
     };
@@ -12139,6 +12162,7 @@ function App() {
       const rows = getOpenRowsForDate(date);
       if (rows.length) ahead.push({ date, rows });
     }
+    const missed = getMissedRowGroups();
     const chooseRow = (row: DailyTimelineRow) => { setWabiOneThingPick({ refId: row.refId, date: row.occurrenceDate }); setSelectedTaskId(null); close(); };
     const renderRow = (row: DailyTimelineRow) => {
       const info = describeTimelineRow(row);
@@ -12160,7 +12184,18 @@ function App() {
             <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
           </header>
           <div className="dpick-body">
-            <p className="dpick-label">Planned today</p>
+            {missed.length ? (
+              <>
+                <p className="dpick-label">Missed</p>
+                {missed.map((group) => (
+                  <div key={group.date}>
+                    <p className="dpick-day">{dayFormat.format(new Date(`${group.date}T00:00:00`))}</p>
+                    {group.rows.map(renderRow)}
+                  </div>
+                ))}
+              </>
+            ) : null}
+            <p className={`dpick-label${missed.length ? " dpick-ahead" : ""}`}>Planned today</p>
             {openEntries.length || todayRows.length ? (
               <>
                 {openEntries.map((entry) => {
@@ -12209,6 +12244,7 @@ function App() {
       const rows = getOpenRowsForDate(date);
       if (rows.length) ahead.push({ date, rows });
     }
+    const missed = getMissedRowGroups();
     const chooseRow = (row: DailyTimelineRow) => { setWabiOneThingPick({ refId: row.refId, date: row.occurrenceDate }); setSelectedTaskId(null); close(); };
     const renderRow = (row: DailyTimelineRow) => {
       const info = describeTimelineRow(row);
@@ -12230,7 +12266,18 @@ function App() {
             <button type="button" className="ghost-button small-button" onClick={close}>Close</button>
           </header>
           <div className="wabi-logs-body">
-            <p className="wabi-logs-day-label">Planned today</p>
+            {missed.length ? (
+              <>
+                <p className="wabi-logs-day-label">Missed</p>
+                {missed.map((group) => (
+                  <div key={group.date}>
+                    <p className="wabi-picker-day">{dayFormat.format(new Date(`${group.date}T00:00:00`))}</p>
+                    {group.rows.map(renderRow)}
+                  </div>
+                ))}
+              </>
+            ) : null}
+            <p className={`wabi-logs-day-label${missed.length ? " wabi-picker-ahead" : ""}`}>Planned today</p>
             {openEntries.length || todayRows.length ? (
               <>
                 {openEntries.map((entry) => {
@@ -12328,7 +12375,7 @@ function App() {
       if (openRow) {
         oneRow = openRow;
         oneTask = rowTask;
-        oneTitle = rowTask ? getWabiUnitInfo(rowTask).heading : openRow.title;
+        oneTitle = getTimelineRowTitle(openRow, rowTask);
         const rowCourse = openRow.courseId ? courseLookup.get(openRow.courseId)?.name : null;
         oneMeta = [openRow.kind === "todo" ? "To-do" : rowCourse, openRow.time ? displayTime(openRow.time) : "any time today"].filter(Boolean).join(" \u00b7 ");
       } else if (comingDeadlines[0]) {
