@@ -26357,47 +26357,6 @@ input[type="color"] {
   flex: 1 1 180px;
 }
 
-/* Exams in the Modern and Field Notebook styles: a fixed vivid red that stands out on every theme,
-   solid with white text. Projects get a heavier bar, release days are outlined. */
-:root:not([data-app-style="wabi-sabi"]) {
-  --exam-pop: #e5192e;
-  --exam-pop-ink: #fff;
-}
-
-:root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) {
-  --exam-pop: #ff4a5c;
-  --exam-pop-ink: #1a0508;
-}
-
-:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill {
-  border: 1px solid var(--exam-pop);
-  border-left: 5px solid var(--exam-pop);
-  background: var(--exam-pop);
-  color: var(--exam-pop-ink);
-  font-weight: 700;
-  cursor: default;
-}
-
-:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill span {
-  color: inherit;
-}
-
-:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.release {
-  background: color-mix(in oklch, var(--exam-pop) 14%, transparent);
-  color: var(--exam-pop);
-  border-style: dashed;
-  border-left-style: solid;
-}
-
-:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker {
-  border-left: 4px solid var(--exam-pop);
-  background: color-mix(in oklch, var(--exam-pop) 16%, transparent);
-}
-
-:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker strong {
-  color: var(--exam-pop);
-}
-
 /* Field Notebook sidebar: exams under each subject, and the add button */
 .fn-sidebar-exam {
   display: flex;
@@ -26439,34 +26398,42 @@ input[type="color"] {
   text-decoration: underline;
 }
 
-/* Field Notebook forces every pill onto the paper surface with !important; exams must win that. */
-:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill {
-  background: var(--exam-pop) !important;
-  color: var(--exam-pop-ink);
-  border: 1px solid var(--exam-pop);
-  border-left: 5px solid var(--exam-pop);
-}
-
-:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill.release {
-  background: color-mix(in oklch, var(--exam-pop) 16%, var(--surface)) !important;
-  color: var(--exam-pop);
-}
-
-:root[data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill span {
-  color: inherit;
-}
-
-/* White text on the solid red in both modes (the dark-mode ink was unreadable on it). */
+/* Exams in the Modern and Field Notebook styles: an "ink stamp" - outlined, uppercase brick red. */
 :root:not([data-app-style="wabi-sabi"]) {
-  --exam-pop-ink: #fff;
+  --exam-pop: #b5473a;
 }
 
 :root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) {
-  --exam-pop: #e5303f;
-  --exam-pop-ink: #fff;
+  --exam-pop: #d9786a;
 }
 
-:root[data-theme="dark"]:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.release,
-:root[data-theme="dark"][data-app-style="field-notebook"] .fn-planner .calendar-pill.exam-pill.release {
-  color: #ff8a95;
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill {
+  background: transparent !important;
+  color: var(--exam-pop) !important;
+  border: 1.5px solid var(--exam-pop) !important;
+  border-left: 5px solid var(--exam-pop) !important;
+  box-shadow: none !important;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  cursor: default;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill span {
+  color: inherit !important;
+}
+
+/* Release days: the same stamp, dashed. */
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.release {
+  border-style: dashed !important;
+  border-left-style: solid !important;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker {
+  border-left: 4px solid var(--exam-pop);
+  background: color-mix(in oklch, var(--exam-pop) 14%, transparent);
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker strong {
+  color: var(--exam-pop);
 }

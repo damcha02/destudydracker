@@ -7,7 +7,8 @@ import { TimeSpanFields } from "./TimeSpanFields";
 import { displayTime } from "../../lib/timeInput";
 import { formatSwissGrade, swissGrades } from "../../lib/grades";
 import { makeId } from "../../lib/storage";
-import type { AppState, Course, Holiday, Semester, Task, TimetableEvent } from "../../types";
+import { EXAM_KINDS, examKindLabel, examKindOf } from "../../lib/examPhase";
+import type { AppState, Course, Exam, ExamKind, Holiday, Semester, Task, TimetableEvent } from "../../types";
 
 const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
   occurrence: "Occurrence",
@@ -82,6 +83,9 @@ export function ManageSemestersModal({
   const [courseEditDraft, setCourseEditDraft] = useState({ name: "", color: "#8fb4ff", externalUrl: "", targetGrade: "4" });
   const [courseRemoveConfirm, setCourseRemoveConfirm] = useState<string | null>(null);
   const [taskRemoveConfirm, setTaskRemoveConfirm] = useState<string | null>(null);
+  const [editingExamId, setEditingExamId] = useState<string | null>(null);
+  const [examEditDraft, setExamEditDraft] = useState<{ title: string; examDate: string; kind: ExamKind; note: string; releaseDate: string }>({ title: "", examDate: "", kind: "midterm", note: "", releaseDate: "" });
+  const [examRemoveConfirm, setExamRemoveConfirm] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [scheduleDraft, setScheduleDraft] = useState({
     date: today, time: "10:00", duration: 90, repeatWeekly: true,
@@ -130,6 +134,36 @@ export function ManageSemestersModal({
     onDeleteWithUndo(`"${event?.label ?? "Item"}" removed`, (current) => ({ ...current, timetableEvents: current.timetableEvents.filter((item) => item.id !== eventId) }));
     setEventRemoveConfirm(null);
     if (editingEventId === eventId) setEditingEventId(null);
+  }
+
+  function startEditExam(exam: Exam) {
+    setEditingExamId(exam.id);
+    setExamEditDraft({ title: exam.title, examDate: exam.examDate, kind: examKindOf(exam), note: exam.note ?? "", releaseDate: exam.releaseDate ?? "" });
+  }
+
+  function saveExamEdit() {
+    if (!examEditDraft.title.trim() || !isValidIsoDate(examEditDraft.examDate)) {
+      setMessage("An exam needs a title and a date.");
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      exams: current.exams.map((exam) => (exam.id === editingExamId ? {
+        ...exam,
+        title: examEditDraft.title.trim(),
+        examDate: examEditDraft.examDate,
+        kind: examEditDraft.kind,
+        note: examEditDraft.note.trim() || undefined,
+        releaseDate: examEditDraft.kind === "project" && isValidIsoDate(examEditDraft.releaseDate) && examEditDraft.releaseDate < examEditDraft.examDate ? examEditDraft.releaseDate : undefined,
+      } : exam)),
+    }));
+    setEditingExamId(null);
+    setMessage("Exam updated.");
+  }
+
+  function removeExam(examId: string) {
+    const exam = state.exams.find((item) => item.id === examId);
+    onDeleteWithUndo(`"${exam?.title ?? "Exam"}" removed`, (current) => ({ ...current, exams: current.exams.filter((item) => item.id !== examId) }));
   }
 
   const courses = semester ? getSemesterCourses(state, semester.id) : [];
@@ -669,6 +703,46 @@ export function ManageSemestersModal({
                             </div>
                           );
                         })}
+                        {state.exams.filter((exam) => exam.courseId === course.id).sort((a, b) => a.examDate.localeCompare(b.examDate)).map((exam) => (
+                          editingExamId === exam.id ? (
+                            <div key={exam.id} className="msm-edit msm-exam-edit">
+                              <label className="field"><span>Title</span><input value={examEditDraft.title} onChange={(event) => setExamEditDraft((current) => ({ ...current, title: event.target.value }))} /></label>
+                              <label className="field"><span>{examEditDraft.kind === "project" ? "Deadline" : "Date"}</span><input type="date" value={examEditDraft.examDate} onChange={(event) => setExamEditDraft((current) => ({ ...current, examDate: event.target.value }))} /></label>
+                              <label className="field"><span>Kind</span>
+                                <select value={examEditDraft.kind} onChange={(event) => setExamEditDraft((current) => ({ ...current, kind: event.target.value as ExamKind }))}>
+                                  {EXAM_KINDS.map((kind) => <option key={kind.id} value={kind.id}>{kind.label}</option>)}
+                                </select>
+                              </label>
+                              {examEditDraft.kind === "project" ? (
+                                <label className="field"><span>Released</span><input type="date" value={examEditDraft.releaseDate} max={examEditDraft.examDate || undefined} onChange={(event) => setExamEditDraft((current) => ({ ...current, releaseDate: event.target.value }))} /></label>
+                              ) : null}
+                              <label className="field msm-wide"><span>Note (shown on hover)</span><input value={examEditDraft.note} maxLength={120} onChange={(event) => setExamEditDraft((current) => ({ ...current, note: event.target.value }))} /></label>
+                              <span className="msm-edit-actions">
+                                <button type="button" onClick={saveExamEdit}>Save</button>
+                                <button type="button" className="ghost-button" onClick={() => setEditingExamId(null)}>Cancel</button>
+                              </span>
+                            </div>
+                          ) : (
+                            <div key={exam.id} className="msm-task msm-exam-row">
+                              <div className="msm-task-row">
+                                <span className="msm-task-title">{exam.title}</span>
+                                <span className="msm-badge msm-exam-badge">{examKindLabel(examKindOf(exam))}</span>
+                                <span className="msm-exam-when">{formatDate(exam.examDate)}{exam.releaseDate ? ` · released ${formatDate(exam.releaseDate)}` : ""}{exam.note ? ` · ${exam.note}` : ""}</span>
+                                {examRemoveConfirm === exam.id ? (
+                                  <>
+                                    <button type="button" className="mini-danger" onClick={() => { removeExam(exam.id); setExamRemoveConfirm(null); }}>Delete</button>
+                                    <button type="button" className="ghost-button small-button" onClick={() => setExamRemoveConfirm(null)}>Cancel</button>
+                                  </>
+                                ) : (
+                                  <RowMenu label={`${exam.title} actions`}>
+                                    <button type="button" role="menuitem" onClick={() => startEditExam(exam)}>Edit exam</button>
+                                    <button type="button" role="menuitem" className="danger" onClick={() => setExamRemoveConfirm(exam.id)}>Delete exam</button>
+                                  </RowMenu>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        ))}
                         <button type="button" className="msm-add-task" onClick={() => onAddTask(course.semesterId, course.id)}>+ Add task or exam</button>
                       </div>
                     </section>

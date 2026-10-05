@@ -4308,7 +4308,8 @@ function App() {
 
   useEffect(() => {
     if (appStyle === "field-notebook" && state.activeTab === "planner") {
-      setCalendarView("month");
+      setCalendarView("week");
+      setCalendarCursorDate(new Date());
     }
   }, [appStyle, state.activeTab]);
 

@@ -13,6 +13,17 @@ export type ReleaseNoteEntry = ReleaseNote & { version: string };
 // Order items by what a user most wants to hear: new features first, then improvements, then fixes
 // and polish. The list is read top-down and the first line is the one everyone reads.
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  "0.1.68": {
+    title: "The semester knows when it's done",
+    items: [
+      { icon: "🎓", heading: "Exams come in kinds now", body: "Midterms, endterms, semester finals, project submissions and session exams each get their own label on the calendar instead of one generic \"Exam.\" Project submissions can carry a release date, marked on the day they were handed out, and any exam can carry a tiny note you see on hover." },
+      { icon: "📚", heading: "Exam prep starts itself", body: "A semester now slides into Exam Prep on its own the day after its end date - no more remembering to flip it over by hand, though you can still end one early if you need to. Once prep starts, each course shows the days left to its next exam, and subjects with nothing left ahead fade quietly out of the way." },
+      { icon: "🔁", heading: "Carry work into exam prep", body: "Repeat any task from the semester as a fresh revision task once exam prep begins, and schedule it as normal - it runs past the semester's own calendar end, so your prep plan isn't boxed in by old dates." },
+      { icon: "⏳", heading: "See exactly how many days you have", body: "Click an exam or deadline and a runway banner opens with the days left, a day-by-day strip with weekends dimmed, and those same days lit up on the calendar grid." },
+      { icon: "✅", heading: "Missed things surface where you plan", body: "The \"pick one thing\" and session-log pickers now show a Missed section for anything from the past two weeks you never ticked off, right above what's planned for today." },
+      { icon: "🖋️", heading: "A new look for exams, and tidier calendars", body: "In Modern and Field Notebook, exams are now an outlined ink-stamp mark instead of a solid red block. Recurring lectures and exercises are numbered by their actual date order rather than by what you've ticked off, and clicking a to-do on the calendar opens a small popup to mark it done." },
+    ],
+  },
   "0.1.67": {
     title: "Nothing slips through",
     items: [
