@@ -547,6 +547,21 @@ export async function finishVerifiedSession(social: SocialState, sessionId: stri
   });
 }
 
+/** Retries a few times so a flaky connection at pause time doesn't leave the server session open (and its gap credited). */
+export async function finishVerifiedSessionWithRetry(social: SocialState, sessionId: string, attempts = 4) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await finishVerifiedSession(social, sessionId);
+    } catch (error) {
+      // 404 means the server already closed it - nothing left to retry.
+      if (error instanceof Error && error.message.includes("Verified session not found")) return undefined;
+      if (attempt === attempts - 1) return undefined;
+      await new Promise((resolve) => setTimeout(resolve, 2000 * 2 ** attempt));
+    }
+  }
+  return undefined;
+}
+
 /**
  * Payload-integrity checksum only, not a security boundary: proves the interval data that
  * arrived at the server is exactly what this function hashed, nothing more (it does not, and

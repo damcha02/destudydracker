@@ -121,10 +121,9 @@ describe("verified leaderboard sessions", () => {
     const payload = await response.json<{ entries: Array<{ userId: string; minutes: number; sessions: number }> }>();
     const self = payload.entries.find((entry) => entry.userId === "stale-user");
 
-    // normalCreditBoundary = min(startedAt+4h, lastHeartbeatAt+2h) = min(13:30Z, 11:35Z) = 11:35Z,
-    // well after the pinned "now" (10:00Z) — so creditedEnd = now, not the boundary:
-    // creditedMinutes = now(10:00Z) - startedAt(09:30Z) = 30 exactly.
-    expect(self?.minutes).toBe(30);
+    // Nothing confirmed the session after its last heartbeat (09:35Z), so settling credits only one
+    // heartbeat interval past it: 09:50Z - startedAt(09:30Z) = 20 minutes, not the 30 up to "now".
+    expect(self?.minutes).toBe(20);
     expect(self?.sessions).toBe(1);
     const session = await env.DB.prepare("SELECT status, credited_minutes AS creditedMinutes FROM verified_study_sessions WHERE id = ?")
       .bind(sessionId).first<{ status: string; creditedMinutes: number }>();

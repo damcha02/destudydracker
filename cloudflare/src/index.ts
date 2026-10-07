@@ -563,12 +563,12 @@ function normalCreditBoundary(startedAt: Date, lastHeartbeatAt: Date) {
   );
 }
 
-async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now = new Date()) {
+async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now = new Date(), maxCreditedEnd = Infinity) {
   const startedAt = parseServerTimestamp(session.startedAt);
   const lastHeartbeatAt = parseServerTimestamp(session.lastHeartbeatAt);
   if (!startedAt || !lastHeartbeatAt) throw new Response("Verified session is invalid.", { status: 409, headers: corsHeaders });
 
-  const creditedEnd = Math.min(now.getTime(), normalCreditBoundary(startedAt, lastHeartbeatAt));
+  const creditedEnd = Math.min(now.getTime(), normalCreditBoundary(startedAt, lastHeartbeatAt), maxCreditedEnd);
   const creditedMinutes = Math.max(0, Math.floor((creditedEnd - startedAt.getTime()) / 60_000));
   const credits = verifiedSessionCredits(startedAt, creditedMinutes);
   const finishedDate = serverDateIso(new Date(creditedEnd));
@@ -610,7 +610,10 @@ async function settleStaleVerifiedSession(env: Env, userId: string, now = new Da
   const isPastHeartbeatGrace = now.getTime() - lastHeartbeatAt.getTime() >= VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS;
   if (!isPastMax && !isPastHeartbeatGrace) return { settled: false, creditedMinutes: 0 };
 
-  const result = await finishVerifiedSession(env, active, now);
+  // Nobody confirmed this session was still running (no finish, no heartbeat), so the silent
+  // stretch is not study time: credit only one heartbeat interval past the last heartbeat. When
+  // it's merely past the 4h max, the normal boundary already applies.
+  const result = await finishVerifiedSession(env, active, now, lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS);
   return { settled: true, creditedMinutes: result.creditedMinutes };
 }
 
@@ -625,10 +628,17 @@ async function handleVerifiedSessionStart(request: Request, env: Env) {
   const now = new Date();
   if (active) {
     const startedAt = parseServerTimestamp(active.startedAt);
-    if (startedAt && now.getTime() - startedAt.getTime() < VERIFIED_SESSION_MAX_MS) {
+    const lastHeartbeatAt = parseServerTimestamp(active.lastHeartbeatAt);
+    const heartbeatFresh = lastHeartbeatAt
+      && now.getTime() - lastHeartbeatAt.getTime() < VERIFIED_SESSION_HEARTBEAT_MS + VERIFIED_SESSION_GRACE_MS;
+    if (startedAt && heartbeatFresh && now.getTime() - startedAt.getTime() < VERIFIED_SESSION_MAX_MS) {
       return json({ sessionId: active.id, startedAt: active.startedAt, resumed: true });
     }
-    await finishVerifiedSession(env, active, now);
+    // The client only asks for a new session once it considers the old one over (pause, break, app
+    // restart), so a lost finish call must not turn the silent gap into credited study time:
+    // credit the old session only up to one heartbeat interval past its last confirmed heartbeat.
+    const staleCreditEnd = lastHeartbeatAt ? lastHeartbeatAt.getTime() + VERIFIED_SESSION_HEARTBEAT_MS : Infinity;
+    await finishVerifiedSession(env, active, now, staleCreditEnd);
   }
 
   const sessionId = crypto.randomUUID();

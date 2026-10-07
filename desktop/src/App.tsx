@@ -55,7 +55,7 @@ import {
   groupTasksBySemesterId,
   isoDate,
 } from "./lib/metrics";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, finishVerifiedSessionWithRetry, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, loadAppState, makeId, restoreBackup, saveAppState, saveBackup } from "./lib/storage";
 import type { PersistenceBaselines, PersistSection } from "./lib/storage";
@@ -5010,7 +5010,7 @@ function App() {
     if (!eligible) {
       const sessionId = verifiedSessionRef.current;
       verifiedSessionRef.current = null;
-      if (sessionId) void finishVerifiedSession(social, sessionId).catch(() => undefined);
+      if (sessionId) void finishVerifiedSessionWithRetry(social, sessionId);
       return undefined;
     }
 

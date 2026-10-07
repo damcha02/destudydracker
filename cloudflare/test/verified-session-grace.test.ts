@@ -418,3 +418,45 @@ describe("verified-session 2-hour normal-credit grace window", () => {
     expect(body.creditedMinutes).toBeLessThanOrEqual(240);
   });
 });
+
+describe("verified-session start with an abandoned active session", () => {
+  it("does not credit the silent gap when a lost finish is followed by a new start", async () => {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM verified_daily_stats"),
+      env.DB.prepare("DELETE FROM verified_study_sessions"),
+      env.DB.prepare("DELETE FROM users"),
+    ]);
+    await createUser("stale-user", "stale-secret", "BCDF-2408");
+    const sessionId = await startSession("stale-user", "stale-secret");
+    const now = Date.now();
+    // Studied 30 min, finish lost, came back 60 min later.
+    await backdate(sessionId, new Date(now - 90 * 60_000), new Date(now - 60 * 60_000));
+
+    const start = await request("/verified-session/start", { userId: "stale-user", deviceSecret: "stale-secret" });
+    const body = await start.json<{ sessionId: string; resumed: boolean }>();
+    expect(body.resumed).toBe(false);
+    expect(body.sessionId).not.toBe(sessionId);
+    // 30 min up to the last heartbeat + at most one heartbeat interval (15 min).
+    expect(await normalSum("stale-user")).toBeLessThanOrEqual(46);
+    expect(await normalSum("stale-user")).toBeGreaterThanOrEqual(44);
+  });
+});
+
+describe("settling an abandoned session", () => {
+  it("does not credit the offline gap after a lost finish (2 min studied, 46 min silent)", async () => {
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM verified_daily_stats"),
+      env.DB.prepare("DELETE FROM verified_study_sessions"),
+      env.DB.prepare("DELETE FROM leaderboard_baselines"),
+      env.DB.prepare("DELETE FROM users"),
+    ]);
+    await createUser("lost-finish-user", "lost-finish-secret", "BCDF-2409");
+    const sessionId = await startSession("lost-finish-user", "lost-finish-secret");
+    const now = Date.now();
+    await backdate(sessionId, new Date(now - 48 * 60_000), new Date(now - 48 * 60_000));
+    await env.DB.prepare("INSERT INTO leaderboard_baselines (user_id, minutes, sessions) VALUES (?, 0, 0)").bind("lost-finish-user").run();
+
+    await request("/leaderboard", { userId: "lost-finish-user", deviceSecret: "lost-finish-secret", scope: "global", period: "daily" });
+    expect(await normalSum("lost-finish-user")).toBeLessThanOrEqual(15);
+  });
+});
