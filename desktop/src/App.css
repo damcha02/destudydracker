@@ -26437,3 +26437,10 @@ input[type="color"] {
 :root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker strong {
   color: var(--exam-pop);
 }
+
+.fn-full-dashboard .fn-stats-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 28px;
+}

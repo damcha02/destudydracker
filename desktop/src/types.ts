@@ -50,6 +50,8 @@ export interface Task {
   unitLabel: string;
   totalUnits: number;
   completedUnits: number;
+  /** A total set by hand (e.g. "13 sheets") instead of counting recurring calendar entries. Completed units still come from ticked-off entries. */
+  fixedTotal?: number;
   dueDate: string | null;
   priority: Priority;
   notes: string;

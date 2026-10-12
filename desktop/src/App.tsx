@@ -99,6 +99,7 @@ import type { TimetableModalState } from "./features/planner/TimetableEventModal
 import privacyPolicyText from "../../PRIVACY.md?raw";
 
 const LazyVaultScreen = lazy(() => import("./features/vault/VaultScreen").then((module) => ({ default: module.VaultScreen })));
+const LazyStatisticsView = lazy(() => import("./features/stats/StatisticsView").then((module) => ({ default: module.StatisticsView })));
 const LazySocialScreen = lazy(() => import("./features/social/SocialScreen").then((module) => ({ default: module.SocialScreen })));
 
 type SocialProfileTarget = Pick<SocialFriend, "userId" | "displayName" | "friendCode" | "avatar"> & { lastSeenAt?: string | null };
@@ -2779,6 +2780,9 @@ type TaskDraft = {
   scheduleDueDuration: number;
   scheduleDueWeekly: boolean;
   scheduleUrl: string;
+  /** "weekly" repeats the entries across the semester; "total" just sets how many there are, with no recurrence. */
+  scheduleCountMode: "weekly" | "total";
+  scheduleTotal: string;
 };
 
 function emptyScheduleDraftFields() {
@@ -2787,6 +2791,7 @@ function emptyScheduleDraftFields() {
     scheduleReleaseDate: "", scheduleReleaseTime: "", scheduleReleaseDuration: 30, scheduleReleaseWeekly: true,
     scheduleDueDate: "", scheduleDueTime: "", scheduleDueDuration: 30, scheduleDueWeekly: true,
     scheduleUrl: "",
+    scheduleCountMode: "weekly" as const, scheduleTotal: "",
   };
 }
 
@@ -3864,6 +3869,9 @@ function App() {
     setManageSemestersMode("full");
   }
   const [wabiNotesMenuOpen, setWabiNotesMenuOpen] = useState(false);
+  // Wabi-Sabi Today: the sidebar dropdown and which of its two pages (Today / Statistics) is showing.
+  const [wabiTodayMenuOpen, setWabiTodayMenuOpen] = useState(false);
+  const [wabiTodayView, setWabiTodayView] = useState<"today" | "statistics">("today");
   // Wabi-Sabi dashboard "Something else": pick what to work on from today or the coming days.
   const [wabiPickerOpen, setWabiPickerOpen] = useState(false);
   // The achievements room shows the album and nothing else; the old per-display picker and its
@@ -4070,6 +4078,13 @@ function App() {
       const tasks = current.tasks.map((task) => {
         // Sheet releases are notifications, not units - only deadlines/occurrences are counted.
         const events = current.timetableEvents.filter((event) => event.taskId === task.id && event.kind !== "sheet-release");
+        if (task.fixedTotal && !task.prep) {
+          // A hand-set total: only the ticked-off entries are counted against it.
+          const done = Math.min(task.fixedTotal, events.reduce((sum, event) => sum + event.completedOccurrences.length, 0));
+          if (task.totalUnits === task.fixedTotal && task.completedUnits === done) return task;
+          changed = true;
+          return { ...task, totalUnits: task.fixedTotal, completedUnits: done };
+        }
         if (!events.length) return task;
         if (task.prep) {
           // Exam-prep tasks keep the total set by hand; only the ticked-off sessions are counted.
@@ -7782,6 +7797,17 @@ function App() {
       ...(isSemesterInPrep(taskDraft.semesterId) ? { prep: true } : {}),
     };
     if (task.prep) task.totalUnits = Math.max(1, Math.round(Number(wabiPrepUnits) || 1));
+    // "Set total": the count is typed in and nothing repeats weekly.
+    const totalMode = !task.prep && taskDraft.scheduleCountMode === "total";
+    if (totalMode) {
+      const count = Math.round(Number(taskDraft.scheduleTotal));
+      if (!Number.isFinite(count) || count < 1) {
+        setMessage("Enter how many there are in total (1 or more).");
+        return;
+      }
+      task.fixedTotal = count;
+      task.totalUnits = count;
+    }
 
     // Inline scheduling: if the user filled in the schedule fields on the same form, create the
     // task's first timetable event(s) in this same save instead of forcing a second trip through
@@ -7814,13 +7840,13 @@ function App() {
           kind: "sheet-release", label: task.title,
           date: taskDraft.scheduleReleaseDate, time: taskDraft.scheduleReleaseTime, endTime: releaseEnd, // null when untimed or too late for a 30 min slot (no end shown)
          
-          repeatWeekly: taskDraft.scheduleReleaseWeekly, url, createdAt,
+          repeatWeekly: !totalMode && taskDraft.scheduleReleaseWeekly, url, createdAt,
         }));
         scheduledEvents.push(makeTimetableEvent({
           id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
           kind: "sheet-deadline", label: task.title,
           date: taskDraft.scheduleDueDate, time: taskDraft.scheduleDueTime, endTime: dueEnd,
-          repeatWeekly: taskDraft.scheduleDueWeekly, url, createdAt,
+          repeatWeekly: !totalMode && taskDraft.scheduleDueWeekly, url, createdAt,
         }));
         scheduled = true;
       } else       if (releaseEnd && dueEnd) {
@@ -7830,13 +7856,13 @@ function App() {
           id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
           kind: "sheet-release", label: task.title,
           date: taskDraft.scheduleReleaseDate, time: taskDraft.scheduleReleaseTime, endTime: releaseEnd,
-          repeatWeekly: taskDraft.scheduleReleaseWeekly, url, createdAt,
+          repeatWeekly: !totalMode && taskDraft.scheduleReleaseWeekly, url, createdAt,
         }));
         scheduledEvents.push(makeTimetableEvent({
           id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
           kind: "sheet-deadline", label: task.title,
           date: taskDraft.scheduleDueDate, time: taskDraft.scheduleDueTime, endTime: dueEnd,
-          repeatWeekly: taskDraft.scheduleDueWeekly, url, createdAt,
+          repeatWeekly: !totalMode && taskDraft.scheduleDueWeekly, url, createdAt,
         }));
         scheduled = true;
       }
@@ -7854,7 +7880,7 @@ function App() {
         id: makeId(), semesterId: task.semesterId, courseId: task.courseId, taskId: task.id,
         kind: "occurrence", label: task.title,
         date: taskDraft.scheduleDate, time: taskDraft.scheduleTime, endTime: end,
-        repeatWeekly: taskDraft.scheduleRepeatWeekly,
+        repeatWeekly: !totalMode && taskDraft.scheduleRepeatWeekly,
       }));
       scheduled = true;
     }
@@ -11116,6 +11142,16 @@ function App() {
           </section>
         </div>
 
+        <section className="fn-stats-sheet">
+          <div className="fn-section-rule">
+            <span>Statistics ledger · hours into credits</span>
+            <em>kept on this device only</em>
+          </div>
+          <Suspense fallback={<p className="fn-footer-note dim">Loading statistics...</p>}>
+            <LazyStatisticsView variant="notebook" sessions={state.sessions} semesters={state.semesters} courses={state.courses} today={calendarToday} currentSemesterId={(activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0])?.id ?? null} />
+          </Suspense>
+        </section>
+
         {state.sessions.length > 0 ? (
           <p className="fn-footer-note">{formatMinutes(totalAllTimeMinutes)} logged across {sessionDays.size} day{sessionDays.size !== 1 ? "s" : ""} since {formatDate(firstSessionDate!)}</p>
         ) : (
@@ -11898,11 +11934,16 @@ function App() {
                 onClick={() => {
                   setWabiQuietMode(false);
                   // Only the item you are on keeps its dropdown open.
+                  if (key !== "dashboard") setWabiTodayMenuOpen(false);
                   if (key !== "planner") setWabiPlanMenuOpen(false);
                   if (key !== "timer") setWabiTimerMenuOpen(false);
                   if (key !== "vault") setWabiNotesMenuOpen(false);
                   if (key !== "break") setWabiRestMenuOpen(false);
                   if (key !== "friends") setWabiCircleMenuOpen(false);
+                  if (key === "dashboard") {
+                    if (!active) setWabiTodayView("today");
+                    setWabiTodayMenuOpen(active ? (open) => !open : true);
+                  }
                   if (key === "planner") {
                     // Already on Plan: toggle the submenu. Coming from elsewhere: open it.
                     setWabiPlanMenuOpen(active ? (open) => !open : true);
@@ -11921,6 +11962,20 @@ function App() {
                 </span>
                 <span className="wabi-nav-sub">{key}</span>
               </button>
+              {key === "dashboard" && wabiTodayMenuOpen ? (
+                <div className="wabi-plan-menu wabi-notes-menu">
+                  {([["today", "Today"], ["statistics", "Statistics"]] as const).map(([view, label]) => (
+                    <button
+                      key={view}
+                      type="button"
+                      className={`wabi-plan-task wabi-notes-menu-item ${state.activeTab === "dashboard" && wabiTodayView === view ? "selected" : ""}`}
+                      onClick={() => { setWabiQuietMode(false); setWabiTodayView(view); setActiveTab("dashboard"); }}
+                    >
+                      <span className="wabi-plan-course-name">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               {key === "break" && wabiRestMenuOpen ? (
                 <div className="wabi-plan-menu wabi-notes-menu">
                   {([["games", "Games"], ["meditation", "Meditation"], ["achievements", "Achievements"]] as const).map(([room, label]) => (
@@ -12076,6 +12131,7 @@ function App() {
               setWabiQuietTaskId(state.timer.taskId);
               setWabiQuietTaskMenuOpen(false);
               // Entering quiet mode: fold every open sidebar dropdown away.
+              setWabiTodayMenuOpen(false);
               setWabiPlanMenuOpen(false);
               setWabiTimerMenuOpen(false);
               setWabiNotesMenuOpen(false);
@@ -12698,25 +12754,39 @@ function App() {
           {creating ? (
             <ScheduleWrap className="fn-task-form-schedule">
               {appStyle === "wabi-sabi" ? <summary>Schedule first occurrence (optional)</summary> : <p className="section-note">Schedule its first occurrence now (optional) - or leave blank and schedule later from Manage Semesters.</p>}
+              {prepTask ? null : (
+                <div className="fn-task-count-mode">
+                  <div className="wabi-todo-kind" role="radiogroup" aria-label="How many">
+                    <button type="button" role="radio" aria-checked={draft.scheduleCountMode === "weekly"} className={draft.scheduleCountMode === "weekly" ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, scheduleCountMode: "weekly" }))}>Repeat weekly</button>
+                    <button type="button" role="radio" aria-checked={draft.scheduleCountMode === "total"} className={draft.scheduleCountMode === "total" ? "active" : ""} onClick={() => setDraft((current) => ({ ...current, scheduleCountMode: "total" }))}>Set total</button>
+                  </div>
+                  {draft.scheduleCountMode === "total" ? (
+                    <label className="field compact-field">
+                      <span>Total {draft.subtype === "Sheet" ? "sheets" : "tasks"} (no repeating)</span>
+                      <input type="number" min="1" step="1" value={draft.scheduleTotal} onChange={(event) => setDraft((current) => ({ ...current, scheduleTotal: event.target.value }))} placeholder="e.g. 13" />
+                    </label>
+                  ) : null}
+                </div>
+              )}
               {draft.subtype === "Sheet" ? (
                 <div className="manage-semesters-schedule-row manage-semesters-sheet-schedule">
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Release</span>
                     <input type="date" value={draft.scheduleReleaseDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseDate: event.target.value }))} />
                     <TimeSpanFields time={draft.scheduleReleaseTime} duration={draft.scheduleReleaseDuration} hideDuration={appStyle === "wabi-sabi"} onTimeChange={(scheduleReleaseTime) => setDraft((current) => ({ ...current, scheduleReleaseTime }))} onDurationChange={(scheduleReleaseDuration) => setDraft((current) => ({ ...current, scheduleReleaseDuration }))} />
-                    <label className="timetable-modal-toggle compact">
+                    {draft.scheduleCountMode === "total" ? null : <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleReleaseWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleReleaseWeekly: event.target.checked }))} />
                       <span>Weekly</span>
-                    </label>
+                    </label>}
                   </div>
                   <div className="manage-semesters-sheet-schedule-section">
                     <span className="section-note">Due</span>
                     <input type="date" value={draft.scheduleDueDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueDate: event.target.value }))} />
                     <TimeSpanFields time={draft.scheduleDueTime} duration={draft.scheduleDueDuration} hideDuration={appStyle === "wabi-sabi"} onTimeChange={(scheduleDueTime) => setDraft((current) => ({ ...current, scheduleDueTime }))} onDurationChange={(scheduleDueDuration) => setDraft((current) => ({ ...current, scheduleDueDuration }))} />
-                    <label className="timetable-modal-toggle compact">
+                    {draft.scheduleCountMode === "total" ? null : <label className="timetable-modal-toggle compact">
                       <input type="checkbox" checked={draft.scheduleDueWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleDueWeekly: event.target.checked }))} />
                       <span>Weekly</span>
-                    </label>
+                    </label>}
                   </div>
                   <input value={draft.scheduleUrl} onChange={(event) => setDraft((current) => ({ ...current, scheduleUrl: event.target.value }))} placeholder="https://... (optional, shared by both)" />
                 </div>
@@ -12724,10 +12794,10 @@ function App() {
                 <div className="manage-semesters-schedule-row">
                   <input type="date" value={draft.scheduleDate} onChange={(event) => setDraft((current) => ({ ...current, scheduleDate: event.target.value }))} />
                   <TimeSpanFields time={draft.scheduleTime} duration={draft.scheduleDuration} onTimeChange={(scheduleTime) => setDraft((current) => ({ ...current, scheduleTime }))} onDurationChange={(scheduleDuration) => setDraft((current) => ({ ...current, scheduleDuration }))} />
-                  <label className="timetable-modal-toggle compact">
+                  {draft.scheduleCountMode === "total" ? null : <label className="timetable-modal-toggle compact">
                     <input type="checkbox" checked={draft.scheduleRepeatWeekly} onChange={(event) => setDraft((current) => ({ ...current, scheduleRepeatWeekly: event.target.checked }))} />
                     <span>Weekly</span>
-                  </label>
+                  </label>}
                 </div>
               )}
             </ScheduleWrap>
@@ -13731,7 +13801,13 @@ function App() {
 
       {state.activeTab === "dashboard" && appStyle === "field-notebook" ? renderFieldNotebookDashboard() : null}
 
-      {state.activeTab === "dashboard" && appStyle === "wabi-sabi" ? renderWabiSabiDashboard() : null}
+      {state.activeTab === "dashboard" && appStyle === "wabi-sabi" && wabiTodayView === "today" ? renderWabiSabiDashboard() : null}
+
+      {state.activeTab === "dashboard" && appStyle === "wabi-sabi" && wabiTodayView === "statistics" ? (
+        <Suspense fallback={<p className="wabi-faint-text">Loading statistics...</p>}>
+          <LazyStatisticsView variant="wabi" sessions={state.sessions} semesters={state.semesters} courses={state.courses} today={calendarToday} currentSemesterId={(activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0])?.id ?? null} />
+        </Suspense>
+      ) : null}
 
       {state.activeTab === "dashboard" && appStyle === "modern" ? (
         <section className="dashboard-design fade-up">
@@ -13809,6 +13885,9 @@ function App() {
                   {renderExamRunway()}
                 </div>
               </div>
+              <Suspense fallback={<article className="panel-card design-card"><p className="section-note">Loading statistics...</p></article>}>
+                <LazyStatisticsView variant="modern" sessions={state.sessions} semesters={state.semesters} courses={state.courses} today={calendarToday} currentSemesterId={(activeSemesters.find((semester) => semester.startDate && semester.endDate && calendarToday >= semester.startDate && calendarToday <= semester.endDate) ?? activeSemesters[0])?.id ?? null} />
+              </Suspense>
             </div>
           ) : null}
 

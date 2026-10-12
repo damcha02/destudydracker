@@ -34,6 +34,10 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
     dueDate: today, dueTime: "", dueDuration: 30, dueWeekly: true,
     sheetUrl: "",
   });
+  // "weekly" repeats entries across the semester; "total" just sets how many there are, with no recurrence.
+  const [countMode, setCountMode] = useState<"weekly" | "total">(task.fixedTotal ? "total" : "weekly");
+  const [totalCount, setTotalCount] = useState(String(task.fixedTotal ?? ""));
+  const totalMode = countMode === "total";
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [eventDraft, setEventDraft] = useState({ date: "", time: "", duration: 60, repeatWeekly: true });
   const [removeConfirm, setRemoveConfirm] = useState<string | null>(null);
@@ -41,6 +45,25 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
   const events = state.timetableEvents
     .filter((event) => event.taskId === task.id)
     .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+
+  /** The fixed total to store on the task: the entered count in total mode, none (cleared) in weekly mode. Null if the count is invalid. */
+  function readFixedTotal(): number | undefined | null {
+    if (!totalMode) return undefined;
+    const count = Math.round(Number(totalCount));
+    if (!Number.isFinite(count) || count < 1) {
+      setMessage("Enter how many there are in total (1 or more).");
+      return null;
+    }
+    return count;
+  }
+
+  function withFixedTotal(current: AppState, fixedTotal: number | undefined) {
+    return current.tasks.map((item) => {
+      if (item.id !== task.id) return item;
+      const { fixedTotal: _previous, ...rest } = item;
+      return fixedTotal ? { ...rest, fixedTotal } : rest;
+    });
+  }
 
   function scheduleOccurrence() {
     if (!isValidIsoDate(draft.date) || !draft.time) {
@@ -52,11 +75,13 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
       setMessage("That duration runs past midnight - shorten it or start earlier.");
       return;
     }
+    const fixedTotal = readFixedTotal();
+    if (fixedTotal === null) return;
     const event = makeTimetableEvent({
       id: makeId(), semesterId: task.semesterId, courseId: course.id, kind: "occurrence", taskId: task.id, label: task.title,
-      date: draft.date, time: draft.time, endTime: end, repeatWeekly: draft.repeatWeekly,
+      date: draft.date, time: draft.time, endTime: end, repeatWeekly: totalMode ? false : draft.repeatWeekly,
     });
-    setState((current) => ({ ...current, timetableEvents: [...current.timetableEvents, event] }));
+    setState((current) => ({ ...current, tasks: withFixedTotal(current, fixedTotal), timetableEvents: [...current.timetableEvents, event] }));
     onClose();
     setMessage(`${task.title} scheduled.`);
   }
@@ -70,17 +95,19 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
     // The duration isn't asked for: a fixed 30 min slot, or no end at all when untimed / too close to midnight.
     const releaseEnd = draft.releaseTime ? endTimeFor(draft.releaseTime, draft.releaseDuration) : null;
     const dueEnd = draft.dueTime ? endTimeFor(draft.dueTime, draft.dueDuration) : null;
+    const fixedTotal = readFixedTotal();
+    if (fixedTotal === null) return;
     const url = draft.sheetUrl.trim() || null;
     const createdAt = new Date().toISOString();
     const releaseEvent = makeTimetableEvent({
       id: makeId(), semesterId: task.semesterId, courseId: course.id, taskId: task.id, kind: "sheet-release", label: task.title,
-      date: draft.releaseDate, time: draft.releaseTime, endTime: releaseEnd, repeatWeekly: draft.releaseWeekly, url, createdAt,
+      date: draft.releaseDate, time: draft.releaseTime, endTime: releaseEnd, repeatWeekly: totalMode ? false : draft.releaseWeekly, url, createdAt,
     });
     const dueEvent = makeTimetableEvent({
       id: makeId(), semesterId: task.semesterId, courseId: course.id, taskId: task.id, kind: "sheet-deadline", label: task.title,
-      date: draft.dueDate, time: draft.dueTime, endTime: dueEnd, repeatWeekly: draft.dueWeekly, url, createdAt,
+      date: draft.dueDate, time: draft.dueTime, endTime: dueEnd, repeatWeekly: totalMode ? false : draft.dueWeekly, url, createdAt,
     });
-    setState((current) => ({ ...current, timetableEvents: [...current.timetableEvents, releaseEvent, dueEvent] }));
+    setState((current) => ({ ...current, tasks: withFixedTotal(current, fixedTotal), timetableEvents: [...current.timetableEvents, releaseEvent, dueEvent] }));
     onClose();
     setMessage(`${task.title} scheduled - release and due added.`);
   }
@@ -123,35 +150,55 @@ export function TaskScheduleEditor({ state, setState, setMessage, onDeleteWithUn
       {open ? (
         task.subtype === "Sheet" ? (
           <div className="manage-semesters-schedule-row manage-semesters-sheet-schedule">
+            <div className="wabi-todo-kind" role="radiogroup" aria-label="How many">
+              <button type="button" role="radio" aria-checked={!totalMode} className={!totalMode ? "active" : ""} onClick={() => setCountMode("weekly")}>Repeat weekly</button>
+              <button type="button" role="radio" aria-checked={totalMode} className={totalMode ? "active" : ""} onClick={() => setCountMode("total")}>Set total</button>
+            </div>
+            {totalMode ? (
+              <label className="field compact-field">
+                <span>Total sheets (no repeating)</span>
+                <input type="number" min={1} step={1} value={totalCount} onChange={(event) => setTotalCount(event.target.value)} placeholder="e.g. 13" />
+              </label>
+            ) : null}
             <div className="manage-semesters-sheet-schedule-section">
               <span className="section-note">Release</span>
               <input type="date" value={draft.releaseDate} onChange={(event) => setDraft((current) => ({ ...current, releaseDate: event.target.value }))} />
               <TimeSpanFields time={draft.releaseTime} duration={draft.releaseDuration} hideDuration onTimeChange={(releaseTime) => setDraft((current) => ({ ...current, releaseTime }))} onDurationChange={(releaseDuration) => setDraft((current) => ({ ...current, releaseDuration }))} />
-              <label className="timetable-modal-toggle compact">
+              {totalMode ? null : <label className="timetable-modal-toggle compact">
                 <input type="checkbox" checked={draft.releaseWeekly} onChange={(event) => setDraft((current) => ({ ...current, releaseWeekly: event.target.checked }))} />
                 <span>Weekly</span>
-              </label>
+              </label>}
             </div>
             <div className="manage-semesters-sheet-schedule-section">
               <span className="section-note">Due</span>
               <input type="date" value={draft.dueDate} onChange={(event) => setDraft((current) => ({ ...current, dueDate: event.target.value }))} />
               <TimeSpanFields time={draft.dueTime} duration={draft.dueDuration} hideDuration onTimeChange={(dueTime) => setDraft((current) => ({ ...current, dueTime }))} onDurationChange={(dueDuration) => setDraft((current) => ({ ...current, dueDuration }))} />
-              <label className="timetable-modal-toggle compact">
+              {totalMode ? null : <label className="timetable-modal-toggle compact">
                 <input type="checkbox" checked={draft.dueWeekly} onChange={(event) => setDraft((current) => ({ ...current, dueWeekly: event.target.checked }))} />
                 <span>Weekly</span>
-              </label>
+              </label>}
             </div>
             <input value={draft.sheetUrl} onChange={(event) => setDraft((current) => ({ ...current, sheetUrl: event.target.value }))} placeholder="https://... (optional, shared by both)" />
             <button type="button" onClick={scheduleSheet}>Add release + due to timetable</button>
           </div>
         ) : (
           <div className="manage-semesters-schedule-row">
+            <div className="wabi-todo-kind" role="radiogroup" aria-label="How many">
+              <button type="button" role="radio" aria-checked={!totalMode} className={!totalMode ? "active" : ""} onClick={() => setCountMode("weekly")}>Repeat weekly</button>
+              <button type="button" role="radio" aria-checked={totalMode} className={totalMode ? "active" : ""} onClick={() => setCountMode("total")}>Set total</button>
+            </div>
+            {totalMode ? (
+              <label className="field compact-field">
+                <span>Total tasks (no repeating)</span>
+                <input type="number" min={1} step={1} value={totalCount} onChange={(event) => setTotalCount(event.target.value)} placeholder="e.g. 13" />
+              </label>
+            ) : null}
             <input type="date" value={draft.date} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} />
             <TimeSpanFields time={draft.time} duration={draft.duration} onTimeChange={(time) => setDraft((current) => ({ ...current, time }))} onDurationChange={(duration) => setDraft((current) => ({ ...current, duration }))} />
-            <label className="timetable-modal-toggle compact">
+            {totalMode ? null : <label className="timetable-modal-toggle compact">
               <input type="checkbox" checked={draft.repeatWeekly} onChange={(event) => setDraft((current) => ({ ...current, repeatWeekly: event.target.checked }))} />
               <span>Weekly</span>
-            </label>
+            </label>}
             <button type="button" onClick={scheduleOccurrence}>Add to timetable</button>
           </div>
         )
