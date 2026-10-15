@@ -7,7 +7,7 @@ import { TimeSpanFields } from "./TimeSpanFields";
 import { displayTime } from "../../lib/timeInput";
 import { formatSwissGrade, swissGrades } from "../../lib/grades";
 import { makeId } from "../../lib/storage";
-import { EXAM_KINDS, examKindLabel, examKindOf } from "../../lib/examPhase";
+import { EXAM_KINDS, examKindLabel, examKindOf, toggleExamCompleted } from "../../lib/examPhase";
 import type { AppState, Course, Exam, ExamKind, Holiday, Semester, Task, TimetableEvent } from "../../types";
 
 const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
@@ -723,8 +723,15 @@ export function ManageSemestersModal({
                               </span>
                             </div>
                           ) : (
-                            <div key={exam.id} className="msm-task msm-exam-row">
+                            <div key={exam.id} className={`msm-task msm-exam-row ${exam.completed ? "done" : ""}`}>
                               <div className="msm-task-row">
+                                <input
+                                  className="msm-exam-check"
+                                  type="checkbox"
+                                  checked={Boolean(exam.completed)}
+                                  aria-label={exam.completed ? `Mark ${exam.title} as not done` : `Mark ${exam.title} as done`}
+                                  onChange={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}
+                                />
                                 <span className="msm-task-title">{exam.title}</span>
                                 <span className="msm-badge msm-exam-badge">{examKindLabel(examKindOf(exam))}</span>
                                 <span className="msm-exam-when">{formatDate(exam.examDate)}{exam.releaseDate ? ` · released ${formatDate(exam.releaseDate)}` : ""}{exam.note ? ` · ${exam.note}` : ""}</span>
@@ -736,6 +743,7 @@ export function ManageSemestersModal({
                                 ) : (
                                   <RowMenu label={`${exam.title} actions`}>
                                     <button type="button" role="menuitem" onClick={() => startEditExam(exam)}>Edit exam</button>
+                                    <button type="button" role="menuitem" onClick={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}>{exam.completed ? "Mark as not done" : "Mark as done"}</button>
                                     <button type="button" role="menuitem" className="danger" onClick={() => setExamRemoveConfirm(exam.id)}>Delete exam</button>
                                   </RowMenu>
                                 )}

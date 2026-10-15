@@ -2472,7 +2472,7 @@
 
 .feed-image-hint,
 .feed-card__image-expired {
-  color: var(--muted) !important;
+  color: var(--ink-4) !important;
   font-size: 0.78rem;
   font-style: italic;
 }
@@ -26443,4 +26443,131 @@ input[type="color"] {
   flex-direction: column;
   gap: 14px;
   margin-top: 28px;
+}
+
+/* Checked-off exams: quiet, not red - they're behind you. */
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.done,
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.project.done {
+  border-left-color: color-mix(in oklch, var(--wabi-muted) 45%, transparent);
+  background: color-mix(in oklch, var(--wabi-muted) 8%, transparent);
+  color: var(--wabi-muted);
+  box-shadow: none;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.done .wabi-exam-pill-kind {
+  color: inherit;
+  opacity: 0.8;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.done .wabi-exam-pill-title {
+  text-decoration: line-through;
+}
+
+:root[data-app-style="wabi-sabi"] .wabi-planner .calendar-pill.wabi-exam-pill.done.focused {
+  outline-color: color-mix(in oklch, var(--wabi-muted) 60%, transparent);
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.completed {
+  color: var(--ink-4) !important;
+  border-color: color-mix(in oklch, var(--ink-4) 45%, transparent) !important;
+  opacity: 0.75;
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-pill.exam-pill.completed span {
+  text-decoration: line-through;
+}
+
+.wabi-day-exam-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wabi-day-exam-row .wabi-day-exam {
+  flex: 1;
+  min-width: 0;
+}
+
+.wabi-day-exam-check,
+.exam-done-check,
+.manage-semesters-exam-check,
+.msm-exam-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--wabi-muted, var(--accent));
+  cursor: pointer;
+}
+
+.wabi-day-exam.done {
+  border-left-color: color-mix(in oklch, var(--wabi-muted) 45%, transparent);
+  background: color-mix(in oklch, var(--wabi-muted) 8%, transparent);
+  color: var(--wabi-muted);
+}
+
+.wabi-day-exam.done strong {
+  color: inherit;
+}
+
+.wabi-day-exam.done > span {
+  text-decoration: line-through;
+}
+
+.manage-semesters-exam-item.done .manage-semesters-unit-label,
+.msm-exam-row.done .msm-task-title {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.manage-semesters-exam-item.done .exam-kind-pill,
+.msm-exam-row.done .msm-exam-badge {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+
+:root:not([data-app-style="wabi-sabi"]) .calendar-marker-row.exam-marker.done {
+  border-left-color: color-mix(in oklch, var(--ink-4) 45%, transparent);
+  background: color-mix(in oklch, var(--ink-4) 8%, transparent);
+  color: var(--ink-4);
+}
+
+.calendar-marker-row.exam-marker.done span,
+.fn-sidebar-exam.done span {
+  text-decoration: line-through;
+}
+
+.calendar-marker-row.exam-marker:has(.exam-done-check) {
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  align-items: center;
+}
+
+.calendar-marker-row.exam-marker .exam-done-check {
+  grid-row: span 2;
+}
+
+.fn-sidebar-exam {
+  align-items: center;
+}
+
+.fn-sidebar-exam > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.fn-sidebar-exam.done {
+  border-left-color: color-mix(in oklch, var(--ink-4) 45%, transparent);
+  background: color-mix(in oklch, var(--ink-4) 8%, transparent);
+  color: var(--ink-4);
+}
+
+.fn-sidebar-exam.done b {
+  color: inherit;
+}
+
+.calendar-marker-row.exam-marker.done strong {
+  color: inherit !important;
 }

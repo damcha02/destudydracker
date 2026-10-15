@@ -6,7 +6,7 @@ import { durationBetween, endTimeFor, isValidIsoDate, getSemesterWeekNumber, mak
 import { TimeSpanFields } from "./TimeSpanFields";
 import { displayTime } from "../../lib/timeInput";
 import { makeId } from "../../lib/storage";
-import { EXAM_KINDS, examKindLabel, examKindOf, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy } from "../../lib/examPhase";
+import { EXAM_KINDS, examKindLabel, examKindOf, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy, toggleExamCompleted } from "../../lib/examPhase";
 import type { AppState, Course, Exam, ExamKind, Holiday, Semester, Task, TimetableEvent } from "../../types";
 
 const timetableEventKindLabel: Record<TimetableEvent["kind"], string> = {
@@ -709,7 +709,14 @@ export function WabiManageSemestersModal({
                                     <button type="button" className="ghost-button small-button" onClick={() => setEditingExamId(null)}>Cancel</button>
                                   </div>
                                 ) : (
-                                  <div key={exam.id} className="manage-semesters-unit-row manage-semesters-exam-item">
+                                  <div key={exam.id} className={`manage-semesters-unit-row manage-semesters-exam-item ${exam.completed ? "done" : ""}`}>
+                                    <input
+                                    className="manage-semesters-exam-check"
+                                    type="checkbox"
+                                    checked={Boolean(exam.completed)}
+                                    aria-label={exam.completed ? `Mark ${exam.title} as not done` : `Mark ${exam.title} as done`}
+                                    onChange={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}
+                                />
                                     <span className="manage-semesters-unit-label">
                                       {exam.title}<span className="semester-phase-pill course-exam-pill exam-kind-pill">{examKindLabel(examKindOf(exam))}</span>
                                       <span className="section-note manage-semesters-exam-date">{formatDate(exam.examDate)}{exam.releaseDate ? ` · released ${formatDate(exam.releaseDate)}` : ""}{exam.note ? ` · ${exam.note}` : ""}</span>
@@ -722,6 +729,7 @@ export function WabiManageSemestersModal({
                                     ) : (
                                       <RowMenu label={`${exam.title} actions`}>
                                         <button type="button" role="menuitem" onClick={() => startEditExam(exam)}>Edit exam</button>
+                                        <button type="button" role="menuitem" onClick={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}>{exam.completed ? "Mark as not done" : "Mark as done"}</button>
                                         <button type="button" role="menuitem" className="danger" onClick={() => setExamRemoveConfirm(exam.id)}>Delete exam</button>
                                       </RowMenu>
                                     )}

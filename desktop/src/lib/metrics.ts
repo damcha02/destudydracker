@@ -363,7 +363,7 @@ export function getTopPendingTasks(state: AppState) {
 
 export function getUpcomingExams(state: AppState) {
   return [...state.exams]
-    .filter((exam) => daysUntil(exam.examDate) >= 0)
+    .filter((exam) => !exam.completed && daysUntil(exam.examDate) >= 0)
     .sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))
     .slice(0, 4);
 }

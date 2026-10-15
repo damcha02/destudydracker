@@ -916,6 +916,7 @@ function normalizeExams(exams: unknown): Exam[] {
       ...(typeof record.note === "string" && record.note.trim() ? { note: record.note.trim().slice(0, 160) } : {}),
       ...(typeof record.releaseDate === "string" && record.releaseDate ? { releaseDate: record.releaseDate } : {}),
       ...(record.kind === "midterm" || record.kind === "endterm" || record.kind === "semester-end" || record.kind === "project" || record.kind === "session" ? { kind: record.kind } : {}),
+      ...(record.completed === true ? { completed: true } : {}),
     }];
   });
 }

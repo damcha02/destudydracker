@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Exam, Semester, Task, TimetableEvent } from "../types";
 import { expandTimetableEvents } from "./plannerSchedule";
-import { buildExamMarksByDate, examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy } from "./examPhase";
+import { buildExamMarksByDate, examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy, toggleExamCompleted } from "./examPhase";
 
 const semester = (over: Partial<Semester> = {}): Semester => ({ id: "s", name: "HS", createdAt: "", startDate: "2026-09-14", endDate: "2026-12-25", phase: "semester", archived: false, archivedAt: null, ...over });
 const exam = (id: string, courseId: string, examDate: string, over: Partial<Exam> = {}): Exam => ({ id, semesterId: "s", courseId, title: id, examDate, weight: 40, preparedness: 0, location: "", ...over });
@@ -103,5 +103,19 @@ describe("buildExamMarksByDate", () => {
   it("ignores a release date that is not before the deadline, and releases on non-projects", () => {
     const marks = buildExamMarksByDate([exam("p", "a", "2026-12-20", { kind: "project", releaseDate: "2026-12-25" }), exam("m", "a", "2026-12-10", { kind: "midterm", releaseDate: "2026-12-01" })]);
     expect([...marks.keys()].sort()).toEqual(["2026-12-10", "2026-12-20"]);
+  });
+});
+
+describe("completed exams", () => {
+  it("toggles one exam on and off", () => {
+    const exams = [exam("m", "a", "2026-11-10", { kind: "midterm" }), exam("s", "a", "2027-01-20")];
+    const done = toggleExamCompleted(exams, "m");
+    expect(done[0].completed).toBe(true);
+    expect(done[1].completed).toBeUndefined();
+    expect(toggleExamCompleted(done, "m")[0].completed).toBeUndefined();
+  });
+  it("no longer keep a subject active in prep", () => {
+    const exams = [exam("p", "a", "2027-01-05", { kind: "project", completed: true })];
+    expect(isCourseActiveInPrep("a", exams, "2026-12-30")).toBe(false);
   });
 });

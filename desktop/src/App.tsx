@@ -81,7 +81,7 @@ import { displayTime } from "./lib/timeInput";
 import { formatSwissGrade, swissGrades } from "./lib/grades";
 import { collectPinwallItems } from "./lib/pinwall";
 import type { PinwallRef } from "./lib/pinwall";
-import { EXAM_KINDS, buildExamMarksByDate, examKindLabel, examMarkLabel, type ExamMark, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep } from "./lib/examPhase";
+import { EXAM_KINDS, buildExamMarksByDate, examKindLabel, examMarkLabel, type ExamMark, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep, toggleExamCompleted } from "./lib/examPhase";
 import { buildDailyTimeline, computeOverlapLayout, type ExpandOptions, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
@@ -9849,17 +9849,28 @@ function App() {
                 const examCourse = courseLookup.get(exam.courseId);
                 const left = getRunway(calendarToday, selectedCalendarDate!)?.daysLeft;
                 return (
-                  <button
-                    key={`${exam.id}${exam.releaseMark ? ":release" : ""}`}
-                    type="button"
-                    className="wabi-day-exam"
-                    title="Show the days left in the calendar"
-                    onClick={() => { setWabiRunwayExamId(exam.id); closeCalendarDrawer(); }}
-                  >
-                    <strong>{examMarkLabel(exam)}</strong>
-                    <span>{exam.title}{examCourse ? <em>{examCourse.name}</em> : null}{exam.note ? <em className="wabi-day-exam-note">{exam.note}</em> : null}</span>
-                    <small>{left === undefined ? (exam.releaseMark ? "released" : "passed") : left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`}</small>
-                  </button>
+                  <div key={`${exam.id}${exam.releaseMark ? ":release" : ""}`} className={`wabi-day-exam-row ${exam.completed ? "done" : ""}`}>
+                    {exam.releaseMark ? null : (
+                      <input
+                        className="wabi-day-exam-check"
+                        type="checkbox"
+                        checked={Boolean(exam.completed)}
+                        aria-label={exam.completed ? `Mark ${exam.title} as not done` : `Mark ${exam.title} as done`}
+                        title={exam.completed ? "Done - click to undo" : "Mark as done"}
+                        onChange={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}
+                      />
+                    )}
+                    <button
+                      type="button"
+                      className={`wabi-day-exam ${exam.completed ? "done" : ""}`}
+                      title="Show the days left in the calendar"
+                      onClick={() => { setWabiRunwayExamId(exam.id); closeCalendarDrawer(); }}
+                    >
+                      <strong>{examMarkLabel(exam)}</strong>
+                      <span>{exam.title}{examCourse ? <em>{examCourse.name}</em> : null}{exam.note ? <em className="wabi-day-exam-note">{exam.note}</em> : null}</span>
+                      <small>{exam.completed && !exam.releaseMark ? "done" : left === undefined ? (exam.releaseMark ? "released" : "passed") : left === 0 ? "today" : left === 1 ? "tomorrow" : `in ${left} days`}</small>
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -9919,7 +9930,16 @@ function App() {
                   </div>
                   <div className="calendar-expanded-list drawer-list">
                     {(appStyle === "wabi-sabi" ? [] : selectedExams).map((exam) => (
-                      <div key={`${exam.id}${exam.releaseMark ? ":release" : ""}`} className="calendar-marker-row exam-marker">
+                      <div key={`${exam.id}${exam.releaseMark ? ":release" : ""}`} className={`calendar-marker-row exam-marker ${exam.completed ? "done" : ""}`}>
+                        {exam.releaseMark ? null : (
+                          <input
+                            className="exam-done-check"
+                            type="checkbox"
+                            checked={Boolean(exam.completed)}
+                            aria-label={exam.completed ? `Mark ${exam.title} as not done` : `Mark ${exam.title} as done`}
+                            onChange={() => setState((current) => ({ ...current, exams: toggleExamCompleted(current.exams, exam.id) }))}
+                          />
+                        )}
                         <strong>{exam.releaseMark ? "Released" : examKindLabel(examKindOf(exam))}</strong>
                         <span>{exam.title} · {courseLookup.get(exam.courseId)?.name ?? "No course"}{exam.note ? ` · ${exam.note}` : ""}</span>
                       </div>
@@ -10175,8 +10195,8 @@ function App() {
                           role="button"
                           tabIndex={0}
                           aria-pressed={wabiRunwayExamId === exam.id}
-                          aria-label={`${examMarkLabel(exam)} ${exam.title}${course ? `, ${course.name}` : ""}`}
-                          className={`calendar-pill exam-pill wabi-exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""} ${wabiRunwayExamId === exam.id ? "focused" : ""}`}
+                          aria-label={`${examMarkLabel(exam)} ${exam.title}${course ? `, ${course.name}` : ""}${exam.completed ? " (done)" : ""}`}
+                          className={`calendar-pill exam-pill wabi-exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""} ${wabiRunwayExamId === exam.id ? "focused" : ""} ${exam.completed ? "done" : ""}`}
                           onClick={(event) => { event.stopPropagation(); toggleRunway(); }}
                           onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); toggleRunway(); } }}
                           onMouseEnter={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setWabiExamTip({ exam, x: rect.left + rect.width / 2, top: rect.top, bottom: rect.bottom }); }}
@@ -10193,7 +10213,7 @@ function App() {
                     return (
                       <div
                         key={`${exam.id}${exam.releaseMark ? ":release" : ""}`}
-                        className={`calendar-pill exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""}`}
+                        className={`calendar-pill exam-pill ${examKindOf(exam) === "project" && !exam.releaseMark ? "project" : ""} ${exam.releaseMark ? "release" : ""} ${exam.completed ? "completed" : ""}`}
                         style={{ "--pill-color": course?.color ?? "var(--danger)" } as CSSProperties}
                         aria-label={`${exam.releaseMark ? "Project released" : examKindLabel(examKindOf(exam))}: ${exam.title}${course ? `, ${course.name}` : ""}`}
                         onMouseEnter={tipAt}
@@ -13973,8 +13993,8 @@ function App() {
                                     </button>
                                   )) : <p className="fn-sidebar-empty">No tasks yet.</p>}
                                   {[...state.exams.filter((exam) => exam.courseId === course.id)].sort((a, b) => a.examDate.localeCompare(b.examDate)).map((exam) => (
-                                    <div key={exam.id} className="fn-sidebar-exam" title={exam.note || undefined}>
-                                      <span><b>{examKindLabel(examKindOf(exam))}</b> {exam.title}</span>
+                                    <div key={exam.id} className={`fn-sidebar-exam ${exam.completed ? "done" : ""}`} title={exam.completed ? "Done" : exam.note || undefined}>
+                                      <span><b>{examKindLabel(examKindOf(exam))}</b> {exam.completed ? "✓ " : ""}{exam.title}</span>
                                       <em>{formatDate(exam.examDate)}</em>
                                     </div>
                                   ))}
@@ -14707,7 +14727,7 @@ function App() {
                 activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
                   const exams = state.exams.filter((exam) => exam.semesterId === semester.id);
-                  const nextExam = [...exams].filter((exam) => daysUntil(exam.examDate) >= 0).sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))[0] ?? null;
+                  const nextExam = [...exams].filter((exam) => !exam.completed && daysUntil(exam.examDate) >= 0).sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))[0] ?? null;
                   return (
                     <div key={semester.id} className="overview-row detailed-overview">
                       <div>

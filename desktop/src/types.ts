@@ -80,6 +80,8 @@ export interface Exam {
   note?: string;
   /** Wabi-sabi: for project submissions, the day the project was handed out. */
   releaseDate?: string;
+  /** Checked off once it's written / submitted; the calendar then shows it muted instead of red. */
+  completed?: boolean;
 }
 
 export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6;

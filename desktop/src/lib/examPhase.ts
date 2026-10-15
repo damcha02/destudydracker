@@ -83,13 +83,17 @@ export function getSemesterStage(semester: Semester, exams: Exam[], todayIso: st
 
 /** During prep a subject is "active" while it still has an exam or project submission ahead; the others fade into the background. */
 export function isCourseActiveInPrep(courseId: string, exams: Exam[], todayIso: string): boolean {
-  return exams.some((exam) => exam.courseId === courseId && exam.examDate >= todayIso);
+  return exams.some((exam) => exam.courseId === courseId && !exam.completed && exam.examDate >= todayIso);
 }
 
 export function getNextExam(exams: Exam[], courseId: string, todayIso: string): Exam | null {
   return exams
-    .filter((exam) => exam.courseId === courseId && exam.examDate >= todayIso)
+    .filter((exam) => exam.courseId === courseId && !exam.completed && exam.examDate >= todayIso)
     .sort((a, b) => a.examDate.localeCompare(b.examDate))[0] ?? null;
+}
+
+export function toggleExamCompleted(exams: Exam[], examId: string): Exam[] {
+  return exams.map((exam) => (exam.id === examId ? { ...exam, completed: exam.completed ? undefined : true } : exam));
 }
 
 /** Repeats a semester task for exam prep: same scope (its total), nothing done yet. */
