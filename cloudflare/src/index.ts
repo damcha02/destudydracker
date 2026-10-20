@@ -576,8 +576,10 @@ async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now 
     UPDATE verified_study_sessions
     SET status = 'finished', finished_at = ?, credited_minutes = ?
     WHERE id = ? AND status = 'active'
-  `).bind(now.toISOString(), creditedMinutes, session.id).run();
-  if (!finished.meta.changes) return { creditedMinutes: 0, finishedAt: now.toISOString() };
+    RETURNING counts_session AS countsSession
+  `).bind(now.toISOString(), creditedMinutes, session.id).first<{ countsSession: number }>();
+  if (!finished) return { creditedMinutes: 0, finishedAt: now.toISOString() };
+  const sessionCredit = Number(finished.countsSession) ? 1 : 0;
 
   const statements: D1PreparedStatement[] = [];
 
@@ -589,7 +591,7 @@ async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now 
         minutes = verified_daily_stats.minutes + excluded.minutes,
         sessions = verified_daily_stats.sessions + excluded.sessions,
         updated_at = CURRENT_TIMESTAMP
-    `).bind(session.userId, date, minutes, date === finishedDate ? 1 : 0));
+    `).bind(session.userId, date, minutes, date === finishedDate ? sessionCredit : 0));
   }
   if (statements.length) await env.DB.batch(statements);
   return { creditedMinutes, finishedAt: now.toISOString() };
@@ -618,9 +620,14 @@ async function settleStaleVerifiedSession(env: Env, userId: string, now = new Da
 }
 
 async function handleVerifiedSessionStart(request: Request, env: Env) {
-  const payload = await readJson<{ userId: string; deviceSecret: string }>(request);
+  const payload = await readJson<{ userId: string; deviceSecret: string; localSessionKey?: unknown }>(request);
   const userId = cleanUserId(payload.userId);
   await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  // Identifies the client's own study session, so every verified session it is split into
+  // (pause/resume, a settled-then-restarted session) adds its minutes but only one session.
+  const localSessionKey = typeof payload.localSessionKey === "string" && payload.localSessionKey.trim()
+    ? payload.localSessionKey.trim().slice(0, MAX_ID_LENGTH)
+    : null;
   const active = await env.DB.prepare(`
     SELECT id, user_id AS userId, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt
     FROM verified_study_sessions WHERE user_id = ? AND status = 'active'
@@ -641,11 +648,19 @@ async function handleVerifiedSessionStart(request: Request, env: Env) {
     await finishVerifiedSession(env, active, now, staleCreditEnd);
   }
 
+  const alreadyCounted = localSessionKey
+    ? await env.DB.prepare(`
+      SELECT 1 AS found FROM verified_study_sessions
+      WHERE user_id = ? AND local_session_key = ? AND counts_session = 1
+      LIMIT 1
+    `).bind(userId, localSessionKey).first<{ found: number }>()
+    : null;
+
   const sessionId = crypto.randomUUID();
   await env.DB.prepare(`
-    INSERT INTO verified_study_sessions (id, user_id, started_at, last_heartbeat_at, status)
-    VALUES (?, ?, ?, ?, 'active')
-  `).bind(sessionId, userId, now.toISOString(), now.toISOString()).run();
+    INSERT INTO verified_study_sessions (id, user_id, started_at, last_heartbeat_at, status, local_session_key, counts_session)
+    VALUES (?, ?, ?, ?, 'active', ?, ?)
+  `).bind(sessionId, userId, now.toISOString(), now.toISOString(), localSessionKey, alreadyCounted ? 0 : 1).run();
   return json({ sessionId, startedAt: now.toISOString(), resumed: false });
 }
 

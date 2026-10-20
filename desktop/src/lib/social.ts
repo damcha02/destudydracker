@@ -526,10 +526,11 @@ export async function getSocialLeaderboard(social: SocialState, scope: SocialLea
   });
 }
 
-export async function startVerifiedSession(social: SocialState) {
+/** `localSessionKey` names the local study session, so the server counts it once however many verified sessions it is split into. */
+export async function startVerifiedSession(social: SocialState, localSessionKey?: string | null) {
   return requestSocialApi<{ sessionId: string; startedAt: string; resumed: boolean }>("/verified-session/start", {
     method: "POST",
-    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret }),
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, ...(localSessionKey ? { localSessionKey } : {}) }),
   });
 }
 

@@ -4999,7 +4999,10 @@ function App() {
     }
 
     function attemptStart() {
-      void startVerifiedSession(social)
+      // The first segment's start stays the same through pause/resume (timer.startedAt doesn't).
+      const timer = latestStateRef.current.timer;
+      const localSessionKey = timer.activeSegments?.[0]?.startedAt ?? timer.startedAt;
+      void startVerifiedSession(social, localSessionKey)
         .then(({ sessionId }) => {
           if (disposed || !timerRunningRef.current) {
             return finishVerifiedSession(social, sessionId).catch(() => undefined);
