@@ -13,6 +13,18 @@ export type ReleaseNoteEntry = ReleaseNote & { version: string };
 // Order items by what a user most wants to hear: new features first, then improvements, then fixes
 // and polish. The list is read top-down and the first line is the one everyone reads.
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  "0.1.69": {
+    title: "See where your hours went",
+    items: [
+      { icon: "📊", heading: "Statistics for the hours you studied", body: "Pick a semester and see your study time as lines you can overlay: turn courses on and off, double-click one to isolate it, and hover for the exact hours on any day. A dashed line tracks the semester total, and the right-hand axis turns hours into credits (1 credit = 30 hours, which you can change). Everything stays on this device and is never shared. In Wabi-Sabi it is a Statistics page under Today; in Modern it sits at the bottom of the Analyst layout; in Field Notebook it is a ledger at the bottom of the Full dashboard." },
+      { icon: "🎓", heading: "Hours into credits, course by course", body: "Tell each course what it is worth, say 3 or 6 credits, and its bar is ruled into that many sections so you can see how far along you are. Leave it blank and the bar shows a single credit." },
+      { icon: "📝", heading: "Your to-dos have statistics too", body: "Time you spent on a to-do such as \"bachelor thesis\" now has its own lines, separate from your courses. Choose \"To-dos only\" to look at them alone, or \"All semesters and to-dos\" to see them next to your courses." },
+      { icon: "🔢", heading: "Set a total instead of repeating weekly", body: "When you add or schedule a lecture, sheet or other task, you can now just say how many there are (for example 13 sheets) instead of repeating it every week. Ticking entries off still counts toward that total." },
+      { icon: "✏️", heading: "Edit and delete exams after you add them", body: "In Modern and Field Notebook, Manage semesters now lists each course's exams, where you can change the title, date, kind and note, or remove one." },
+      { icon: "🗓️", heading: "The Notebook planner opens on this week", body: "In Field Notebook, the Planner calendar now opens on the current week rather than the whole month." },
+      { icon: "⏱️", heading: "Verified time is no longer inflated", body: "If your connection dropped just as you paused or stopped a session, the leaderboard could later credit up to two hours of time you never studied, so a two-minute run showed as 48. The finish is now retried when you stop, and an unfinished session is only credited up to its last heartbeat." },
+    ],
+  },
   "0.1.68": {
     title: "The semester knows when it's done",
     items: [
