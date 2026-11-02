@@ -92,6 +92,15 @@ export function getNextExam(exams: Exam[], courseId: string, todayIso: string): 
     .sort((a, b) => a.examDate.localeCompare(b.examDate))[0] ?? null;
 }
 
+/** Closest upcoming exam first; exams already behind you (passed or checked off) follow, most recent first. */
+export function sortExamsByDate(exams: Exam[], todayIso: string): Exam[] {
+  const ahead = (exam: Exam) => !exam.completed && exam.examDate >= todayIso;
+  return [...exams].sort((a, b) => {
+    if (ahead(a) !== ahead(b)) return ahead(a) ? -1 : 1;
+    return ahead(a) ? a.examDate.localeCompare(b.examDate) : b.examDate.localeCompare(a.examDate);
+  });
+}
+
 export function toggleExamCompleted(exams: Exam[], examId: string): Exam[] {
   return exams.map((exam) => (exam.id === examId ? { ...exam, completed: exam.completed ? undefined : true } : exam));
 }

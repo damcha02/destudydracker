@@ -548,6 +548,14 @@ export async function finishVerifiedSession(social: SocialState, sessionId: stri
   });
 }
 
+/** The session was saved: credit its verified time (and one session) to the leaderboard. */
+export async function commitVerifiedSession(social: SocialState, localSessionKey: string) {
+  return requestSocialApi<{ ok: boolean; creditedMinutes: number }>("/verified-session/commit", {
+    method: "POST",
+    body: JSON.stringify({ userId: social.userId, deviceSecret: social.deviceSecret, localSessionKey }),
+  });
+}
+
 /** Retries a few times so a flaky connection at pause time doesn't leave the server session open (and its gap credited). */
 export async function finishVerifiedSessionWithRetry(social: SocialState, sessionId: string, attempts = 4) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {

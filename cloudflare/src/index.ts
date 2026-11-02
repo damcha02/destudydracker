@@ -570,31 +570,77 @@ async function finishVerifiedSession(env: Env, session: VerifiedSessionRow, now 
 
   const creditedEnd = Math.min(now.getTime(), normalCreditBoundary(startedAt, lastHeartbeatAt), maxCreditedEnd);
   const creditedMinutes = Math.max(0, Math.floor((creditedEnd - startedAt.getTime()) / 60_000));
-  const credits = verifiedSessionCredits(startedAt, creditedMinutes);
-  const finishedDate = serverDateIso(new Date(creditedEnd));
   const finished = await env.DB.prepare(`
     UPDATE verified_study_sessions
     SET status = 'finished', finished_at = ?, credited_minutes = ?
     WHERE id = ? AND status = 'active'
-    RETURNING counts_session AS countsSession
-  `).bind(now.toISOString(), creditedMinutes, session.id).first<{ countsSession: number }>();
+    RETURNING counts_session AS countsSession, local_session_key AS localSessionKey
+  `).bind(now.toISOString(), creditedMinutes, session.id).first<{ countsSession: number; localSessionKey: string | null }>();
   if (!finished) return { creditedMinutes: 0, finishedAt: now.toISOString() };
-  const sessionCredit = Number(finished.countsSession) ? 1 : 0;
+  // A keyed piece waits for /verified-session/commit (the client saving the session).
+  if (finished.localSessionKey) return { creditedMinutes, finishedAt: now.toISOString() };
 
-  const statements: D1PreparedStatement[] = [];
-
-  for (const [date, minutes] of credits) {
-    statements.push(env.DB.prepare(`
-      INSERT INTO verified_daily_stats (user_id, date, minutes, sessions, updated_at)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(user_id, date) DO UPDATE SET
-        minutes = verified_daily_stats.minutes + excluded.minutes,
-        sessions = verified_daily_stats.sessions + excluded.sessions,
-        updated_at = CURRENT_TIMESTAMP
-    `).bind(session.userId, date, minutes, date === finishedDate ? sessionCredit : 0));
-  }
-  if (statements.length) await env.DB.batch(statements);
+  await creditVerifiedDailyStats(env, session.userId, [{ startedAt, creditedMinutes }], Number(finished.countsSession) ? 1 : 0);
   return { creditedMinutes, finishedAt: now.toISOString() };
+}
+
+/** Adds verified pieces' minutes to verified_daily_stats per day, plus `sessions` on the day the last piece ended. */
+async function creditVerifiedDailyStats(env: Env, userId: string, pieces: Array<{ startedAt: Date; creditedMinutes: number }>, sessions: number) {
+  const credits = new Map<string, number>();
+  let lastEnd = 0;
+  for (const piece of pieces) {
+    for (const [date, minutes] of verifiedSessionCredits(piece.startedAt, piece.creditedMinutes)) credits.set(date, (credits.get(date) ?? 0) + minutes);
+    lastEnd = Math.max(lastEnd, piece.startedAt.getTime() + piece.creditedMinutes * 60_000);
+  }
+  if (!pieces.length) return;
+  const sessionDate = serverDateIso(new Date(lastEnd));
+  if (sessions && !credits.has(sessionDate)) credits.set(sessionDate, 0);
+
+  const statements = [...credits].map(([date, minutes]) => env.DB.prepare(`
+    INSERT INTO verified_daily_stats (user_id, date, minutes, sessions, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, date) DO UPDATE SET
+      minutes = verified_daily_stats.minutes + excluded.minutes,
+      sessions = verified_daily_stats.sessions + excluded.sessions,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(userId, date, minutes, date === sessionDate ? sessions : 0));
+  if (statements.length) await env.DB.batch(statements);
+}
+
+/**
+ * The client saved its local session: finish its still-running piece (if any) and credit every
+ * finished, not-yet-committed piece with that key - their minutes and exactly one session.
+ * Claiming the pieces with a single UPDATE ... RETURNING makes retries and duplicates no-ops.
+ */
+async function handleVerifiedSessionCommit(request: Request, env: Env) {
+  const payload = await readJson<{ userId: string; deviceSecret: string; localSessionKey: string }>(request);
+  const userId = cleanUserId(payload.userId);
+  await verifyUser(env, userId, cleanDeviceSecret(payload.deviceSecret));
+  const localSessionKey = requiredText(payload.localSessionKey, "localSessionKey", MAX_ID_LENGTH);
+
+  const active = await env.DB.prepare(`
+    SELECT id, user_id AS userId, started_at AS startedAt, last_heartbeat_at AS lastHeartbeatAt
+    FROM verified_study_sessions WHERE user_id = ? AND local_session_key = ? AND status = 'active'
+  `).bind(userId, localSessionKey).first<VerifiedSessionRow>();
+  if (active) await finishVerifiedSession(env, active);
+
+  const previouslyCommitted = await env.DB.prepare(`
+    SELECT 1 AS found FROM verified_study_sessions
+    WHERE user_id = ? AND local_session_key = ? AND committed_at IS NOT NULL
+    LIMIT 1
+  `).bind(userId, localSessionKey).first<{ found: number }>();
+  const claimed = await env.DB.prepare(`
+    UPDATE verified_study_sessions SET committed_at = ?
+    WHERE user_id = ? AND local_session_key = ? AND status = 'finished' AND committed_at IS NULL
+    RETURNING started_at AS startedAt, credited_minutes AS creditedMinutes
+  `).bind(new Date().toISOString(), userId, localSessionKey).all<{ startedAt: string; creditedMinutes: number }>();
+
+  const pieces = claimed.results.flatMap((row) => {
+    const startedAt = parseServerTimestamp(row.startedAt);
+    return startedAt ? [{ startedAt, creditedMinutes: Math.max(0, Number(row.creditedMinutes)) }] : [];
+  });
+  await creditVerifiedDailyStats(env, userId, pieces, previouslyCommitted ? 0 : 1);
+  return json({ ok: true, creditedMinutes: pieces.reduce((sum, piece) => sum + piece.creditedMinutes, 0) });
 }
 
 async function settleStaleVerifiedSession(env: Env, userId: string, now = new Date()) {
@@ -703,7 +749,7 @@ function maxPlausibleMinutes(elapsedMinutes: number): number {
 /**
  * Per-day-bucket credit split for an arbitrary list of (possibly disjoint) intervals — the
  * offline-reconciliation analog of `verifiedSessionCredits`, which only handles a single
- * contiguous span. One "session" credit is attributed to each interval's start date.
+ * contiguous span. Minutes only: a session is counted once, when the client commits it.
  */
 function bucketOfflineCredits(intervals: Array<{ start: Date; end: Date }>) {
   const credits = new Map<string, { minutes: number; sessions: number }>();
@@ -716,7 +762,6 @@ function bucketOfflineCredits(intervals: Array<{ start: Date; end: Date }>) {
     for (let minute = 0; minute < totalMinutes; minute += 1) {
       bump(serverDateIso(new Date(start.getTime() + minute * 60_000)), 1, 0);
     }
-    if (totalMinutes > 0) bump(serverDateIso(start), 0, 1);
   }
   return credits;
 }
@@ -3587,6 +3632,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/verified-session/start") return await handleVerifiedSessionStart(request, env);
       if (request.method === "POST" && url.pathname === "/verified-session/heartbeat") return await handleVerifiedSessionHeartbeat(request, env);
       if (request.method === "POST" && url.pathname === "/verified-session/finish") return await handleVerifiedSessionFinish(request, env);
+      if (request.method === "POST" && url.pathname === "/verified-session/commit") return await handleVerifiedSessionCommit(request, env);
       if (request.method === "POST" && url.pathname === "/verified-session/reconcile-offline") return await handleVerifiedSessionReconcileOffline(request, env);
       if (request.method === "POST" && url.pathname === "/feed/react") return await handleFeedReaction(request, env);
       if (request.method === "POST" && url.pathname === "/feed/poll/vote") return await handleFeedPollVote(request, env);

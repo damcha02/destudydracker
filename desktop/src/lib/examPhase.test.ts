@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Exam, Semester, Task, TimetableEvent } from "../types";
 import { expandTimetableEvents } from "./plannerSchedule";
-import { buildExamMarksByDate, examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy, toggleExamCompleted } from "./examPhase";
+import { buildExamMarksByDate, examKindOf, getLastExamDate, getRunway, getSemesterStage, isCourseActiveInPrep, makePrepCopy, sortExamsByDate, toggleExamCompleted } from "./examPhase";
 
 const semester = (over: Partial<Semester> = {}): Semester => ({ id: "s", name: "HS", createdAt: "", startDate: "2026-09-14", endDate: "2026-12-25", phase: "semester", archived: false, archivedAt: null, ...over });
 const exam = (id: string, courseId: string, examDate: string, over: Partial<Exam> = {}): Exam => ({ id, semesterId: "s", courseId, title: id, examDate, weight: 40, preparedness: 0, location: "", ...over });
@@ -117,5 +117,18 @@ describe("completed exams", () => {
   it("no longer keep a subject active in prep", () => {
     const exams = [exam("p", "a", "2027-01-05", { kind: "project", completed: true })];
     expect(isCourseActiveInPrep("a", exams, "2026-12-30")).toBe(false);
+  });
+});
+
+describe("sortExamsByDate", () => {
+  it("lists upcoming exams closest first, then the ones behind you", () => {
+    const exams = [
+      exam("far", "a", "2027-01-20"),
+      exam("done", "a", "2026-11-20", { completed: true }),
+      exam("past", "a", "2026-10-14"),
+      exam("near", "a", "2026-11-06"),
+      exam("mid", "a", "2026-12-11"),
+    ];
+    expect(sortExamsByDate(exams, "2026-11-02").map((item) => item.id)).toEqual(["near", "mid", "far", "done", "past"]);
   });
 });

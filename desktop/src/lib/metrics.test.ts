@@ -15,6 +15,7 @@ import {
   getWeeklyCourseCount,
   groupTasksByCourseId,
   groupTasksBySemesterId,
+  compareNatural,
 } from "./metrics";
 import type { AppState, Course, Exam, Semester, StudySession, Task } from "../types";
 
@@ -350,5 +351,12 @@ describe("getActiveSemesterIds", () => {
     expect(activeTasks.map((t) => t.id)).toEqual(["t-active"]);
     expect(calculateAggregateWorkload(activeTasks).totalUnits).toBe(10);
     expect(getOverallHealth({ tasks: activeTasks, exams: [] } as unknown as AppState)).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("compareNatural", () => {
+  it("orders numbered titles numerically, case-insensitively", () => {
+    const titles = ["Lecture 10", "lecture 2", "Exercise sheet 1", "Lecture 1", "Exercise sheet 12", "Exercise sheet 3"];
+    expect([...titles].sort(compareNatural)).toEqual(["Exercise sheet 1", "Exercise sheet 3", "Exercise sheet 12", "Lecture 1", "lecture 2", "Lecture 10"]);
   });
 });

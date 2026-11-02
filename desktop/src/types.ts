@@ -389,6 +389,8 @@ export interface SocialState {
   cachedSquadScoreLeaderboards: Record<SocialSquadScorePeriod, SocialSquadScoreEntry[]>;
   /** The last point the server actually acknowledged a verified-session call — the boundary offline credit is measured from. */
   verifiedAnchor: { sessionId: string; confirmedAt: string } | null;
+  /** Saved sessions (by local session key) whose verified time still has to be committed to the leaderboard. */
+  pendingVerifiedCommits: string[];
 }
 
 export interface TimerActiveSegment {

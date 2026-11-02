@@ -305,6 +305,7 @@ function makeDefaultSocialState(): SocialState {
     },
     cachedSquadScoreLeaderboards: { daily: [], season: [], overall: [] },
     verifiedAnchor: null,
+    pendingVerifiedCommits: [],
   };
 }
 
@@ -783,6 +784,9 @@ function normalizeSocialState(social: unknown): SocialState {
       record.verifiedAnchor && typeof record.verifiedAnchor.sessionId === "string" && typeof record.verifiedAnchor.confirmedAt === "string"
         ? { sessionId: record.verifiedAnchor.sessionId, confirmedAt: record.verifiedAnchor.confirmedAt }
         : null,
+    pendingVerifiedCommits: Array.isArray(record.pendingVerifiedCommits)
+      ? record.pendingVerifiedCommits.filter((key): key is string => typeof key === "string" && key.length > 0).slice(-50)
+      : [],
   };
 }
 

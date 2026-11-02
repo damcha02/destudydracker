@@ -33,6 +33,7 @@ import {
   getActiveSemesterIds,
   getCourseHealthMap,
   getCourseMinutesMap,
+  compareNatural,
   getCourseTasks,
   getFirstSessionDate,
   getFocusMomentum,
@@ -55,7 +56,7 @@ import {
   groupTasksBySemesterId,
   isoDate,
 } from "./lib/metrics";
-import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, finishVerifiedSession, finishVerifiedSessionWithRetry, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
+import { commentOnFeedPost, createFriendRequest, createSquad, deleteFeedPost, deleteFeedPostImage, deleteSquadMessage, commitVerifiedSession, finishVerifiedSession, finishVerifiedSessionWithRetry, getAdminUsage, getCurrentAnnouncement, getFriendStatus, getLeaderboardWithLocalSelf, getLocalLeaderboardEntry, getNextAutoSyncAt, getPlayerStats, getSocialFeed, getSocialLeaderboard, getSquadDetails, getSquadScoreboard, heartbeatVerifiedSession, isSocialApiConfigured, joinSquad, kickSquadMember, leaveSquad, notifyUsersAboutUpdate, presencePing, reactToFeedPost, reconcileOfflineVerifiedCredit, respondToFriendRequest, respondToSquadRequest, searchSquads, sendSquadMessage, sendTelemetryHeartbeat, setSquadMemberRole, shouldAutoSyncSocial, startVerifiedSession, syncSocialState, updateFeedPost, updateSquadSettings, uploadFeedPostImage, uploadProfileAvatar, voteOnFeedPoll } from "./lib/social";
 import type { AdminUsageResponse, AppAnnouncement, AppMetadata, PlayerStatsResponse, R2UsageStatus, SquadSearchResult } from "./lib/social";
 import { APP_STATE_STORAGE_KEYS, applyPersistedSections, createInitialPersistenceBaselines, defaultState, defaultTimer, loadAppState, makeId, restoreBackup, saveAppState, saveBackup } from "./lib/storage";
 import type { PersistenceBaselines, PersistSection } from "./lib/storage";
@@ -81,7 +82,7 @@ import { displayTime } from "./lib/timeInput";
 import { formatSwissGrade, swissGrades } from "./lib/grades";
 import { collectPinwallItems } from "./lib/pinwall";
 import type { PinwallRef } from "./lib/pinwall";
-import { EXAM_KINDS, buildExamMarksByDate, examKindLabel, examMarkLabel, type ExamMark, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep, toggleExamCompleted } from "./lib/examPhase";
+import { EXAM_KINDS, buildExamMarksByDate, examKindLabel, examMarkLabel, type ExamMark, examKindOf, getLastExamDate, getNextExam, getRunway, getSemesterStage, isCourseActiveInPrep, sortExamsByDate, toggleExamCompleted } from "./lib/examPhase";
 import { buildDailyTimeline, computeOverlapLayout, type ExpandOptions, countEventOccurrenceDates, endTimeFor, isValidIsoDate, expandDailyTodoDates, expandTimetableEvents, getSemesterWeekNumber, makeTimetableEvent, moveSingleOccurrence, splitRecurringEventAt } from "./lib/plannerSchedule";
 import type { DailyTimelineRow, OverlapLayoutSlot } from "./lib/plannerSchedule";
 import { ManageSemestersModal } from "./features/planner/ManageSemestersModal";
@@ -3164,10 +3165,20 @@ function getNewLifetimeTotals(state: AppState, sessions: StudySession[]) {
     }), { minutes: state.lifetimeStudyMinutes, sessions: state.lifetimeStudySessions });
 }
 
+/** Same key the verified-session effect sends on start: the first segment's start survives pause/resume. */
+function getLocalSessionKey(timer: TimerState) {
+  return timer.activeSegments?.[0]?.startedAt ?? timer.startedAt;
+}
+
 function prependSessionsToState(state: AppState, sessions: StudySession[], postSession?: StudySession) {
-  const socialState = postSession && state.social.autoPostSessions
+  const postedState = postSession && state.social.autoPostSessions
     ? queueFeedPost(state, postSession, getSessionCourseName(state, postSession))
     : state;
+  // Saving is what puts the verified time on the leaderboard - queue the commit for this session.
+  const commitKey = sessions.some((session) => session.kind === "study" || session.kind === "exam") ? getLocalSessionKey(state.timer) : null;
+  const socialState = commitKey && !postedState.social.pendingVerifiedCommits.includes(commitKey)
+    ? { ...postedState, social: { ...postedState.social, pendingVerifiedCommits: [...postedState.social.pendingVerifiedCommits, commitKey].slice(-50) } }
+    : postedState;
   const lifetimeTotals = getNewLifetimeTotals(socialState, sessions);
   return {
     ...socialState,
@@ -3842,6 +3853,19 @@ function App() {
   const [calculatorOpen, setCalculatorOpen] = useState(true);
   const [timerAdvancedOpen, setTimerAdvancedOpen] = useState(false);
   const [timerFaceEditing, setTimerFaceEditing] = useState(false);
+  // Reset throws the running session away, so it asks once more before doing it.
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  useEffect(() => {
+    if (!resetConfirmOpen) return undefined;
+    const timeout = window.setTimeout(() => setResetConfirmOpen(false), 5000);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setResetConfirmOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => { window.clearTimeout(timeout); window.removeEventListener("keydown", onKey); };
+  }, [resetConfirmOpen]);
+  // Saved or finished in the meantime: nothing left to reset.
+  useEffect(() => {
+    if (state.timer.phase === "idle") setResetConfirmOpen(false);
+  }, [state.timer.phase]);
   const [timerFaceDraft, setTimerFaceDraft] = useState("");
   const endlessInactivityRemainingMs = endlessInactivityPrompt
     ? Math.max(0, new Date(endlessInactivityPrompt.promptedAt).getTime() + ENDLESS_INACTIVITY_GRACE_MS - countdownNowMs)
@@ -5000,8 +5024,7 @@ function App() {
 
     function attemptStart() {
       // The first segment's start stays the same through pause/resume (timer.startedAt doesn't).
-      const timer = latestStateRef.current.timer;
-      const localSessionKey = timer.activeSegments?.[0]?.startedAt ?? timer.startedAt;
+      const localSessionKey = getLocalSessionKey(latestStateRef.current.timer);
       void startVerifiedSession(social, localSessionKey)
         .then(({ sessionId }) => {
           if (disposed || !timerRunningRef.current) {
@@ -5043,6 +5066,38 @@ function App() {
       if (heartbeatInterval !== undefined) window.clearInterval(heartbeatInterval);
     };
   }, [socialConfigured, state.social.deviceSecret, state.social.userId, state.timer.phase, state.timer.running]);
+
+  // Sends queued commits for saved sessions; a failed one stays queued and is retried on the next
+  // change, every minute, or when the connection comes back.
+  const pendingVerifiedCommitKey = state.social.pendingVerifiedCommits.join("|");
+  useEffect(() => {
+    if (!isTauriApp() || !socialConfigured || !pendingVerifiedCommitKey) return undefined;
+    let disposed = false;
+    let inFlight = false;
+    const flush = async () => {
+      if (inFlight || disposed) return;
+      inFlight = true;
+      const social = latestStateRef.current.social;
+      for (const key of social.pendingVerifiedCommits) {
+        try {
+          await commitVerifiedSession(social, key);
+          if (disposed) break;
+          setState((current) => ({ ...current, social: { ...current.social, pendingVerifiedCommits: current.social.pendingVerifiedCommits.filter((item) => item !== key) } }));
+        } catch {
+          break;
+        }
+      }
+      inFlight = false;
+    };
+    void flush();
+    const interval = window.setInterval(() => void flush(), 60_000);
+    window.addEventListener("online", flush);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+      window.removeEventListener("online", flush);
+    };
+  }, [pendingVerifiedCommitKey, socialConfigured, state.social.deviceSecret, state.social.userId]);
 
   useEffect(() => {
     const handleOnline = () => attemptVerifiedSyncRef.current();
@@ -9150,6 +9205,37 @@ function App() {
     });
   }
 
+  function requestResetTimer() {
+    if (state.timer.phase === "idle") {
+      resetTimer();
+      return;
+    }
+    setResetConfirmOpen(true);
+  }
+
+  function confirmResetTimer() {
+    setResetConfirmOpen(false);
+    resetTimer();
+  }
+
+  function renderResetControl(variant: "modern" | "wabi") {
+    if (resetConfirmOpen) {
+      return (
+        <span className={`timer-reset-confirm timer-reset-confirm--${variant}`} role="group" aria-label="Confirm reset">
+          <button type="button" className={variant === "wabi" ? "wabi-btn-outline timer-reset-confirm-yes" : "timer-reset-action timer-reset-confirm-yes"} onClick={confirmResetTimer} autoFocus>
+            {variant === "wabi" ? "RESET SESSION?" : "Reset session?"}
+          </button>
+          <button type="button" className={variant === "wabi" ? "wabi-btn-outline timer-reset-confirm-no" : "timer-reset-action timer-reset-confirm-no"} onClick={() => setResetConfirmOpen(false)} title="Keep the session" aria-label="Cancel reset">
+            ✕
+          </button>
+        </span>
+      );
+    }
+    return variant === "wabi"
+      ? <button type="button" className="wabi-btn-outline" onClick={requestResetTimer}>RESET</button>
+      : <button type="button" className="timer-reset-action" data-tour="timer-reset" onClick={requestResetTimer} title="Reset">↻</button>;
+  }
+
   function resetTimer() {
     endlessContinuousStartedAtRef.current = null;
     clearEndlessInactivityPrompt();
@@ -11521,7 +11607,7 @@ function App() {
               <button type="button" className="wabi-btn-solid" onClick={state.timer.phase === "idle" ? startTimer : pauseTimer}>
                 {state.timer.phase === "idle" ? (state.timer.mode === "endless" ? "START TRACKING" : "START") : state.timer.running ? "PAUSE" : "RESUME"}
               </button>
-              <button type="button" className="wabi-btn-outline" onClick={resetTimer}>RESET</button>
+              {renderResetControl("wabi")}
               <button type="button" className="wabi-btn-outline" onClick={completeSessionManually} disabled={state.timer.phase === "idle" || state.timer.phase === "break"}>
                 LOG AND CLOSE
               </button>
@@ -11867,7 +11953,7 @@ function App() {
     const inFocus = (semester: Semester) => Boolean(semester.startDate && semester.endDate && calendarToday >= semester.startDate && (calendarToday <= semester.endDate || (appStyle === "wabi-sabi" && getSemesterStage(semester, state.exams, calendarToday) === "prep")));
     const currentSemester = activeSemesters.find(inFocus) ?? activeSemesters[0] ?? null;
     const currentSemesterStage = appStyle === "wabi-sabi" && currentSemester ? getSemesterStage(currentSemester, state.exams, calendarToday) : "lectures";
-    const currentSemesterCourses = currentSemester ? getSemesterCourses(state, currentSemester.id) : [];
+    const currentSemesterCourses = currentSemester ? getSemesterCourses(state, currentSemester.id).sort((a, b) => compareNatural(a.name, b.name)) : [];
     function openSemesterManager(semesterId: string | null, courseId: string | null) {
       // Wabi-Sabi: "Manage semesters" is semester-level only; "Edit semester" / a course is that semester's courses.
       setManageSemestersMode(semesterId ? "courses" : "semesters");
@@ -13970,8 +14056,8 @@ function App() {
                       </div>
                       {active ? (
                         <div className="fn-course-tree">
-                          {courses.map((course) => {
-                            const courseTasks = getCourseTasks(state, course.id);
+                          {[...courses].sort((a, b) => compareNatural(a.name, b.name)).map((course) => {
+                            const courseTasks = getCourseTasks(state, course.id).sort((a, b) => compareNatural(a.title, b.title));
                             return (
                               <div key={course.id} className="fn-course-tree-item">
                                 <button
@@ -14103,7 +14189,7 @@ function App() {
                   // state.semesters, so every semester.id is guaranteed a key.
                   const semesterHealth = semesterHealthBySemesterId.get(semester.id)!;
                   const semesterExpanded = expandedSemesterIds.includes(semester.id);
-                  const semesterExams = state.exams.filter((exam) => exam.semesterId === semester.id);
+                  const semesterExams = sortExamsByDate(state.exams.filter((exam) => exam.semesterId === semester.id), calendarToday);
                   const semesterWeekNumber = getSemesterWeekNumber(semester, calendarToday);
 
                   return (
@@ -14729,8 +14815,8 @@ function App() {
               {activeSemesters.length ? (
                 activeSemesters.map((semester) => {
                   const courses = getSemesterCourses(state, semester.id);
-                  const exams = state.exams.filter((exam) => exam.semesterId === semester.id);
-                  const nextExam = [...exams].filter((exam) => !exam.completed && daysUntil(exam.examDate) >= 0).sort((a, b) => daysUntil(a.examDate) - daysUntil(b.examDate))[0] ?? null;
+                  const exams = sortExamsByDate(state.exams.filter((exam) => exam.semesterId === semester.id), calendarToday);
+                  const nextExam = exams.find((exam) => !exam.completed && daysUntil(exam.examDate) >= 0) ?? null;
                   return (
                     <div key={semester.id} className="overview-row detailed-overview">
                       <div>
@@ -14919,9 +15005,7 @@ function App() {
                     ⛶
                   </button>
                 ) : null}
-                <button type="button" className="timer-reset-action" data-tour="timer-reset" onClick={resetTimer} title="Reset">
-                  ↻
-                </button>
+                {renderResetControl("modern")}
               </div>
 
               {state.timer.mode !== "exam" && state.timer.mode !== "endless" ? (
@@ -15709,9 +15793,7 @@ function App() {
             >
               ▣ Save
             </button>
-            <button type="button" className="timer-reset-action" onClick={resetTimer} title="Reset">
-              ↻
-            </button>
+            {renderResetControl("modern")}
           </div>
         </div>
       ) : null}

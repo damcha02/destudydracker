@@ -52,6 +52,13 @@ export function getSemesterCourses(state: AppState, semesterId: string) {
   return state.courses.filter((course) => course.semesterId === semesterId);
 }
 
+const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** Alphabetical with numbers in numeric order: "Sheet 2" before "Sheet 10". */
+export function compareNatural(a: string, b: string) {
+  return naturalCollator.compare(a.trim(), b.trim());
+}
+
 export function getCourseTasks(state: AppState, courseId: string) {
   return state.tasks.filter((task) => task.courseId === courseId);
 }

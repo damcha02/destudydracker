@@ -26571,3 +26571,68 @@ input[type="color"] {
 .calendar-marker-row.exam-marker.done strong {
   color: inherit !important;
 }
+
+/* Reset asks once more: a red confirm button plus a cancel, in place of the reset button. */
+.timer-reset-confirm {
+  display: inline-flex;
+  align-items: stretch;
+  gap: 8px;
+  animation: fadeUp 160ms ease-out;
+}
+
+:root .timer-reset-confirm .timer-reset-action.timer-reset-confirm-yes {
+  width: auto;
+  padding: 0 22px;
+  font-size: 1rem;
+  font-weight: 800;
+  white-space: nowrap;
+  border-color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 18%, var(--surface-2));
+  color: var(--danger);
+}
+
+:root .timer-reset-confirm .timer-reset-action.timer-reset-confirm-no {
+  width: 56px;
+  padding: 0;
+  font-size: 1.1rem;
+}
+
+:root .timer-reset-confirm .wabi-btn-outline.timer-reset-confirm-yes {
+  border-color: var(--wabi-vermilion, var(--danger));
+  color: var(--wabi-vermilion, var(--danger));
+  white-space: nowrap;
+}
+
+/* Never wider than the row it sits in; the confirm text wraps before it overflows. */
+.timer-reset-confirm {
+  max-width: 100%;
+  min-width: 0;
+}
+
+:root .timer-reset-confirm .timer-reset-confirm-yes {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: normal !important;
+  line-height: 1.2;
+}
+
+:root .timer-reset-confirm .timer-reset-confirm-no {
+  flex: none;
+}
+
+/* Field notebook stacks the timer buttons in a narrow column: fill it like the other buttons. */
+:root[data-app-style="field-notebook"] .fn-timer .timer-action-row .timer-reset-confirm {
+  width: 100%;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-action-row .timer-reset-confirm .timer-reset-confirm-yes {
+  width: auto;
+  padding: 6px 8px;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+:root[data-app-style="field-notebook"] .fn-timer .timer-action-row .timer-reset-confirm .timer-reset-confirm-no {
+  width: 42px;
+  padding: 0;
+}

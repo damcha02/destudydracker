@@ -35,7 +35,14 @@ async function totals(userId: string) {
   return { minutes: Number(row?.minutes ?? 0), sessions: Number(row?.sessions ?? 0) };
 }
 
-describe("verified sessions split from one local session", () => {
+async function commit(userId: string, deviceSecret: string, localSessionKey: string) {
+  const response = await request("/verified-session/commit", { userId, deviceSecret, localSessionKey });
+  expect(response.status).toBe(200);
+}
+
+const KEY = "2026-10-20T12:15:40.379Z";
+
+describe("verified sessions reach the leaderboard only once saved", () => {
   beforeEach(async () => {
     await env.DB.batch([
       env.DB.prepare("DELETE FROM verified_daily_stats"),
@@ -44,19 +51,47 @@ describe("verified sessions split from one local session", () => {
     ]);
   });
 
-  it("counts one session however many verified sessions share a local key", async () => {
-    await createUser("split-user", "split-secret", "BCDF-3301");
-    await studyPiece("split-user", "split-secret", "2026-10-20T12:15:40.379Z", 60);
-    await studyPiece("split-user", "split-secret", "2026-10-20T12:15:40.379Z", 40);
-    await studyPiece("split-user", "split-secret", "2026-10-20T12:15:40.379Z", 20);
-    expect(await totals("split-user")).toEqual({ minutes: 120, sessions: 1 });
+  it("pausing adds nothing; saving credits every piece's minutes and one session", async () => {
+    await createUser("pause-user", "pause-secret", "BCDF-3301");
+    await studyPiece("pause-user", "pause-secret", KEY, 60);
+    await studyPiece("pause-user", "pause-secret", KEY, 40);
+    await studyPiece("pause-user", "pause-secret", KEY, 20);
+    expect(await totals("pause-user")).toEqual({ minutes: 0, sessions: 0 });
+
+    await commit("pause-user", "pause-secret", KEY);
+    expect(await totals("pause-user")).toEqual({ minutes: 120, sessions: 1 });
   });
 
-  it("still counts a new local session, and keyless starts as before", async () => {
-    await createUser("two-user", "two-secret", "BCDF-3302");
-    await studyPiece("two-user", "two-secret", "2026-10-20T12:15:40.379Z", 60);
-    await studyPiece("two-user", "two-secret", "2026-10-20T15:35:35.127Z", 40);
-    await studyPiece("two-user", "two-secret", undefined, 20);
-    expect(await totals("two-user")).toEqual({ minutes: 120, sessions: 3 });
+  it("a repeated commit credits nothing twice", async () => {
+    await createUser("dup-user", "dup-secret", "BCDF-3302");
+    await studyPiece("dup-user", "dup-secret", KEY, 30);
+    await commit("dup-user", "dup-secret", KEY);
+    await commit("dup-user", "dup-secret", KEY);
+    expect(await totals("dup-user")).toEqual({ minutes: 30, sessions: 1 });
+  });
+
+  it("a session that is never saved never counts", async () => {
+    await createUser("discard-user", "discard-secret", "BCDF-3303");
+    await studyPiece("discard-user", "discard-secret", KEY, 30);
+    await commit("discard-user", "discard-secret", "2026-10-20T15:35:35.127Z");
+    expect(await totals("discard-user")).toEqual({ minutes: 0, sessions: 0 });
+  });
+
+  it("commit finishes a still-running piece and credits it", async () => {
+    await createUser("live-user", "live-secret", "BCDF-3304");
+    const start = await request("/verified-session/start", { userId: "live-user", deviceSecret: "live-secret", localSessionKey: KEY });
+    const { sessionId } = await start.json<{ sessionId: string }>();
+    const startedAt = new Date(Date.now() - 25 * 60_000).toISOString();
+    await env.DB.prepare("UPDATE verified_study_sessions SET started_at = ?, last_heartbeat_at = ? WHERE id = ?").bind(startedAt, new Date().toISOString(), sessionId).run();
+    await commit("live-user", "live-secret", KEY);
+    expect(await totals("live-user")).toEqual({ minutes: 25, sessions: 1 });
+    const row = await env.DB.prepare("SELECT status FROM verified_study_sessions WHERE id = ?").bind(sessionId).first<{ status: string }>();
+    expect(row?.status).toBe("finished");
+  });
+
+  it("keyless sessions from older clients are still credited on finish", async () => {
+    await createUser("old-user", "old-secret", "BCDF-3305");
+    await studyPiece("old-user", "old-secret", undefined, 20);
+    expect(await totals("old-user")).toEqual({ minutes: 20, sessions: 1 });
   });
 });
