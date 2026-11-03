@@ -48,10 +48,6 @@ export function getActiveSemesterIds(state: AppState): Set<string> {
   return new Set(state.semesters.filter((semester) => !semester.archived).map((semester) => semester.id));
 }
 
-export function getSemesterCourses(state: AppState, semesterId: string) {
-  return state.courses.filter((course) => course.semesterId === semesterId);
-}
-
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Alphabetical with numbers in numeric order: "Sheet 2" before "Sheet 10". */
@@ -59,8 +55,14 @@ export function compareNatural(a: string, b: string) {
   return naturalCollator.compare(a.trim(), b.trim());
 }
 
+/** Courses of a semester in natural name order, so every style lists them the same way. */
+export function getSemesterCourses(state: AppState, semesterId: string) {
+  return state.courses.filter((course) => course.semesterId === semesterId).sort((a, b) => compareNatural(a.name, b.name));
+}
+
+/** Tasks of a course in natural title order, so every style lists them the same way. */
 export function getCourseTasks(state: AppState, courseId: string) {
-  return state.tasks.filter((task) => task.courseId === courseId);
+  return state.tasks.filter((task) => task.courseId === courseId).sort((a, b) => compareNatural(a.title, b.title));
 }
 
 export function getCourseExams(state: AppState, courseId: string) {

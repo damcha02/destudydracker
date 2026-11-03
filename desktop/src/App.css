@@ -26636,3 +26636,14 @@ input[type="color"] {
   width: 42px;
   padding: 0;
 }
+
+/* Done exams in the planner's semester exam list and overview: muted, struck through. */
+.exam-row.detailed.done {
+  opacity: 0.6;
+}
+
+.exam-row.detailed.done strong,
+.exam-overview-done {
+  text-decoration: line-through;
+  color: var(--ink-4, var(--muted));
+}

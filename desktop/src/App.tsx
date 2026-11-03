@@ -33,13 +33,13 @@ import {
   getActiveSemesterIds,
   getCourseHealthMap,
   getCourseMinutesMap,
-  compareNatural,
   getCourseTasks,
   getFirstSessionDate,
   getFocusMomentum,
   getLocalMonthlyStats,
   getOverallHealth,
   getRemainingUnits,
+  compareNatural,
   getSemesterCourses,
   getSemesterHealthMap,
   getSemesterTasks,
@@ -4768,7 +4768,7 @@ function App() {
   const activeSemesterIds = useMemo(() => getActiveSemesterIds(state), [state.semesters]);
   // Archived semesters' courses/tasks/exams are excluded from workload totals, health scores,
   // and workload selectors - only currently-running semesters count toward "total workload".
-  const activeCourses = useMemo(() => state.courses.filter((course) => activeSemesterIds.has(course.semesterId)), [state.courses, activeSemesterIds]);
+  const activeCourses = useMemo(() => state.courses.filter((course) => activeSemesterIds.has(course.semesterId)).sort((a, b) => compareNatural(a.name, b.name)), [state.courses, activeSemesterIds]);
   const activeTasks = useMemo(() => state.tasks.filter((task) => activeSemesterIds.has(task.semesterId)), [state.tasks, activeSemesterIds]);
   const activeExams = useMemo(() => state.exams.filter((exam) => activeSemesterIds.has(exam.semesterId)), [state.exams, activeSemesterIds]);
 
@@ -11953,7 +11953,7 @@ function App() {
     const inFocus = (semester: Semester) => Boolean(semester.startDate && semester.endDate && calendarToday >= semester.startDate && (calendarToday <= semester.endDate || (appStyle === "wabi-sabi" && getSemesterStage(semester, state.exams, calendarToday) === "prep")));
     const currentSemester = activeSemesters.find(inFocus) ?? activeSemesters[0] ?? null;
     const currentSemesterStage = appStyle === "wabi-sabi" && currentSemester ? getSemesterStage(currentSemester, state.exams, calendarToday) : "lectures";
-    const currentSemesterCourses = currentSemester ? getSemesterCourses(state, currentSemester.id).sort((a, b) => compareNatural(a.name, b.name)) : [];
+    const currentSemesterCourses = currentSemester ? getSemesterCourses(state, currentSemester.id) : [];
     function openSemesterManager(semesterId: string | null, courseId: string | null) {
       // Wabi-Sabi: "Manage semesters" is semester-level only; "Edit semester" / a course is that semester's courses.
       setManageSemestersMode(semesterId ? "courses" : "semesters");
@@ -14056,8 +14056,8 @@ function App() {
                       </div>
                       {active ? (
                         <div className="fn-course-tree">
-                          {[...courses].sort((a, b) => compareNatural(a.name, b.name)).map((course) => {
-                            const courseTasks = getCourseTasks(state, course.id).sort((a, b) => compareNatural(a.title, b.title));
+                          {courses.map((course) => {
+                            const courseTasks = getCourseTasks(state, course.id);
                             return (
                               <div key={course.id} className="fn-course-tree-item">
                                 <button
@@ -14289,7 +14289,7 @@ function App() {
                           <div className="course-stack">
                             {courses.length ? (
                               courses.map((course) => {
-                                const courseTasks = courseTasksByCourseId.get(course.id) ?? [];
+                                const courseTasks = getCourseTasks(state, course.id);
                                 // Non-null: courseHealthByCourseId is built by iterating this
                                 // same state.courses, so every course.id is guaranteed a key.
                                 const health = courseHealthByCourseId.get(course.id)!;
@@ -14644,13 +14644,13 @@ function App() {
                                       <button type="button" className="ghost-button" onClick={() => setEditingExamId(null)}>Cancel</button>
                                     </form>
                                   ) : (
-                                    <div key={exam.id} className="exam-row detailed">
+                                    <div key={exam.id} className={`exam-row detailed ${exam.completed ? "done" : ""}`}>
                                       <div>
-                                        <strong>{exam.title}</strong>
+                                        <strong>{exam.completed ? "✓ " : ""}{exam.title}</strong>
                                         <p>{courseLookup.get(exam.courseId)?.name ?? "No course"}{exam.location ? ` · ${exam.location}` : ""}</p>
                                       </div>
                                       <div className="exam-side">
-                                        <span>{daysUntil(exam.examDate)} days</span>
+                                        <span>{exam.completed ? "Done" : `${daysUntil(exam.examDate)} days`}</span>
                                         <small>{exam.weight}% of grade</small>
                                       </div>
                                       <button type="button" className="ghost-button" onClick={() => startEditingExam(exam)}>
@@ -14826,7 +14826,7 @@ function App() {
                       </div>
                       <div className="overview-side exam-overview-side">
                         {exams.length ? exams.slice(0, 3).map((exam) => (
-                          <span key={exam.id}>{exam.title}</span>
+                          <span key={exam.id} className={exam.completed ? "exam-overview-done" : undefined}>{exam.completed ? "✓ " : ""}{exam.title}</span>
                         )) : <span>No exams yet</span>}
                       </div>
                     </div>
