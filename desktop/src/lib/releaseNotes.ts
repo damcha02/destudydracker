@@ -13,6 +13,16 @@ export type ReleaseNoteEntry = ReleaseNote & { version: string };
 // Order items by what a user most wants to hear: new features first, then improvements, then fixes
 // and polish. The list is read top-down and the first line is the one everyone reads.
 export const RELEASE_NOTES: Record<string, ReleaseNote> = {
+  "0.1.70": {
+    title: "Only saved sessions count",
+    items: [
+      { icon: "✅", heading: "Check off exams once they're done", body: "Mark an exam as done from the calendar day view or Manage semesters. Done exams are muted and struck through instead of red, and no longer count as upcoming or keep a course active in exam prep." },
+      { icon: "🏆", heading: "The leaderboard only counts sessions you save", body: "Verified study time now reaches the leaderboard when you save the session, not while the timer runs. Pausing, taking a break or resetting without saving adds nothing, and one session is counted once however many times it was paused. If you're offline when you save, it is sent as soon as you're back online." },
+      { icon: "🛑", heading: "Reset asks before it throws a session away", body: "While a session is running, Reset turns into a red \"Reset session?\" button with a cancel. Cancel, Escape or waiting 5 seconds keeps your session. When the timer is idle, Reset still works in one click." },
+      { icon: "🗂️", heading: "Exams in date order", body: "In Modern, \"Exams in this semester\" and \"Exams by semester\" now list the closest exam first, followed by the ones that have passed or are checked off." },
+      { icon: "🔤", heading: "Courses and tasks sort naturally", body: "In Field Notebook and Wabi-Sabi, the planner sidebar sorts courses (and in Field Notebook their tasks and lectures) so that \"Sheet 2\" comes before \"Sheet 10\"." },
+    ],
+  },
   "0.1.69": {
     title: "See where your hours went",
     items: [
