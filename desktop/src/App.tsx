@@ -3858,7 +3858,7 @@ function App() {
   useEffect(() => {
     if (!resetConfirmOpen) return undefined;
     const timeout = window.setTimeout(() => setResetConfirmOpen(false), 5000);
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setResetConfirmOpen(false); };
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") setResetConfirmOpen(false); };
     window.addEventListener("keydown", onKey);
     return () => { window.clearTimeout(timeout); window.removeEventListener("keydown", onKey); };
   }, [resetConfirmOpen]);
